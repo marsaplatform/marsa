@@ -20,6 +20,10 @@ export interface SiteMeta {
   title?: string;
   /** The team hid this site from the public directory (team sites only). */
   unlisted?: boolean;
+  /** No expiry (team sites of teams allowed to). expiresAt is then PERMANENT_EXPIRES. */
+  permanent?: boolean;
+  /** When the current timed life started (set when permanence ends); the TTL ceiling counts from here. */
+  ttlFrom?: string;
   fileCount: number;
   totalBytes: number;
   files: Record<string, SiteFile>;
@@ -32,6 +36,13 @@ export function publicMeta(m: SiteMeta) {
 }
 
 const ID_RE = /^[a-z0-9]{6,32}$/;
+
+/**
+ * expiresAt of a permanent site. A real date far in the future, so every
+ * "is it live?" check (and older releases, after a rollback) keeps working.
+ */
+export const PERMANENT_EXPIRES = "9999-12-31T00:00:00.000Z";
+export const isPermanentIso = (iso: string) => iso.startsWith("9999-");
 
 /**
  * Filesystem-backed site store:
@@ -139,6 +150,7 @@ export class SiteStore {
   async sweepExpired(now = Date.now()): Promise<string[]> {
     const removed: string[] = [];
     for (const m of await this.list()) {
+      if (m.permanent) continue;
       if (Date.parse(m.expiresAt) <= now) {
         await this.delete(m.id);
         removed.push(m.id);

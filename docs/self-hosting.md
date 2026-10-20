@@ -43,6 +43,8 @@ Every setting is an environment variable with a safe default. Copy
 | `SESSION_SECRET` | random per start | HMAC key for sign-in cookies and CSRF tokens, at least 32 characters |
 | `SESSION_TTL_HOURS` / `ADMIN_SESSION_TTL_HOURS` | `168` / `12` | Team / admin session lifetime |
 | `LOGIN_ATTEMPTS_PER_15_MIN` | `10` | Sign-in attempts per client IP per 15 minutes |
+| `TEAM_MAX_SITES` | `50` | Default quota: live sites per team (admin can override per team) |
+| `TEAM_MAX_MB` | `200` | Default quota: MB across a team's live sites (admin can override per team) |
 | `FEATURED_SITES` | empty | Site ids for the home page's Featured card, comma-separated (first live one). Empty = newest listed page |
 
 Generate an admin token and a session secret with `openssl rand -hex 32`. Without `SESSION_SECRET`

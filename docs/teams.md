@@ -78,6 +78,36 @@ curl -s -X POST "https://marsa.example.com/api/sites?ttlHours=72" \
   key itself is only for creating sites and for signing in.
 - The `<title>` of `index.html` becomes the card title in the directory (else the site id).
 
+## Permanent sites and quotas
+
+By default every link expires (1 hour to `MAX_TTL_HOURS`). A team the admin allows can also publish
+**permanent** sites that never expire and are never swept.
+
+- **Who:** the per-team flag *Permanent* (admin console, or `"permanent": true` in the admin API). It
+  defaults to the team's *Data and files* (backend) access, because those are the teams that run
+  real apps; the admin can turn it on or off for any team. Guests can never publish permanent sites.
+- **Publish permanent:** pick **Permanent (no expiry)** in the dashboard's expiry picker, or send
+  `?ttlHours=permanent` (also `?permanent=1`, or `"ttlHours": "permanent"` / `"permanent": true` in a
+  JSON upload) with the team key.
+- **Convert:** **Make permanent** on the site page, or `PATCH /api/sites/<id>` with
+  `{"permanent": true}` and the edit token. To make it a timed link again pick a time and press
+  **Extend** (or `PATCH` with `{"ttlHours": N}`); its maximum lifetime then counts from that moment.
+- **Admin:** *All sites* has a **Permanent sites** filter and a **Revoke permanent** button; the
+  API is `PATCH /api/admin/sites/<id>` with `{"permanent": false}` (or `true` for any team site).
+  A revoked site gets `MAX_TTL_HOURS` from now, so its team has time to react.
+- In the API a permanent site has `"permanent": true` and `expiresAt` `9999-12-31T00:00:00.000Z`
+  (a real date, so clients that compare dates keep working).
+
+**Quotas** keep permanent from meaning unbounded. Each team may have at most `TEAM_MAX_SITES` live
+sites (default 50) using at most `TEAM_MAX_MB` (default 200 MB) in total, permanent or not. The admin
+can override both per team (the *Quota* fields in the console, or `maxSites` / `maxMb` in the admin
+API; empty, `0` or `null` goes back to the default). An upload or a replace that would go over answers
+`403 TEAM_QUOTA_EXCEEDED`; the dashboard shows the team's usage. Guest uploads are limited as before
+(size limits, uploads per hour, and they expire).
+
+Size the quotas to your disk: every team's quota together should fit the data volume with room for
+guest uploads.
+
 ## Who may use the backend
 
 | Site | Backend configured | Backend **not** configured |

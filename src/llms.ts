@@ -37,6 +37,7 @@ If the operator gave you a team key, add the header X-Team-Key: <team key> to PO
 ## Limits on this instance
 
 - ttlHours: ${config.minTtlHours}-${config.maxTtlHours} (default ${config.defaultTtlHours}); a link never outlives created + ${config.maxTtlHours}h
+- Teams the admin allows can publish with ttlHours=permanent (no expiry); team quotas apply (default ${config.teamMaxSites} live sites, ${mb(config.teamMaxBytes)} MB per team)
 - ${config.maxFiles} files, ${mb(config.maxFileBytes)} MB per file, ${mb(config.maxSiteBytes)} MB per site
 - ${config.uploadsPerHour} uploads per hour per IP
 - Rejected: server scripts and executables (.php, .py, .sh, .exe, ...). Dotfiles are dropped.

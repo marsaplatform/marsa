@@ -174,6 +174,14 @@ export interface Strings {
     listingSaved: string;
     notYours: string;
     capped: string;
+    madePermanent: string;
+    permanentNotAllowed: string;
+    permanent: string;
+    permanentOption: string;
+    makePermanent: string;
+    permanentNote: string;
+    permanentOn: string;
+    quotaUse: (sites: string, bytes: string) => string;
     filesTitle: string;
     kvTitle: string;
     kvEmpty: string;
@@ -248,6 +256,16 @@ export interface Strings {
     createSub: string;
     keyHelp: string;
     docsLink: string;
+    revoked: string;
+    permanent: string;
+    permanentFilter: string;
+    revoke: string;
+    makePermanent: string;
+    quota: string;
+    quotaSites: string;
+    quotaMb: string;
+    quotaHelp: string;
+    permanentCount: (n: number) => string;
   };
 }
 
@@ -481,6 +499,15 @@ const en: Strings = {
     listingSaved: "Saved.",
     notYours: "This site doesn't exist or doesn't belong to your team.",
     capped: "A link can live at most the maximum time from when it was first published.",
+    madePermanent: "The site is now permanent. It will not expire.",
+    permanentNotAllowed: "This team is not allowed to publish permanent sites.",
+    permanent: "Permanent",
+    permanentOption: "Permanent (no expiry)",
+    makePermanent: "Make permanent",
+    permanentNote:
+      "This site is permanent: it never expires and is never swept. To make it a timed link again, pick a time and press Extend.",
+    permanentOn: "Permanent sites allowed",
+    quotaUse: (sites: string, bytes: string) => `Quota: ${sites} · ${bytes}`,
     filesTitle: "Published files",
     kvTitle: "Stored values (KV)",
     kvEmpty: "No values stored.",
@@ -563,6 +590,16 @@ const en: Strings = {
       "The team key is shown once after creating. Give it to the team; they sign in with it.",
     keyHelp: "Only the first characters of each key are shown.",
     docsLink: "Read the teams guide",
+    revoked: "Permanence revoked. The site now has the maximum lifetime from now.",
+    permanent: "Permanent",
+    permanentFilter: "Permanent sites",
+    revoke: "Revoke permanent",
+    makePermanent: "Make permanent",
+    quota: "Quota",
+    quotaSites: "Max sites",
+    quotaMb: "Max MB",
+    quotaHelp: "Leave empty for the default.",
+    permanentCount: (n: number) => (n === 1 ? "1 permanent site" : `${n} permanent sites`),
   },
 };
 
@@ -781,6 +818,15 @@ const ar: Strings = {
     listingSaved: "حُفظ.",
     notYours: "هذا الموقع غير موجود أو لا يتبع فريقك.",
     capped: "لا يتجاوز عمر الرابط الحدّ الأقصى محسوبًا من أول نشر.",
+    madePermanent: "أصبح الموقع دائمًا، ولن ينتهي.",
+    permanentNotAllowed: "هذا الفريق غير مسموح له بالمواقع الدائمة.",
+    permanent: "دائم",
+    permanentOption: "دائم (بلا انتهاء)",
+    makePermanent: "اجعله دائمًا",
+    permanentNote:
+      "الموقع دائم: لا ينتهي ولا يُحذف تلقائيًا. لإرجاعه لرابط مؤقت اختر مدة واضغط «مدّد».",
+    permanentOn: "مسموح بالمواقع الدائمة",
+    quotaUse: (sites: string, bytes: string) => `الحصة: ${sites} · ${bytes}`,
     filesTitle: "الملفات المنشورة",
     kvTitle: "القيم المخزّنة (KV)",
     kvEmpty: "لا توجد قيم مخزّنة.",
@@ -877,6 +923,16 @@ const ar: Strings = {
     createSub: "يُعرض مفتاح الفريق مرة واحدة بعد الإنشاء. سلّمه للفريق ليدخل به.",
     keyHelp: "تظهر الأحرف الأولى فقط من كل مفتاح.",
     docsLink: "اقرأ دليل الفرق",
+    revoked: "تم إلغاء الدوام. للموقع الآن المدة القصوى من الآن.",
+    permanent: "دائم",
+    permanentFilter: "المواقع الدائمة",
+    revoke: "ألغِ الدوام",
+    makePermanent: "اجعله دائمًا",
+    quota: "الحصة",
+    quotaSites: "حد المواقع",
+    quotaMb: "حد المساحة (م.ب)",
+    quotaHelp: "اتركه فارغًا لاستخدام الافتراضي.",
+    permanentCount: (n: number) => (n === 1 ? "موقع دائم واحد" : `${n} مواقع دائمة`),
   },
 };
 

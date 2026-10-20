@@ -30,6 +30,9 @@ export interface Config {
   backend: BackendLimits;
   /** Browser sign-in for teams and the admin (signed session cookies). */
   sessions: SessionConfig;
+  /** Default per-team quotas (the admin can override them per team). */
+  teamMaxSites: number;
+  teamMaxBytes: number;
   /** Site ids spotlighted on the home page (FEATURED_SITES, comma-separated). */
   featuredSites: string[];
 }
@@ -118,6 +121,8 @@ export function loadConfig(env: Env = process.env): Config {
     adminToken: env.ADMIN_TOKEN?.trim() ?? "",
     sweepIntervalSeconds: int(env, "SWEEP_INTERVAL_SECONDS", 60, 5),
     cloudflare: cloudflareConfig(env),
+    teamMaxSites: int(env, "TEAM_MAX_SITES", 50, 1),
+    teamMaxBytes: int(env, "TEAM_MAX_MB", 200, 1) * MB,
     featuredSites: (env.FEATURED_SITES ?? "")
       .split(",")
       .map((x) => x.trim())

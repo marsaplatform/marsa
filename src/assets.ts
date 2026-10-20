@@ -233,6 +233,13 @@ a.card:hover{border-color:var(--accent);transform:translateY(-2px);color:var(--i
 .how-num{color:var(--accent);margin-inline-end:2px}
 .how-steps p{font-size:15px;line-height:1.7}
 
+/* permanent sites + quotas */
+.badge.perm{font-weight:700}
+.quota-form{display:grid;grid-template-columns:repeat(2,minmax(0,70px));gap:6px;align-items:center}
+.quota-form .button{grid-column:1/-1;justify-self:start}
+.quota-field input{width:100%;padding:6px 8px;font-size:14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper)}
+@media (max-width:820px){.quota-form{grid-template-columns:repeat(2,90px)}}
+
 /* uploader */
 .try{scroll-margin-top:24px}
 .drop{margin:8px 0 12px;padding:36px 24px;border:2px dashed var(--line);border-radius:var(--radius);background:var(--paper);text-align:center;transition:border-color .15s,background .15s}

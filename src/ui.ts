@@ -4,6 +4,7 @@ import type { Config } from "./config.js";
 import { hashIndex, initialOf } from "./cover.js";
 import type { DocPage } from "./docs.js";
 import { bytesLabel, hoursLabel, type Lang, type LimitValues, STRINGS } from "./i18n.js";
+import { isPermanentIso } from "./store.js";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
@@ -59,6 +60,9 @@ export interface Flash {
 
 /** A server-rendered UTC time; the page script swaps in the visitor's local time. */
 function timeTag(lang: Lang, iso: string): string {
+  if (isPermanentIso(iso)) {
+    return `<span class="badge on perm">${esc(STRINGS[lang].team.permanent)}</span>`;
+  }
   const d = new Date(iso);
   const text = new Intl.DateTimeFormat(lang === "ar" ? "ar-EG" : "en-GB", {
     dateStyle: "medium",
@@ -71,16 +75,34 @@ function timeTag(lang: Lang, iso: string): string {
 const ltr = (s: string) => `<span dir="ltr" class="ltr">${esc(s)}</span>`;
 const hostless = (url: string) => url.replace(/^https?:\/\//, "");
 
-function ttlOptions(lang: Lang, c: Config, selected = c.defaultTtlHours): string {
+/** "Expires <time>", or just "Permanent". */
+function expiryLine(lang: Lang, iso: string): string {
+  return isPermanentIso(iso)
+    ? timeTag(lang, iso)
+    : `${esc(STRINGS[lang].directory.expires)} ${timeTag(lang, iso)}`;
+}
+
+function ttlOptions(
+  lang: Lang,
+  c: Config,
+  selected = c.defaultTtlHours,
+  permanent = false,
+): string {
   const set = new Set([1, 6, 24, 72, 168, c.defaultTtlHours, c.maxTtlHours]);
-  return [...set]
-    .filter((h) => h >= c.minTtlHours && h <= c.maxTtlHours)
-    .sort((a, b) => a - b)
-    .map(
-      (h) =>
-        `<option value="${h}"${h === selected ? " selected" : ""}>${esc(hoursLabel(lang, h))}</option>`,
-    )
-    .join("");
+  const perm = permanent
+    ? `<option value="permanent">${esc(STRINGS[lang].team.permanentOption)}</option>`
+    : "";
+  return (
+    perm +
+    [...set]
+      .filter((h) => h >= c.minTtlHours && h <= c.maxTtlHours)
+      .sort((a, b) => a - b)
+      .map(
+        (h) =>
+          `<option value="${h}"${h === selected ? " selected" : ""}>${esc(hoursLabel(lang, h))}</option>`,
+      )
+      .join("")
+  );
 }
 
 // ---- layout -----------------------------------------------------------------
@@ -264,8 +286,7 @@ function teamBadge(name: string, id: string): string {
 }
 
 function directoryCard(lang: Lang, x: DirSite, teamId: string): string {
-  const t = STRINGS[lang].directory;
-  return `<li class="dir-card"><a class="dir-link" href="${esc(x.url)}" target="_blank" rel="noopener">${thumb(lang, x, teamId)}<span class="dir-body"><span class="dir-title"><bdi>${esc(x.title)}</bdi></span><span class="dir-url">${ltr(hostless(x.url))}</span></span></a><p class="meta dir-expiry">${esc(t.expires)} ${timeTag(lang, x.expiresAt)}</p></li>`;
+  return `<li class="dir-card"><a class="dir-link" href="${esc(x.url)}" target="_blank" rel="noopener">${thumb(lang, x, teamId)}<span class="dir-body"><span class="dir-title"><bdi>${esc(x.title)}</bdi></span><span class="dir-url">${ltr(hostless(x.url))}</span></span></a><p class="meta dir-expiry">${expiryLine(lang, x.expiresAt)}</p></li>`;
 }
 
 function directorySection(lang: Lang, dir: Directory): string {
@@ -304,7 +325,7 @@ function featuredSection(lang: Lang, dir: Directory): string {
       <h2 id="featured-title"><bdi>${esc(x.title)}</bdi></h2>
       <p class="feature-team">${teamBadge(team.name, team.id)}<span>${esc(t.landing.by)} <bdi>${esc(team.name)}</bdi></span></p>
       <p class="dir-url">${ltr(hostless(x.url))}</p>
-      <p class="meta">${esc(t.directory.expires)} ${timeTag(lang, x.expiresAt)}</p>
+      <p class="meta">${expiryLine(lang, x.expiresAt)}</p>
       <div class="actions">
         <a class="button" href="${esc(x.url)}" target="_blank" rel="noopener">${esc(t.landing.open)} <span aria-hidden="true" class="arrow"></span></a>
         <a class="text-link" href="#directory">${esc(t.landing.allPages)}</a>
@@ -594,10 +615,13 @@ export interface TeamSiteRow {
   fileCount: number;
   listed: boolean;
   unlisted: boolean;
+  permanent: boolean;
 }
 
 export interface TeamPageOpts {
-  team: { id: string; name: string; backend: boolean; directory: boolean };
+  team: { id: string; name: string; backend: boolean; directory: boolean; permanent: boolean };
+  quota: { sites: number; bytes: number };
+  usage: { sites: number; bytes: number };
   backendConfigured: boolean;
   sites: TeamSiteRow[];
   csrf: string;
@@ -619,6 +643,9 @@ function teamHead(lang: Lang, o: { team: TeamPageOpts["team"]; csrf: string }, s
   );
 }
 
+const quotaState = (o: TeamPageOpts) =>
+  o.usage.sites >= o.quota.sites || o.usage.bytes >= o.quota.bytes * 0.9 ? "warn" : "on";
+
 function statusList(lang: Lang, o: TeamPageOpts): string {
   const t = STRINGS[lang];
   const backend = !o.team.backend
@@ -630,6 +657,8 @@ function statusList(lang: Lang, o: TeamPageOpts): string {
     <li><span class="dot-status on" aria-hidden="true"></span><strong>${esc(t.team.sites)}:</strong> ${esc(t.team.sitesCount(o.sites.length))}</li>
     <li><span class="dot-status ${backend[0]}" aria-hidden="true"></span><strong>${esc(t.team.backend)}:</strong> ${esc(backend[1] ?? "")}</li>
     <li><span class="dot-status ${o.team.directory ? "on" : "off"}" aria-hidden="true"></span>${esc(o.team.directory ? t.team.directoryOn : t.team.directoryOff)}</li>
+    ${o.team.permanent ? `<li><span class="dot-status on" aria-hidden="true"></span>${esc(t.team.permanentOn)}</li>` : ""}
+    <li><span class="dot-status ${quotaState(o)}" aria-hidden="true"></span>${esc(t.team.quotaUse(`${o.usage.sites}/${o.quota.sites}`, `${bytesLabel(lang, o.usage.bytes)} / ${bytesLabel(lang, o.quota.bytes)}`))}</li>
   </ul>`;
 }
 
@@ -643,6 +672,7 @@ function teamUploader(
   submit: string,
   withTtl: boolean,
   compact = false,
+  permanent = false,
 ): string {
   const t = STRINGS[lang];
   const l = limitValues(lang, c);
@@ -661,7 +691,7 @@ function teamUploader(
       <p class="meta">${esc(t.limits.limitItems(l)[0] ?? "")}</p>
     </div>
     <div class="form-row">
-      ${withTtl ? `<label class="ttl"><span>${esc(t.try.expires)}</span> <select name="ttlHours">${ttlOptions(lang, c)}</select></label>` : ""}
+      ${withTtl ? `<label class="ttl"><span>${esc(t.try.expires)}</span> <select name="ttlHours">${ttlOptions(lang, c, c.defaultTtlHours, permanent)}</select></label>` : ""}
       <button class="button" type="submit">${esc(submit)}</button>
     </div>
     <p class="status" role="status" aria-live="polite" data-status></p>
@@ -706,7 +736,7 @@ export function teamHtml(lang: Lang, c: Config, o: TeamPageOpts): string {
     ${table}
   </section>
   <section aria-label="${esc(t.team.publishTitle)}" class="block">
-    ${teamUploader(lang, c, o.csrf, href("/team/sites"), t.team.publishTitle, t.team.publishSub, t.team.publish, true)}
+    ${teamUploader(lang, c, o.csrf, href("/team/sites"), t.team.publishTitle, t.team.publishSub, t.team.publish, true, false, o.team.permanent)}
   </section>
   <section aria-labelledby="agents-title" class="block two-col">
     <div>
@@ -854,9 +884,18 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
         ${postForm(
           href(`${base}/extend`),
           o.csrf,
-          `<label class="ttl"><span>${esc(t.team.extendTo)}</span> <select name="ttlHours">${ttlOptions(lang, c)}</select></label> <button class="button small" type="submit">${esc(t.team.extend)}</button>`,
+          `<label class="ttl"><span>${esc(t.team.extendTo)}</span> <select name="ttlHours">${ttlOptions(lang, c, c.defaultTtlHours, false)}</select></label> <button class="button small" type="submit">${esc(t.team.extend)}</button>`,
           { cls: "inline-form extend-form" },
         )}
+        ${
+          o.team.permanent && !s.permanent
+            ? postForm(
+                href(`${base}/permanent`),
+                o.csrf,
+                `<button class="button small ghost" type="submit">${esc(t.team.makePermanent)}</button>`,
+              )
+            : ""
+        }
         ${listingForm}
         ${postForm(
           href(`${base}/delete`),
@@ -865,7 +904,7 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
           { confirm: t.team.confirmDelete, cls: "inline-form push-end" },
         )}
       </div>
-      <p class="meta">${esc(t.team.capped)} (${timeTag(lang, s.ceiling)})</p>
+      <p class="meta">${s.permanent ? esc(t.team.permanentNote) : `${esc(t.team.capped)} (${timeTag(lang, s.ceiling)})`}</p>
     </div>
   </section>
   <section class="block" aria-label="${esc(t.team.replace)}">
@@ -900,6 +939,10 @@ export interface AdminTeamRow {
   name: string;
   backend: boolean;
   directory: boolean;
+  permanent: boolean;
+  quotaSites: number;
+  quotaMb: number;
+  customQuota: boolean;
   keyPrefix: string;
   liveSites: number;
   createdAt: string;
@@ -930,7 +973,7 @@ export function adminTeamsHtml(
       const base = `/admin/teams/${tm.id}`;
       // Same pattern as a site's "Listed / Hidden" on the team pages: a badge with
       // the state and one button that flips it.
-      const toggle = (field: "backend" | "directory", label: string) =>
+      const toggle = (field: "backend" | "directory" | "permanent", label: string) =>
         `<div class="acts"><span class="badge ${tm[field] ? "on" : "muted"}">${esc(tm[field] ? t.common.on : t.common.off)}</span>${postForm(
           href(`${base}/update`),
           o.csrf,
@@ -940,6 +983,16 @@ export function adminTeamsHtml(
         <th scope="row"><bdi>${esc(tm.name)}</bdi><div class="meta ltr">${esc(tm.id)}</div></th>
         ${td(t.admin.backend, toggle("backend", t.admin.backend))}
         ${td(t.admin.directory, toggle("directory", t.admin.directory))}
+        ${td(t.admin.permanent, toggle("permanent", t.admin.permanent))}
+        ${td(
+          t.admin.quota,
+          postForm(
+            href(`${base}/update`),
+            o.csrf,
+            `<label class="quota-field"><span class="sr-only">${esc(`${t.admin.quotaSites} · ${tm.name}`)}</span><input name="maxSites" type="number" min="0" max="100000" inputmode="numeric" placeholder="${tm.quotaSites}" value="${tm.customQuota ? tm.quotaSites : ""}" aria-describedby="quota-help" title="${esc(t.admin.quotaSites)}"></label><label class="quota-field"><span class="sr-only">${esc(`${t.admin.quotaMb} · ${tm.name}`)}</span><input name="maxMb" type="number" min="0" max="100000" inputmode="numeric" placeholder="${tm.quotaMb}" value="${tm.customQuota ? tm.quotaMb : ""}" aria-describedby="quota-help" title="${esc(t.admin.quotaMb)}"></label><button type="submit" class="button small ghost">${esc(t.common.save)}</button>`,
+            { cls: "inline-form quota-form" },
+          ),
+        )}
         ${td(t.admin.liveSites, `<a class="text-link" href="${href(`/admin/sites?owner=${tm.id}`)}">${esc(String(tm.liveSites))}</a>`)}
         ${td(t.admin.key, `<code class="ltr">${esc(tm.keyPrefix)}…</code>`)}
         ${td(
@@ -958,9 +1011,10 @@ export function adminTeamsHtml(
   const table = o.teams.length
     ? `<div class="table-wrap"><table class="data stack">
       <caption class="sr-only">${esc(t.admin.teams)}</caption>
-      <thead><tr><th scope="col">${esc(t.admin.name)}</th><th scope="col">${esc(t.admin.backend)}</th><th scope="col">${esc(t.admin.directory)}</th><th scope="col">${esc(t.admin.liveSites)}</th><th scope="col">${esc(t.admin.key)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
+      <thead><tr><th scope="col">${esc(t.admin.name)}</th><th scope="col">${esc(t.admin.backend)}</th><th scope="col">${esc(t.admin.directory)}</th><th scope="col">${esc(t.admin.permanent)}</th><th scope="col">${esc(t.admin.quota)}</th><th scope="col">${esc(t.admin.liveSites)}</th><th scope="col">${esc(t.admin.key)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
       <tbody>${rows}</tbody></table></div>
-      <p class="meta table-note">${esc(t.admin.keyHelp)}</p>`
+      <p class="meta table-note">${esc(t.admin.keyHelp)}</p>
+      <p class="meta table-note" id="quota-help">${esc(`${t.admin.quotaSites} / ${t.admin.quotaMb}: ${t.admin.quotaHelp}`)}</p>`
     : emptyState(t.admin.none, t.admin.createSub);
   const body = `<div class="wrap page-wide">
   ${pageHead(t.admin.eyebrow, esc(t.admin.title), t.admin.sub, adminTools(lang, "teams", o.csrf))}
@@ -984,6 +1038,7 @@ export function adminTeamsHtml(
       <div class="form-row checks-row">
         <label class="check"><input name="backend" type="checkbox" value="1"> ${esc(t.admin.backend)}</label>
         <label class="check"><input name="directory" type="checkbox" value="1" checked> ${esc(t.admin.directory)}</label>
+        <label class="check"><input name="permanent" type="checkbox" value="1"> ${esc(t.admin.permanent)}</label>
       </div>
       <button class="button" type="submit">${esc(t.admin.create)}</button>
     </form>
@@ -1023,6 +1078,7 @@ export interface AdminSiteRow {
   createdAt: string;
   expiresAt: string;
   totalBytes: number;
+  permanent: boolean;
 }
 
 export function adminSitesHtml(
@@ -1042,6 +1098,7 @@ export function adminSitesHtml(
     `<option value="${esc(v)}"${o.owner === v ? " selected" : ""}>${esc(label)}</option>`;
   const total = o.sites.reduce((n, s) => n + s.totalBytes, 0);
   const guests = o.sites.filter((s) => !s.owner).length;
+  const perms = o.sites.filter((s) => s.permanent).length;
   const rows = o.sites
     .map(
       (s) => `<tr>
@@ -1052,12 +1109,21 @@ export function adminSitesHtml(
       ${td(t.common.size, esc(bytesLabel(lang, s.totalBytes)))}
       ${td(
         t.common.actions,
-        postForm(
+        `<div class="acts">${postForm(
           href(`/admin/sites/${s.id}/delete`),
           o.csrf,
           `<input type="hidden" name="owner" value="${esc(o.owner)}"><button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
           { confirm: t.team.confirmDelete },
-        ),
+        )}${
+          s.permanent
+            ? postForm(
+                href(`/admin/sites/${s.id}/permanent`),
+                o.csrf,
+                `<input type="hidden" name="owner" value="${esc(o.owner)}"><input type="hidden" name="permanent" value="0"><button class="button small ghost" type="submit">${esc(t.admin.revoke)}</button>`,
+                { confirm: t.common.confirm },
+              )
+            : ""
+        }</div>`,
         "cell-actions",
       )}</tr>`,
     )
@@ -1069,13 +1135,14 @@ export function adminSitesHtml(
     <li><span class="dot-status ${o.sites.length ? "on" : "off"}" aria-hidden="true"></span><strong>${esc(t.admin.sitesTab)}:</strong> ${esc(t.admin.total(o.sites.length, bytesLabel(lang, total)))}</li>
     <li><span class="dot-status on" aria-hidden="true"></span>${esc(t.admin.liveTotal(o.sites.length - guests))}</li>
     <li><span class="dot-status ${guests ? "warn" : "off"}" aria-hidden="true"></span>${esc(t.admin.guestsCount(guests))}</li>
+    <li><span class="dot-status ${perms ? "on" : "off"}" aria-hidden="true"></span>${esc(t.admin.permanentCount(perms))}</li>
   </ul>
   <section class="block" aria-labelledby="sites-title">
     <h2 id="sites-title" class="sr-only">${esc(t.admin.sitesTitle)}</h2>
     <form method="get" action="${href("/admin/sites")}" class="panel filter-panel">
       <div class="form-row">
         <label for="owner">${esc(t.admin.filter)}</label>
-        <select id="owner" name="owner">${opt("all", t.admin.all)}${opt("guest", t.admin.guests)}${o.teams.map((x) => opt(x.id, x.name)).join("")}</select>
+        <select id="owner" name="owner">${opt("all", t.admin.all)}${opt("guest", t.admin.guests)}${opt("permanent", t.admin.permanentFilter)}${o.teams.map((x) => opt(x.id, x.name)).join("")}</select>
         <button class="button small" type="submit">${esc(t.admin.apply)}</button>
       </div>
     </form>

@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-10-20
+
+### Added
+- **Permanent sites.** Teams with the new per-team `permanent` flag can publish sites with no expiry
+  (`ttlHours=permanent`, `?permanent=1` or `"permanent": true`), or convert one with **Make
+  permanent** on the site page / `PATCH /api/sites/<id> {"permanent": true}`. The flag defaults to the
+  team's backend access and the admin toggles it in the console or with `PATCH /api/admin/teams/<id>`.
+  Guests keep the 1 h – `MAX_TTL_HOURS` TTL.
+- A permanent site has `"permanent": true` and `expiresAt` `9999-12-31T00:00:00.000Z` (a real date, so
+  every liveness check, and older releases after a rollback, keep working). The sweeper skips it
+  explicitly. Pages show a **Permanent** badge instead of a date.
+- Admin: **Permanent sites** filter and **Revoke permanent** on *All sites*;
+  `PATCH /api/admin/sites/<id> {"permanent": true|false}`. Revoking gives `MAX_TTL_HOURS` from now.
+  Turning a permanent site back into a timed one restarts its TTL ceiling (`ttlFrom`).
+- **Team quotas**: `TEAM_MAX_SITES` (default 50 live sites) and `TEAM_MAX_MB` (default 200 MB) per
+  team, overridable per team (`maxSites` / `maxMb`, *Quota* fields in the console). Uploads and
+  replaces over the quota answer `403 TEAM_QUOTA_EXCEEDED`. The dashboard shows usage.
+
 ## [0.7.0] - 2026-10-20
 
 ### Added

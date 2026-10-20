@@ -10,7 +10,9 @@ export type UploadErrorCode =
   | "INVALID_PATH"
   | "INVALID_ENCODING"
   | "BLOCKED_FILE_TYPE"
-  | "INVALID_REQUEST";
+  | "INVALID_REQUEST"
+  | "PERMANENT_NOT_ALLOWED"
+  | "TEAM_QUOTA_EXCEEDED";
 
 export class UploadError extends Error {
   constructor(
@@ -22,8 +24,11 @@ export class UploadError extends Error {
     this.name = "UploadError";
   }
 
-  get status(): 400 | 413 | 415 {
+  get status(): 400 | 403 | 413 | 415 {
     switch (this.code) {
+      case "PERMANENT_NOT_ALLOWED":
+      case "TEAM_QUOTA_EXCEEDED":
+        return 403;
       case "FILE_TOO_LARGE":
       case "SITE_TOO_LARGE":
       case "TOO_MANY_FILES":

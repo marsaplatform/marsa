@@ -14,12 +14,28 @@ export interface Team {
   backend: boolean;
   /** List this team's live sites in the public directory on the homepage? (default true) */
   directory: boolean;
+  /** May this team publish sites with no expiry? (default: same as `backend`) */
+  permanent: boolean;
+  /** Quota: most live sites at once. Unset = TEAM_MAX_SITES. */
+  maxSites?: number;
+  /** Quota: most bytes across live sites, in MB. Unset = TEAM_MAX_MB. */
+  maxMb?: number;
   createdAt: string;
   updatedAt: string;
   /** SHA-256 of the team key. The key itself is shown once and never stored. */
   keyHash: string;
   /** First characters of the key, so the admin can tell keys apart. */
   keyPrefix: string;
+}
+
+/** Fields the admin may change. */
+export interface TeamPatch {
+  name?: string;
+  backend?: boolean;
+  directory?: boolean;
+  permanent?: boolean;
+  maxSites?: number | null;
+  maxMb?: number | null;
 }
 
 /** What the admin API returns (never the key hash). */
@@ -94,6 +110,7 @@ export class TeamStore {
     this.byKey.clear();
     for (const t of parsed.teams ?? []) {
       if (typeof t.directory !== "boolean") t.directory = true;
+      if (typeof t.permanent !== "boolean") t.permanent = !!t.backend;
       this.teams.set(t.id, t);
       this.byKey.set(t.keyHash, t.id);
     }
@@ -129,6 +146,7 @@ export class TeamStore {
     backend: boolean,
     now: number,
     directory = true,
+    extra: TeamPatch = {},
   ): Promise<{ team: Team; key: string }> {
     let id = `t_${newSiteId(8)}`;
     while (this.teams.has(id)) id = `t_${newSiteId(8)}`;
@@ -139,6 +157,9 @@ export class TeamStore {
       name,
       backend,
       directory,
+      permanent: extra.permanent ?? backend,
+      ...(extra.maxSites ? { maxSites: extra.maxSites } : {}),
+      ...(extra.maxMb ? { maxMb: extra.maxMb } : {}),
       createdAt: ts,
       updatedAt: ts,
       keyHash: hashToken(key),
@@ -150,14 +171,13 @@ export class TeamStore {
     return { team, key };
   }
 
-  async update(
-    id: string,
-    patch: { name?: string; backend?: boolean; directory?: boolean },
-    now: number,
-  ): Promise<Team | null> {
+  async update(id: string, patch: TeamPatch, now: number): Promise<Team | null> {
     const t = this.teams.get(id);
     if (!t) return null;
-    const next: Team = { ...t, ...patch, updatedAt: new Date(now).toISOString() };
+    const next = { ...t, ...patch, updatedAt: new Date(now).toISOString() } as Team;
+    // 0 (or null) clears a quota back to the server default.
+    if (!next.maxSites) delete next.maxSites;
+    if (!next.maxMb) delete next.maxMb;
     this.teams.set(id, next);
     await this.persist();
     return next;

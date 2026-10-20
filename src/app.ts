@@ -27,9 +27,16 @@ import { RateLimiter } from "./rate-limit.js";
 import { SDK_JS } from "./sdk.js";
 import { APP_CSP, baseHeaders, SITE_CSP } from "./security.js";
 import { Sessions } from "./session.js";
-import { publicMeta, type SiteMeta, type SiteStore } from "./store.js";
+import { PERMANENT_EXPIRES, publicMeta, type SiteMeta, type SiteStore } from "./store.js";
 import { removeSite, sweepExpired } from "./sweep.js";
-import { cleanTeamName, isTeamKey, publicTeam, type Team, TeamStore } from "./teams.js";
+import {
+  cleanTeamName,
+  isTeamKey,
+  publicTeam,
+  type Team,
+  type TeamPatch,
+  TeamStore,
+} from "./teams.js";
 import { bearer, hashToken, newEditToken, newSiteId, safeEqual } from "./tokens.js";
 import {
   type Directory,
@@ -160,9 +167,12 @@ export function createApp({
   /** Parse any supported upload body into raw entries + an optional TTL. */
   async function readUpload(c: Context): Promise<{ entries: UploadEntry[]; ttl?: unknown }> {
     const type = (c.req.header("content-type") ?? "").toLowerCase();
-    const queryTtl = c.req.query("ttlHours") ?? c.req.query("ttl");
+    const queryTtl =
+      c.req.query("permanent") === "1" || c.req.query("permanent") === "true"
+        ? "permanent"
+        : (c.req.query("ttlHours") ?? c.req.query("ttl"));
     if (type.startsWith("application/json")) {
-      let body: { files?: FileInput[]; ttlHours?: unknown };
+      let body: { files?: FileInput[]; ttlHours?: unknown; permanent?: unknown };
       try {
         body = await c.req.json();
       } catch {
@@ -174,7 +184,8 @@ export function createApp({
           "expected { files: [{ path, content, encoding? }] }",
         );
       }
-      return { entries: fromFilesArray(body.files), ttl: body.ttlHours ?? queryTtl };
+      const ttl = body.permanent === true ? "permanent" : (body.ttlHours ?? queryTtl);
+      return { entries: fromFilesArray(body.files), ttl };
     }
     if (type.startsWith("application/zip") || type.startsWith("application/octet-stream")) {
       const buf = Buffer.from(await c.req.arrayBuffer());
@@ -335,8 +346,57 @@ export function createApp({
   }
 
   // ---- site operations shared by the API and the dashboard ----------------
+  /** "permanent" (or true) asks for no expiry. */
+  const wantsPermanent = (ttl: unknown) =>
+    ttl === true || (typeof ttl === "string" && ttl.trim().toLowerCase() === "permanent");
+  const quotaOf = (team: Team) => ({
+    sites: team.maxSites ?? config.teamMaxSites,
+    bytes: team.maxMb ? team.maxMb * 1024 * 1024 : config.teamMaxBytes,
+  });
+  /** Live sites and bytes a team uses now (optionally leaving one site out). */
+  async function usageOf(team: Team, except?: string) {
+    let sites = 0;
+    let bytes = 0;
+    for (const m of await store.list()) {
+      if (m.teamId !== team.id || m.id === except || Date.parse(m.expiresAt) <= now()) continue;
+      sites++;
+      bytes += m.totalBytes;
+    }
+    return { sites, bytes };
+  }
+  async function checkQuota(team: Team, addBytes: number, newSite: boolean, except?: string) {
+    const q = quotaOf(team);
+    const u = await usageOf(team, except);
+    if (newSite && u.sites + 1 > q.sites) {
+      throw new UploadError(
+        "TEAM_QUOTA_EXCEEDED",
+        `this team already has ${u.sites} live sites (quota ${q.sites}); delete one first`,
+      );
+    }
+    if (u.bytes + addBytes > q.bytes) {
+      const mb = (n: number) => `${Math.ceil(n / 1024 / 1024)} MB`;
+      throw new UploadError(
+        "TEAM_QUOTA_EXCEEDED",
+        `this upload would bring the team to ${mb(u.bytes + addBytes)} (quota ${mb(q.bytes)})`,
+      );
+    }
+  }
+  const bytesOf = (files: Map<string, Uint8Array>) =>
+    [...files.values()].reduce((n, b) => n + b.byteLength, 0);
+  const permanentFor = (team: Team | null) => {
+    if (!team?.permanent) {
+      throw new UploadError(
+        "PERMANENT_NOT_ALLOWED",
+        "only teams the admin allows can publish permanent sites",
+      );
+    }
+  };
+
   async function createSite(entries: UploadEntry[], ttl: unknown, team: Team | null) {
+    const permanent = wantsPermanent(ttl);
+    if (permanent) permanentFor(team);
     const files = prepareSite(entries, limits);
+    if (team) await checkQuota(team, bytesOf(files), true);
     let id = newSiteId();
     while (await store.exists(id)) id = newSiteId();
     // Every site gets an edit token; only its hash is stored. Team sites are
@@ -348,7 +408,10 @@ export function createApp({
         id,
         createdAt: new Date(ts).toISOString(),
         updatedAt: new Date(ts).toISOString(),
-        expiresAt: new Date(ts + clampTtl(ttl) * HOUR).toISOString(),
+        expiresAt: permanent
+          ? PERMANENT_EXPIRES
+          : new Date(ts + clampTtl(ttl) * HOUR).toISOString(),
+        ...(permanent ? { permanent: true } : {}),
         tokenHash: hashToken(token),
         ...(team ? { teamId: team.id } : {}),
         ...titleOf(files),
@@ -360,6 +423,8 @@ export function createApp({
   }
   async function replaceSite(meta: SiteMeta, entries: UploadEntry[]) {
     const files = prepareSite(entries, limits);
+    const team = teams.get(meta.teamId);
+    if (team) await checkQuota(team, bytesOf(files), false, meta.id);
     const { title: _old, ...rest } = meta;
     const updated = await store.put(
       { ...rest, ...titleOf(files), updatedAt: new Date(now()).toISOString() },
@@ -368,9 +433,37 @@ export function createApp({
     invalidateDirectory();
     return updated;
   }
-  /** Change the expiry. A link can never outlive createdAt + MAX_TTL_HOURS. */
-  const ceilingOf = (meta: SiteMeta) => Date.parse(meta.createdAt) + config.maxTtlHours * HOUR;
+  /** A link can never outlive (start of its timed life) + MAX_TTL_HOURS. */
+  const ceilingOf = (meta: SiteMeta) =>
+    Date.parse(meta.ttlFrom ?? meta.createdAt) + config.maxTtlHours * HOUR;
+  /** Turn permanence on, or off (the site then gets MAX_TTL_HOURS from now). */
+  async function setPermanent(meta: SiteMeta, on: boolean) {
+    const ts = new Date(now()).toISOString();
+    if (on) {
+      meta.permanent = true;
+      meta.expiresAt = PERMANENT_EXPIRES;
+      delete meta.ttlFrom;
+    } else if (meta.permanent) {
+      delete meta.permanent;
+      meta.ttlFrom = ts;
+      meta.expiresAt = new Date(now() + config.maxTtlHours * HOUR).toISOString();
+    }
+    meta.updatedAt = ts;
+    await store.updateMeta(meta);
+    invalidateDirectory();
+    return meta;
+  }
+  /** Change the expiry; "permanent" asks for none (team permitting). */
   async function extendSite(meta: SiteMeta, ttl: unknown) {
+    if (wantsPermanent(ttl)) {
+      permanentFor(teams.get(meta.teamId));
+      return setPermanent(meta, true);
+    }
+    if (meta.permanent) {
+      // Back to a timed link: its life (and ceiling) starts now.
+      delete meta.permanent;
+      meta.ttlFrom = new Date(now()).toISOString();
+    }
     meta.expiresAt = new Date(
       Math.min(now() + clampTtl(ttl) * HOUR, ceilingOf(meta)),
     ).toISOString();
@@ -448,8 +541,12 @@ export function createApp({
   app.patch("/api/sites/:id", async (c) => {
     const meta = await authorizeSite(c);
     if (meta instanceof Response) return meta;
-    const body = (await c.req.json().catch(() => ({}))) as { ttlHours?: unknown };
-    return c.json(view(await extendSite(meta, body.ttlHours)));
+    const body = (await c.req.json().catch(() => ({}))) as {
+      ttlHours?: unknown;
+      permanent?: unknown;
+    };
+    const ttl = body.permanent === true ? "permanent" : body.ttlHours;
+    return c.json(view(await extendSite(meta, ttl)));
   });
 
   app.delete("/api/sites/:id", async (c) => {
@@ -490,6 +587,22 @@ export function createApp({
     invalidateDirectory();
     return c.body(null, 204);
   });
+  /** Admin: make a team site permanent, or revoke it ({ "permanent": true | false }). */
+  app.patch("/api/admin/sites/:id", async (c) => {
+    const meta = await store.get(c.req.param("id"));
+    if (!meta || Date.parse(meta.expiresAt) <= now()) {
+      return apiError(c, 404, "NOT_FOUND", "site not found");
+    }
+    const body = await readBody(c);
+    if (typeof body.permanent !== "boolean") {
+      return apiError(c, 400, "INVALID_REQUEST", "permanent must be true or false");
+    }
+    if (body.permanent && !teams.get(meta.teamId)) {
+      return apiError(c, 403, "PERMANENT_NOT_ALLOWED", "guest sites cannot be permanent");
+    }
+    const { files: _files, ...rest } = view(await setPermanent(meta, body.permanent));
+    return c.json(rest);
+  });
   app.post("/api/admin/sweep", async (c) => {
     const removed = await sweepExpired(store, backend, now());
     invalidateDirectory();
@@ -508,21 +621,36 @@ export function createApp({
   };
   const teamView = (t: Team, counts?: Map<string, number>) => ({
     ...publicTeam(t),
+    quota: { sites: quotaOf(t).sites, mb: Math.round(quotaOf(t).bytes / 1024 / 1024) },
     ...(counts ? { liveSites: counts.get(t.id) ?? 0 } : {}),
   });
   const readFlags = (body: Record<string, unknown>, c: Context) => {
-    const out: { name?: string; backend?: boolean; directory?: boolean } = {};
+    const out: TeamPatch = {};
     if ("name" in body) {
       const name = cleanTeamName(body.name);
       if (!name) return apiError(c, 400, "INVALID_REQUEST", "name: 1-80 characters");
       out.name = name;
     }
-    for (const k of ["backend", "directory"] as const) {
+    for (const k of ["backend", "directory", "permanent"] as const) {
       if (k in body) {
         if (typeof body[k] !== "boolean") {
           return apiError(c, 400, "INVALID_REQUEST", `${k} must be true or false`);
         }
         out[k] = body[k] as boolean;
+      }
+    }
+    for (const k of ["maxSites", "maxMb"] as const) {
+      if (k in body) {
+        const v = body[k];
+        if (v === null || v === 0) out[k] = null;
+        else if (typeof v === "number" && Number.isInteger(v) && v > 0 && v <= 100_000) out[k] = v;
+        else
+          return apiError(
+            c,
+            400,
+            "INVALID_REQUEST",
+            `${k}: a whole number, or null for the default`,
+          );
       }
     }
     return out;
@@ -544,6 +672,11 @@ export function createApp({
       f.backend ?? false,
       now(),
       f.directory ?? true,
+      {
+        ...(f.permanent !== undefined ? { permanent: f.permanent } : {}),
+        ...(f.maxSites ? { maxSites: f.maxSites } : {}),
+        ...(f.maxMb ? { maxMb: f.maxMb } : {}),
+      },
     );
     invalidateDirectory();
     return c.json({ team: teamView(team), key }, 201);
@@ -623,6 +756,9 @@ export function createApp({
     extendSite,
     deleteSite,
     ceilingOf,
+    setPermanent,
+    quotaOf,
+    usageOf,
     siteUrl,
     invalidateDirectory,
     siteCounts,

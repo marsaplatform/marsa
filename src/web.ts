@@ -9,7 +9,7 @@ import type { UploadEntry } from "./ingest.js";
 import type { RateLimiter } from "./rate-limit.js";
 import { fingerprint, type Session, type Sessions, sameOrigin } from "./session.js";
 import type { SiteMeta, SiteStore } from "./store.js";
-import { cleanTeamName, type Team, type TeamStore } from "./teams.js";
+import { cleanTeamName, type Team, type TeamPatch, type TeamStore } from "./teams.js";
 import { safeEqual } from "./tokens.js";
 import {
   adminSitesHtml,
@@ -44,6 +44,9 @@ export interface WebDeps {
   extendSite: (meta: SiteMeta, ttl: unknown) => Promise<SiteMeta>;
   deleteSite: (id: string) => Promise<void>;
   ceilingOf: (meta: SiteMeta) => number;
+  setPermanent: (meta: SiteMeta, on: boolean) => Promise<SiteMeta>;
+  quotaOf: (team: Team) => { sites: number; bytes: number };
+  usageOf: (team: Team, except?: string) => Promise<{ sites: number; bytes: number }>;
   siteUrl: (id: string) => string;
   invalidateDirectory: () => void;
   siteCounts: () => Promise<Map<string, number>>;
@@ -197,6 +200,12 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     fileCount: m.fileCount,
     listed: team.directory && !m.unlisted,
     unlisted: !!m.unlisted,
+    permanent: !!m.permanent,
+  });
+  const teamInfo = async (team: Team) => ({
+    team,
+    quota: d.quotaOf(team),
+    usage: await d.usageOf(team),
   });
 
   const live = (m: SiteMeta) => Date.parse(m.expiresAt) > now();
@@ -284,7 +293,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       return page(
         c,
         teamHtml(lang, config, {
-          team,
+          ...(await teamInfo(team)),
           backendConfigured: !!backend,
           sites,
           csrf: sessions.csrfFor(s),
@@ -364,7 +373,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       return page(
         c,
         teamSiteHtml(lang, config, {
-          team,
+          ...(await teamInfo(team)),
           backendConfigured: !!backend,
           sites: [],
           site,
@@ -416,8 +425,22 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     );
 
     sitePost("extend", async (c, { s, m, form, back }) => {
-      await d.extendSite(m, field(form, "ttlHours"));
-      return done(c, s, back, { kind: "ok", text: t.team.extended });
+      try {
+        const out = await d.extendSite(m, field(form, "ttlHours"));
+        return done(c, s, back, {
+          kind: "ok",
+          text: out.permanent ? t.team.madePermanent : t.team.extended,
+        });
+      } catch (err) {
+        return done(c, s, back, { kind: "err", text: uploadErr(err) });
+      }
+    });
+
+    sitePost("permanent", async (c, { s, team, m, back }) => {
+      if (!team.permanent)
+        return done(c, s, back, { kind: "err", text: t.team.permanentNotAllowed });
+      await d.setPermanent(m, true);
+      return done(c, s, back, { kind: "ok", text: t.team.madePermanent });
     });
 
     sitePost("delete", async (c, { s, m }) => {
@@ -519,6 +542,10 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             name: x.name,
             backend: x.backend,
             directory: x.directory,
+            permanent: x.permanent,
+            quotaSites: d.quotaOf(x).sites,
+            quotaMb: Math.round(d.quotaOf(x).bytes / 1024 / 1024),
+            customQuota: !!(x.maxSites || x.maxMb),
             keyPrefix: x.keyPrefix,
             createdAt: x.createdAt,
             liveSites: counts.get(x.id) ?? 0,
@@ -551,21 +578,28 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     adminPost("/admin/teams", async (c, { s, form }) => {
       const name = cleanTeamName(field(form, "name"));
       if (!name) return done(c, s, href("/admin"), { kind: "err", text: t.badRequest });
-      const { key } = await teams.create(
-        name,
-        field(form, "backend") === "1",
-        now(),
-        field(form, "directory") === "1",
-      );
+      const backendOn = field(form, "backend") === "1";
+      const { key } = await teams.create(name, backendOn, now(), field(form, "directory") === "1", {
+        // Permanent links follow backend access unless the admin says otherwise.
+        permanent: form.has("permanent") ? field(form, "permanent") === "1" : backendOn,
+      });
       d.invalidateDirectory();
       return done(c, s, href("/admin"), keyFlash(t.admin.created, key));
     });
 
     adminPost("/admin/teams/:id/update", async (c, { s, form }) => {
-      const patch: { backend?: boolean; directory?: boolean; name?: string } = {};
-      for (const k of ["backend", "directory"] as const) {
+      const patch: TeamPatch = {};
+      for (const k of ["backend", "directory", "permanent"] as const) {
         const v = field(form, k);
         if (v === "1" || v === "0") patch[k] = v === "1";
+      }
+      for (const k of ["maxSites", "maxMb"] as const) {
+        if (!form.has(k)) continue;
+        const raw = field(form, k).trim();
+        const n = Number(raw);
+        if (raw === "" || n === 0) patch[k] = null;
+        else if (Number.isInteger(n) && n > 0 && n <= 100_000) patch[k] = n;
+        else return done(c, s, href("/admin"), { kind: "err", text: t.badRequest });
       }
       if (form.has("name")) {
         const name = cleanTeamName(field(form, "name"));
@@ -595,7 +629,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     });
 
     const ownerFilter = (raw: string | undefined) =>
-      raw === "guest" || (raw && teams.get(raw)) ? raw : "all";
+      raw === "guest" || raw === "permanent" || (raw && teams.get(raw)) ? raw : "all";
 
     app.get(`${prefix}/admin/sites`, async (c) => {
       const s = needAdmin(c);
@@ -604,7 +638,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       const sites = (await store.list())
         .filter((m) => live(m))
         .filter((m) =>
-          owner === "all" ? true : owner === "guest" ? !teams.get(m.teamId) : m.teamId === owner,
+          owner === "all"
+            ? true
+            : owner === "guest"
+              ? !teams.get(m.teamId)
+              : owner === "permanent"
+                ? !!m.permanent
+                : m.teamId === owner,
         )
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .map((m) => {
@@ -618,6 +658,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             createdAt: m.createdAt,
             expiresAt: m.expiresAt,
             totalBytes: m.totalBytes,
+            permanent: !!m.permanent,
           };
         });
       return page(
@@ -630,6 +671,17 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           flash: takeFlash(c, s),
         }),
       );
+    });
+
+    adminPost("/admin/sites/:id/permanent", async (c, { s, form }) => {
+      const owner = ownerFilter(field(form, "owner"));
+      const back = href(`/admin/sites${owner === "all" ? "" : `?owner=${owner}`}`);
+      const m = await store.get(c.req.param("id") ?? "");
+      if (!m || !live(m)) return done(c, s, back, { kind: "err", text: t.notFound });
+      const on = field(form, "permanent") === "1";
+      if (on && !teams.get(m.teamId)) return done(c, s, back, { kind: "err", text: t.badRequest });
+      await d.setPermanent(m, on);
+      return done(c, s, back, { kind: "ok", text: on ? t.team.madePermanent : t.admin.revoked });
     });
 
     adminPost("/admin/sites/:id/delete", async (c, { s, form }) => {

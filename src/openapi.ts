@@ -50,7 +50,7 @@ export function openapi(config: Config) {
     openapi: "3.1.0",
     info: {
       title: `${APP_NAME} API`,
-      version: "0.7.0",
+      version: "0.8.0",
       description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site. Teams can also sign in in a browser at /login (team key) to manage their sites; the admin signs in at /admin/login. Those browser routes use session cookies and are not part of this API.`,
       license: { name: "MIT", identifier: "MIT" },
     },
@@ -81,7 +81,14 @@ export function openapi(config: Config) {
           type: "object",
           required: ["files"],
           properties: {
-            ttlHours: { type: "number", minimum: config.minTtlHours, maximum: config.maxTtlHours },
+            ttlHours: {
+              description: `${config.minTtlHours}-${config.maxTtlHours}, or "permanent" (teams allowed to)`,
+              oneOf: [
+                { type: "number", minimum: config.minTtlHours, maximum: config.maxTtlHours },
+                { type: "string", enum: ["permanent"] },
+              ],
+            },
+            permanent: { type: "boolean", description: 'Same as ttlHours: "permanent"' },
             files: { type: "array", items: { $ref: "#/components/schemas/FileInput" } },
           },
         },
@@ -92,7 +99,12 @@ export function openapi(config: Config) {
             url: { type: "string", format: "uri" },
             createdAt: { type: "string", format: "date-time" },
             updatedAt: { type: "string", format: "date-time" },
-            expiresAt: { type: "string", format: "date-time" },
+            expiresAt: {
+              type: "string",
+              format: "date-time",
+              description: "9999-12-31T00:00:00.000Z for permanent sites",
+            },
+            permanent: { type: "boolean", description: "No expiry (team sites only)" },
             fileCount: { type: "integer" },
             totalBytes: { type: "integer" },
             title: { type: "string", description: "<title> of index.html, if any" },
@@ -135,6 +147,17 @@ export function openapi(config: Config) {
             name: { type: "string" },
             backend: { type: "boolean", description: "May its sites use KV/files?" },
             directory: { type: "boolean", description: "Listed in /api/directory?" },
+            permanent: { type: "boolean", description: "May publish permanent sites?" },
+            maxSites: { type: "integer", description: "Quota override (unset = server default)" },
+            maxMb: {
+              type: "integer",
+              description: "Quota override in MB (unset = server default)",
+            },
+            quota: {
+              type: "object",
+              properties: { sites: { type: "integer" }, mb: { type: "integer" } },
+              description: "Effective quota",
+            },
             keyPrefix: { type: "string", description: "First characters of the key" },
             liveSites: { type: "integer" },
             createdAt: { type: "string", format: "date-time" },
@@ -147,6 +170,9 @@ export function openapi(config: Config) {
             name: { type: "string", maxLength: 80 },
             backend: { type: "boolean", default: false },
             directory: { type: "boolean", default: true },
+            permanent: { type: "boolean", description: "Default: same as backend" },
+            maxSites: { type: ["integer", "null"], description: "null or 0 = server default" },
+            maxMb: { type: ["integer", "null"], description: "null or 0 = server default" },
           },
         },
         TeamWithKey: {
@@ -220,7 +246,15 @@ export function openapi(config: Config) {
           description:
             "No auth needed (guest upload). Send X-Team-Key to attach the site to a team.",
           security: [{}, { teamKey: [] }],
-          parameters: [{ name: "ttlHours", in: "query", schema: { type: "number" } }],
+          parameters: [
+            {
+              name: "ttlHours",
+              in: "query",
+              schema: { type: "string" },
+              description: 'Hours, or "permanent"',
+            },
+            { name: "permanent", in: "query", schema: { type: "string", enum: ["1", "true"] } },
+          ],
           requestBody: uploadBody,
           responses: {
             "201": {
@@ -259,14 +293,20 @@ export function openapi(config: Config) {
           },
         },
         patch: {
-          summary: "Change the expiry",
+          summary: "Change the expiry, or make the site permanent",
           operationId: "extendSite",
           security: [{ editToken: [] }],
+          description:
+            'Body { "ttlHours": N } sets a timed expiry (a permanent site becomes timed again; its ceiling counts from now). { "permanent": true } removes the expiry if the team may.',
           requestBody: {
-            content: json({ type: "object", properties: { ttlHours: { type: "number" } } }),
+            content: json({
+              type: "object",
+              properties: { ttlHours: { type: "number" }, permanent: { type: "boolean" } },
+            }),
           },
           responses: {
             "200": site("Updated"),
+            "403": err("PERMANENT_NOT_ALLOWED"),
             "404": err("Not found or bad token"),
             "410": err("Expired"),
           },
@@ -427,6 +467,25 @@ export function openapi(config: Config) {
       },
       "/api/admin/sites/{id}": {
         parameters: [idParam],
+        patch: {
+          summary: "Make a team site permanent, or revoke it (admin)",
+          operationId: "adminSetPermanent",
+          security: [{ adminToken: [] }],
+          description:
+            "Revoking gives the site MAX_TTL_HOURS from now. Guest sites can never be permanent.",
+          requestBody: {
+            content: json({
+              type: "object",
+              required: ["permanent"],
+              properties: { permanent: { type: "boolean" } },
+            }),
+          },
+          responses: {
+            "200": site("Updated"),
+            "403": err("Guest site"),
+            "404": err("Not found"),
+          },
+        },
         delete: {
           summary: "Delete any site (admin)",
           operationId: "adminDeleteSite",
