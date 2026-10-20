@@ -220,6 +220,16 @@ export interface Strings {
     owner: string;
     noSites: string;
     total: (n: number, size: string) => string;
+    teamsCount: (n: number) => string;
+    liveTotal: (n: number) => string;
+    guestsCount: (n: number) => string;
+    serverBackendOn: string;
+    serverBackendOff: string;
+    turnOn: string;
+    turnOff: string;
+    createSub: string;
+    keyHelp: string;
+    docsLink: string;
   };
 }
 
@@ -506,6 +516,17 @@ const en: Strings = {
     owner: "Owner",
     noSites: "No sites match.",
     total: (n, size) => `${n} site${n === 1 ? "" : "s"} · ${size}`,
+    teamsCount: (n) => (n === 1 ? "1 team" : `${n} teams`),
+    liveTotal: (n) => (n === 1 ? "1 live team site" : `${n} live team sites`),
+    guestsCount: (n) => (n === 1 ? "1 guest site" : `${n} guest sites`),
+    serverBackendOn: "Data and files backend configured on this server",
+    serverBackendOff: "No data and files backend on this server yet",
+    turnOn: "Turn on",
+    turnOff: "Turn off",
+    createSub:
+      "The team key is shown once after creating. Give it to the team; they sign in with it.",
+    keyHelp: "Only the first characters of each key are shown.",
+    docsLink: "Read the teams guide",
   },
 };
 
@@ -776,6 +797,18 @@ const ar: Strings = {
     owner: "المالك",
     noSites: "لا توجد مواقع مطابقة.",
     total: (n, size) => `${iso(n)} موقع · ${iso(size)}`,
+    teamsCount: (n) => (n === 1 ? "فريق واحد" : n === 2 ? "فريقان" : `${iso(n)} فرق`),
+    liveTotal: (n) =>
+      n === 1 ? "موقع فريق حيّ واحد" : n === 2 ? "موقعا فرق حيّان" : `${iso(n)} مواقع فرق حيّة`,
+    guestsCount: (n) =>
+      n === 1 ? "موقع زائر واحد" : n === 2 ? "موقعا زوار" : `${iso(n)} مواقع زوار`,
+    serverBackendOn: "الخدمة الخلفية للبيانات والملفات مضبوطة على هذا الخادم",
+    serverBackendOff: "لم تُضبط الخدمة الخلفية للبيانات والملفات على هذا الخادم بعد",
+    turnOn: "تفعيل",
+    turnOff: "إيقاف",
+    createSub: "يُعرض مفتاح الفريق مرة واحدة بعد الإنشاء. سلّمه للفريق ليدخل به.",
+    keyHelp: "تظهر الأحرف الأولى فقط من كل مفتاح.",
+    docsLink: "اقرأ دليل الفرق",
   },
 };
 

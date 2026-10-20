@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-10-20
+
+### Changed
+- **Admin console redesign.** `/admin` and `/admin/sites` (AR/EN) now use the same building blocks as
+  the team dashboard: page heading with the section switch and sign-out beside it, a status summary
+  (teams, live team sites, guest sites, whether the data-and-files backend is configured), the shared
+  table, panel and form styles, and the shared empty state. Team flags (data and files, home-page
+  listing) are shown as a badge with one "Turn on / Turn off" button, like a site's listing on the team
+  pages. The admin-only switch, tab and filter-bar styles are gone. No routes or behaviour changed.
+- On narrow screens every data table (team sites, KV keys, uploaded files, admin teams and sites) is
+  shown as a stack of cards, one per row, each value labelled.
+
+### Fixed
+- Mobile pages with a table no longer scroll sideways: the visually hidden table caption could escape
+  the table's scroll box and widen the page.
+
 ## [0.6.0] - 2026-10-20
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "marsa",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Marsa: a lightweight, self-hostable drop-in for static sites. Upload files or a ZIP, get a shareable link that expires on its own. No accounts.",
   "license": "MIT",

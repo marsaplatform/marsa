@@ -508,6 +508,40 @@ describe("admin console", () => {
     expect((await admin.get("/team")).status).toBe(303);
   });
 
+  it("renders with the same shared components as the team dashboard", async () => {
+    const s = await setup();
+    const t = await s.createTeam("A");
+    await s.api(
+      "POST",
+      "/api/sites",
+      { files: [{ path: "index.html", content: "<title>Team page</title>" }] },
+      { "x-team-key": t.key },
+    );
+    const { b } = await adminIn(s);
+    for (const path of ["/admin", "/ar/admin", "/admin/sites", "/ar/admin/sites"]) {
+      const html = await (await b.get(path)).text();
+      for (const cls of [
+        "page-heading with-aside",
+        "status-list",
+        'class="data stack"',
+        "head-tools",
+      ]) {
+        expect(html, `${path} ${cls}`).toContain(cls);
+      }
+      expect(html).toMatch(/aria-current="page"/);
+      expect(html).toContain('action="' + (path.startsWith("/ar") ? "/ar" : "") + '/logout"');
+      // no admin-only widgets and no inline script
+      expect(html).not.toMatch(/class="(switch|tabs|admin-bar|filter-bar)"/);
+      expect(html).not.toMatch(/<script>(?!<\/script>)|<script(?![^>]*src=)[^>]*>[^<]/);
+      expect(html).toMatch(/<td data-label="[^"]+"/);
+    }
+    // Each flag is a badge with the state plus one form that flips it.
+    const html = await (await b.get("/admin")).text();
+    expect(html).toMatch(/name="backend" value="1"/);
+    expect(html).toMatch(/name="directory" value="0"/);
+    expect(html).toContain('name="sites" value="delete"');
+  });
+
   it("is disabled without ADMIN_TOKEN", async () => {
     const s = await setup({ ADMIN_TOKEN: "" });
     expect((await s.app.request("/admin/login")).status).toBe(404);

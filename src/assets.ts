@@ -207,7 +207,9 @@ input[aria-invalid=true]{border-color:var(--danger)}
 .page-heading.with-aside{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap}
 .page-heading h1{font-size:clamp(30px,3.4vw,46px);letter-spacing:-.6px;line-height:1.3;margin-bottom:10px}
 .page-heading>div>p:not(.eyebrow),.page-heading>p{font-size:18px;max-width:62ch}
-.head-tools{display:flex;gap:10px}
+.head-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.segmented{display:flex;gap:6px;flex-wrap:wrap}
+.button[aria-current=page]{background:var(--soft);border-color:var(--accent);color:var(--accent)}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:28px}
 .panel>h2{margin-bottom:6px}
 .panel label{display:block;font-weight:650;font-size:15px;margin-top:14px;margin-bottom:6px}
@@ -228,7 +230,7 @@ label.check.small{font-size:13px;font-weight:500;margin:0}
 .dot-status.on{background:#2f8f5b}
 .dot-status.off{background:var(--line);border:1px solid var(--muted)}
 .dot-status.warn{background:#d39a1e}
-.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper)}
+.table-wrap{position:relative;overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper)}
 table.data{width:100%;border-collapse:collapse;font-size:15px}
 table.data th,table.data td{padding:12px 16px;text-align:start;border-bottom:1px solid var(--line);vertical-align:middle}
 table.data thead th{font-size:13px;font-weight:650;color:var(--muted);background:var(--surface);white-space:nowrap}
@@ -237,17 +239,20 @@ table.data tbody th{font-weight:650}
 table.data tbody th a:hover,table.data a.url:hover{text-decoration:underline;text-underline-offset:4px}
 table.data a.url{color:var(--accent);font-size:13px;word-break:break-all}
 table.data time{white-space:nowrap;font-size:14px}
+table.data th .meta{font-size:12.5px;font-weight:500;margin-top:2px}
+table.data td.cell-actions .acts,table.data td.cell-actions .inline-form{justify-content:flex-end}
+.table-note{font-size:13px;margin-top:10px}
+.filter-panel{padding:16px 20px;margin-bottom:16px}
+.filter-panel label{margin:0}
+.filter-panel select{min-width:220px}
+.checks-row{gap:8px 28px}
+.checks-row label.check{margin-top:4px}
 .value{font:12.5px/1.5 var(--mono);white-space:pre-wrap;word-break:break-all;display:block;max-width:46ch;max-height:7.5em;overflow:auto}
 .acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .inline-form{display:inline-flex;gap:8px;align-items:center;margin:0;flex-wrap:wrap}
 .badge{display:inline-block;font-size:12px;font-weight:650;padding:2px 10px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
 .badge.on{background:var(--soft);color:var(--accent);border-color:transparent}
 .badge.muted{color:var(--muted)}
-.switch{display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:4px;min-height:40px;font-size:14px;font-weight:600;color:var(--ink)}
-.switch .knob{width:40px;height:22px;border-radius:999px;background:var(--line);position:relative;transition:background .15s}
-.switch .knob::after{content:"";position:absolute;top:3px;inset-inline-start:3px;width:16px;height:16px;border-radius:50%;background:var(--paper);transition:inset-inline-start .15s;box-shadow:0 1px 2px #0003}
-.switch[aria-checked=true] .knob{background:var(--accent)}
-.switch[aria-checked=true] .knob::after{inset-inline-start:21px}
 .team-upload .drop{margin-top:16px}
 .form-row{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:8px}
 .form-row .ttl{margin-top:0}
@@ -261,14 +266,6 @@ table.data time{white-space:nowrap;font-size:14px}
 .file-list{list-style:none;padding:0;margin:0;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper)}
 .file-list li{display:flex;justify-content:space-between;gap:12px;padding:8px 14px;border-bottom:1px solid var(--line);font:13px/1.6 var(--mono)}
 .file-list li:last-child{border-bottom:0}
-.admin-bar{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid var(--line);margin-bottom:8px;flex-wrap:wrap}
-.tabs{display:flex;gap:24px;font-weight:650;font-size:15px}
-.tabs a{padding-block:12px;position:relative}
-.tabs a[aria-current=page]{color:var(--accent)}
-.tabs a[aria-current=page]::after{content:"";position:absolute;bottom:-1px;inset-inline:0;height:2px;background:var(--accent)}
-.filter-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-block:20px}
-.filter-bar label{font-weight:650;font-size:15px}
-.del-team{gap:10px}
 .empty-state{text-align:center;padding:48px 20px;border:1px dashed var(--line);border-radius:var(--radius);background:var(--paper)}
 .empty-state svg{width:56px;height:56px;color:var(--accent);opacity:.7}
 .empty-state h2{margin-block:10px 6px}
@@ -329,6 +326,20 @@ table.data time{white-space:nowrap;font-size:14px}
   .page-wide{padding-block:32px 64px}
   .panel{padding:20px}
   table.data th,table.data td{padding:10px 12px}
+  /* data tables become a stack of cards: one card per row, label beside each value */
+  .table-wrap:has(table.stack){border:0;background:none;overflow:visible}
+  table.data.stack,table.data.stack tbody,table.data.stack tr,table.data.stack th,table.data.stack td{display:block;width:100%}
+  table.data.stack thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  table.data.stack tr{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:12px;overflow:hidden}
+  table.data.stack tbody th{background:var(--surface);border-bottom:1px solid var(--line);font-size:16px}
+  table.data.stack td{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--line)}
+  table.data.stack tbody tr:last-child>*{border-bottom:1px solid var(--line)}
+  table.data.stack tbody tr>:last-child{border-bottom:0}
+  table.data.stack td::before{content:attr(data-label);font-size:13px;font-weight:650;color:var(--muted);flex-shrink:0}
+  table.data.stack td.cell-actions{display:block}
+  table.data.stack td.cell-actions::before{display:none}
+  table.data.stack td.cell-actions .acts,table.data.stack td.cell-actions .inline-form{justify-content:flex-start}
+  .filter-panel select{min-width:0;flex:1}
 }
 @media (max-width:520px){
   body{font-size:16px}

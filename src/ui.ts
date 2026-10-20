@@ -206,6 +206,9 @@ function pageHead(eyebrow: string, title: string, sub: string, aside = ""): stri
   return `<div class="page-heading${aside ? " with-aside" : ""}"><div><p class="eyebrow">${esc(eyebrow)}</p><h1>${title}</h1>${sub ? `<p>${esc(sub)}</p>` : ""}</div>${aside}</div>`;
 }
 
+const td = (label: string, inner: string, cls = "") =>
+  `<td data-label="${esc(label)}"${cls ? ` class="${cls}"` : ""}>${inner}</td>`;
+
 function emptyState(title: string, sub: string, action = ""): string {
   return `<div class="empty-state"><svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><rect x="10" y="14" width="44" height="36" rx="6" class="stroke"/><path d="M10 24h44M20 34h16M20 41h24" class="stroke"/></svg><h2 class="h3">${esc(title)}</h2><p>${esc(sub)}</p>${action}</div>`;
 }
@@ -565,11 +568,11 @@ export function teamHtml(lang: Lang, c: Config, o: TeamPageOpts): string {
         : `<span class="badge ${s.listed ? "on" : "muted"}">${esc(s.listed ? t.team.listed : t.team.hidden)}</span>`;
       return `<tr>
         <th scope="row"><a href="${href(`/team/sites/${s.id}`)}"><bdi>${esc(s.title)}</bdi></a></th>
-        <td><a href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a></td>
-        <td>${timeTag(lang, s.expiresAt)}</td>
-        <td>${esc(bytesLabel(lang, s.totalBytes))}</td>
-        <td>${listing}</td>
-        <td><div class="acts"><a class="button small ghost" href="${href(`/team/sites/${s.id}`)}">${esc(t.team.manage)}</a>${postForm(
+        ${td(t.common.link, `<a href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a>`)}
+        ${td(t.common.expires, timeTag(lang, s.expiresAt))}
+        ${td(t.common.size, esc(bytesLabel(lang, s.totalBytes)))}
+        ${td(STRINGS[lang].directory.title, listing)}
+        <td class="cell-actions"><div class="acts"><a class="button small ghost" href="${href(`/team/sites/${s.id}`)}">${esc(t.team.manage)}</a>${postForm(
           href(`/team/sites/${s.id}/delete`),
           o.csrf,
           `<button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
@@ -579,7 +582,7 @@ export function teamHtml(lang: Lang, c: Config, o: TeamPageOpts): string {
     })
     .join("");
   const table = o.sites.length
-    ? `<div class="table-wrap"><table class="data">
+    ? `<div class="table-wrap"><table class="data stack">
       <caption class="sr-only">${esc(t.team.sites)}</caption>
       <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.link)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(STRINGS[lang].directory.title)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`
@@ -663,7 +666,7 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
     const kvRows = bb.kv
       .map(
         (k) =>
-          `<tr><th scope="row">${ltr(k.key)}</th><td><code class="value" dir="ltr">${esc(k.value ?? "…")}</code></td><td>${postForm(
+          `<tr><th scope="row">${ltr(k.key)}</th>${td(t.team.value, `<code class="value" dir="ltr">${esc(k.value ?? "…")}</code>`)}<td class="cell-actions">${postForm(
             href(`${base}/kv/delete`),
             o.csrf,
             `<input type="hidden" name="key" value="${esc(k.key)}"><button class="button small danger" type="submit" aria-label="${esc(`${t.common.del}: ${k.key}`)}">${esc(t.common.del)}</button>`,
@@ -674,7 +677,7 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
     const fileRows = bb.files
       .map(
         (f) =>
-          `<tr><th scope="row"><a href="${esc(f.url)}" target="_blank" rel="noopener"><bdi>${esc(f.name)}</bdi></a></th><td>${esc(bytesLabel(lang, f.size))}</td><td>${timeTag(lang, f.createdAt)}</td><td>${postForm(
+          `<tr><th scope="row"><a href="${esc(f.url)}" target="_blank" rel="noopener"><bdi>${esc(f.name)}</bdi></a></th>${td(t.common.size, esc(bytesLabel(lang, f.size)))}${td(t.common.created, timeTag(lang, f.createdAt))}<td class="cell-actions">${postForm(
             href(`${base}/files/delete`),
             o.csrf,
             `<input type="hidden" name="fileId" value="${esc(f.id)}"><button class="button small danger" type="submit" aria-label="${esc(`${t.common.del}: ${f.name}`)}">${esc(t.common.del)}</button>`,
@@ -686,13 +689,13 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
     <h3>${esc(t.team.kvTitle)}</h3>
     ${
       bb.kv.length
-        ? `<div class="table-wrap"><table class="data"><thead><tr><th scope="col">${esc(t.team.key)}</th><th scope="col">${esc(t.team.value)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${kvRows}</tbody></table></div>${bb.moreKeys ? `<p class="meta">${esc(t.team.moreKeys(bb.moreKeys))}</p>` : ""}`
+        ? `<div class="table-wrap"><table class="data stack"><thead><tr><th scope="col">${esc(t.team.key)}</th><th scope="col">${esc(t.team.value)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${kvRows}</tbody></table></div>${bb.moreKeys ? `<p class="meta">${esc(t.team.moreKeys(bb.moreKeys))}</p>` : ""}`
         : `<p class="meta">${esc(t.team.kvEmpty)}</p>`
     }
     <h3>${esc(t.team.backendFilesTitle)}</h3>
     ${
       bb.files.length
-        ? `<div class="table-wrap"><table class="data"><thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(t.common.created)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${fileRows}</tbody></table></div>`
+        ? `<div class="table-wrap"><table class="data stack"><thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(t.common.created)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${fileRows}</tbody></table></div>`
         : `<p class="meta">${esc(t.team.backendFilesEmpty)}</p>`
     }`;
   }
@@ -763,11 +766,12 @@ export interface AdminTeamRow {
   createdAt: string;
 }
 
-function adminTabs(lang: Lang, active: "teams" | "sites", csrf: string): string {
+/** Section switch + sign-out, shown in the page heading like the team dashboard's tools. */
+function adminTools(lang: Lang, active: "teams" | "sites", csrf: string): string {
   const t = STRINGS[lang];
   const href = (p: string) => localePath(lang, p);
   const cur = (k: string) => (k === active ? ' aria-current="page"' : "");
-  return `<div class="admin-bar"><nav class="tabs" aria-label="${esc(t.admin.tabsLabel)}"><a href="${href("/admin")}"${cur("teams")}>${esc(t.admin.teamsTab)}</a><a href="${href("/admin/sites")}"${cur("sites")}>${esc(t.admin.sitesTab)}</a></nav>${postForm(
+  return `<div class="head-tools"><nav class="segmented" aria-label="${esc(t.admin.tabsLabel)}"><a class="button small ghost" href="${href("/admin")}"${cur("teams")}>${esc(t.admin.teamsTab)}</a><a class="button small ghost" href="${href("/admin/sites")}"${cur("sites")}>${esc(t.admin.sitesTab)}</a></nav>${postForm(
     href("/logout"),
     csrf,
     `<button class="button small ghost" type="submit">${esc(t.common.signOut)}</button>`,
@@ -781,56 +785,83 @@ export function adminTeamsHtml(
 ): string {
   const t = STRINGS[lang];
   const href = (p: string) => localePath(lang, p);
+  const live = o.teams.reduce((n, x) => n + x.liveSites, 0);
   const rows = o.teams
     .map((tm) => {
       const base = `/admin/teams/${tm.id}`;
+      // Same pattern as a site's "Listed / Hidden" on the team pages: a badge with
+      // the state and one button that flips it.
       const toggle = (field: "backend" | "directory", label: string) =>
-        postForm(
+        `<div class="acts"><span class="badge ${tm[field] ? "on" : "muted"}">${esc(tm[field] ? t.common.on : t.common.off)}</span>${postForm(
           href(`${base}/update`),
           o.csrf,
-          `<input type="hidden" name="${field}" value="${tm[field] ? "0" : "1"}"><button type="submit" class="switch" role="switch" aria-checked="${tm[field]}" aria-label="${esc(`${tm.name}: ${label}`)}"><span class="knob" aria-hidden="true"></span><span class="switch-text">${esc(tm[field] ? t.common.on : t.common.off)}</span></button>`,
-        );
+          `<input type="hidden" name="${field}" value="${tm[field] ? "0" : "1"}"><button type="submit" class="button small ghost" aria-label="${esc(`${tm[field] ? t.admin.turnOff : t.admin.turnOn}: ${label} · ${tm.name}`)}">${esc(tm[field] ? t.admin.turnOff : t.admin.turnOn)}</button>`,
+        )}</div>`;
       return `<tr>
-        <th scope="row"><bdi>${esc(tm.name)}</bdi><div class="meta" dir="ltr">${esc(tm.id)}</div></th>
-        <td>${toggle("backend", t.admin.backend)}</td>
-        <td>${toggle("directory", t.admin.directory)}</td>
-        <td><a href="${href(`/admin/sites?owner=${tm.id}`)}">${esc(String(tm.liveSites))}</a></td>
-        <td><code dir="ltr">${esc(tm.keyPrefix)}…</code></td>
-        <td><div class="acts">${postForm(href(`${base}/rotate`), o.csrf, `<button class="button small ghost" type="submit">${esc(t.admin.rotate)}</button>`, { confirm: t.admin.confirmRotate })}${postForm(
-          href(`${base}/delete`),
-          o.csrf,
-          `<label class="check small"><input type="checkbox" name="sites" value="delete"> ${esc(t.admin.alsoDeleteSites)}</label><button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
-          { confirm: t.admin.confirmDelete, cls: "inline-form del-team" },
-        )}</div></td>
+        <th scope="row"><bdi>${esc(tm.name)}</bdi><div class="meta ltr">${esc(tm.id)}</div></th>
+        ${td(t.admin.backend, toggle("backend", t.admin.backend))}
+        ${td(t.admin.directory, toggle("directory", t.admin.directory))}
+        ${td(t.admin.liveSites, `<a class="text-link" href="${href(`/admin/sites?owner=${tm.id}`)}">${esc(String(tm.liveSites))}</a>`)}
+        ${td(t.admin.key, `<code class="ltr">${esc(tm.keyPrefix)}…</code>`)}
+        ${td(
+          t.common.actions,
+          `<div class="acts">${postForm(href(`${base}/rotate`), o.csrf, `<button class="button small ghost" type="submit">${esc(t.admin.rotate)}</button>`, { confirm: t.admin.confirmRotate })}${postForm(
+            href(`${base}/delete`),
+            o.csrf,
+            `<label class="check small"><input type="checkbox" name="sites" value="delete"> ${esc(t.admin.alsoDeleteSites)}</label><button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
+            { confirm: t.admin.confirmDelete },
+          )}</div>`,
+          "cell-actions",
+        )}
       </tr>`;
     })
     .join("");
   const table = o.teams.length
-    ? `<div class="table-wrap"><table class="data">
+    ? `<div class="table-wrap"><table class="data stack">
       <caption class="sr-only">${esc(t.admin.teams)}</caption>
       <thead><tr><th scope="col">${esc(t.admin.name)}</th><th scope="col">${esc(t.admin.backend)}</th><th scope="col">${esc(t.admin.directory)}</th><th scope="col">${esc(t.admin.liveSites)}</th><th scope="col">${esc(t.admin.key)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`
-    : emptyState(t.admin.none, "");
+      <tbody>${rows}</tbody></table></div>
+      <p class="meta table-note">${esc(t.admin.keyHelp)}</p>`
+    : emptyState(t.admin.none, t.admin.createSub);
   const body = `<div class="wrap page-wide">
-  ${pageHead(t.admin.eyebrow, esc(t.admin.title), t.admin.sub)}
-  ${adminTabs(lang, "teams", o.csrf)}
+  ${pageHead(t.admin.eyebrow, esc(t.admin.title), t.admin.sub, adminTools(lang, "teams", o.csrf))}
   ${flashBox(lang, o.flash)}
-  <section class="block" aria-label="${esc(t.admin.teams)}">${table}</section>
-  <section class="block two-col">
+  <ul class="status-list">
+    <li><span class="dot-status on" aria-hidden="true"></span><strong>${esc(t.admin.teams)}:</strong> ${esc(t.admin.teamsCount(o.teams.length))}</li>
+    <li><span class="dot-status ${live ? "on" : "off"}" aria-hidden="true"></span>${esc(t.admin.liveTotal(live))}</li>
+    <li><span class="dot-status ${o.backendConfigured ? "on" : "warn"}" aria-hidden="true"></span>${esc(o.backendConfigured ? t.admin.serverBackendOn : t.admin.serverBackendOff)}</li>
+  </ul>
+  <section class="block" aria-labelledby="teams-title">
+    <h2 id="teams-title">${esc(t.admin.teams)}</h2>
+    ${table}
+  </section>
+  <section class="block" aria-labelledby="create-title">
     <form method="post" action="${href("/admin/teams")}" class="panel">
       ${csrfField(o.csrf)}
-      <h2 class="h3">${esc(t.admin.create)}</h2>
+      <h2 class="h3" id="create-title">${esc(t.admin.create)}</h2>
+      <p>${esc(t.admin.createSub)}</p>
       <label for="teamName">${esc(t.admin.name)}</label>
       <input id="teamName" name="name" type="text" required maxlength="80" dir="auto">
-      <label class="check"><input name="backend" type="checkbox" value="1"> ${esc(t.admin.backend)}</label>
-      <label class="check"><input name="directory" type="checkbox" value="1" checked> ${esc(t.admin.directory)}</label>
+      <div class="form-row checks-row">
+        <label class="check"><input name="backend" type="checkbox" value="1"> ${esc(t.admin.backend)}</label>
+        <label class="check"><input name="directory" type="checkbox" value="1" checked> ${esc(t.admin.directory)}</label>
+      </div>
       <button class="button" type="submit">${esc(t.admin.create)}</button>
     </form>
+  </section>
+  <section class="block two-col" aria-labelledby="how-title">
     <div>
-      <h2 class="h3">${esc(t.admin.howTitle)}</h2>
+      <h2 id="how-title">${esc(t.admin.howTitle)}</h2>
       <ul class="checks">${t.admin.how.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-      ${o.backendConfigured ? "" : `<p class="notice">${esc(t.team.backendNotConfigured)}</p>`}
+      <div class="actions"><a class="text-link" href="/docs/teams">${esc(t.admin.docsLink)}</a></div>
     </div>
+    <pre class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
+curl -s -X POST "${esc(c.publicUrl)}/api/sites" \\
+  -H "X-Team-Key: $MARSA_TEAM_KEY" \\
+  -H "Content-Type: application/zip" --data-binary @site.zip
+
+# Team members sign in at:
+# ${esc(c.publicUrl)}${esc(localePath(lang, "/login"))}</code></pre>
   </section>
 </div>`;
   return layout({
@@ -871,40 +902,53 @@ export function adminSitesHtml(
   const opt = (v: string, label: string) =>
     `<option value="${esc(v)}"${o.owner === v ? " selected" : ""}>${esc(label)}</option>`;
   const total = o.sites.reduce((n, s) => n + s.totalBytes, 0);
+  const guests = o.sites.filter((s) => !s.owner).length;
   const rows = o.sites
     .map(
       (s) => `<tr>
       <th scope="row"><bdi>${esc(s.title)}</bdi></th>
-      <td>${s.owner ? `<a href="${href(`/admin/sites?owner=${s.ownerId}`)}"><bdi>${esc(s.owner)}</bdi></a>` : `<span class="badge muted">${esc(t.common.guest)}</span>`}</td>
-      <td><a href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a></td>
-      <td>${timeTag(lang, s.expiresAt)}</td>
-      <td>${esc(bytesLabel(lang, s.totalBytes))}</td>
-      <td>${postForm(
-        href(`/admin/sites/${s.id}/delete`),
-        o.csrf,
-        `<input type="hidden" name="owner" value="${esc(o.owner)}"><button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
-        { confirm: t.team.confirmDelete },
-      )}</td></tr>`,
+      ${td(t.admin.owner, s.owner ? `<a class="text-link" href="${href(`/admin/sites?owner=${s.ownerId}`)}"><bdi>${esc(s.owner)}</bdi></a>` : `<span class="badge muted">${esc(t.common.guest)}</span>`)}
+      ${td(t.common.link, `<a href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a>`)}
+      ${td(t.common.expires, timeTag(lang, s.expiresAt))}
+      ${td(t.common.size, esc(bytesLabel(lang, s.totalBytes)))}
+      ${td(
+        t.common.actions,
+        postForm(
+          href(`/admin/sites/${s.id}/delete`),
+          o.csrf,
+          `<input type="hidden" name="owner" value="${esc(o.owner)}"><button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
+          { confirm: t.team.confirmDelete },
+        ),
+        "cell-actions",
+      )}</tr>`,
     )
     .join("");
   const body = `<div class="wrap page-wide">
-  ${pageHead(t.admin.eyebrow, esc(t.admin.sitesTitle), t.admin.sitesSub)}
-  ${adminTabs(lang, "sites", o.csrf)}
+  ${pageHead(t.admin.eyebrow, esc(t.admin.sitesTitle), t.admin.sitesSub, adminTools(lang, "sites", o.csrf))}
   ${flashBox(lang, o.flash)}
-  <form method="get" action="${href("/admin/sites")}" class="filter-bar">
-    <label for="owner">${esc(t.admin.filter)}</label>
-    <select id="owner" name="owner">${opt("all", t.admin.all)}${opt("guest", t.admin.guests)}${o.teams.map((x) => opt(x.id, x.name)).join("")}</select>
-    <button class="button small ghost" type="submit">${esc(t.admin.apply)}</button>
-    <span class="meta">${esc(t.admin.total(o.sites.length, bytesLabel(lang, total)))}</span>
-  </form>
-  ${
-    o.sites.length
-      ? `<div class="table-wrap"><table class="data">
+  <ul class="status-list">
+    <li><span class="dot-status ${o.sites.length ? "on" : "off"}" aria-hidden="true"></span><strong>${esc(t.admin.sitesTab)}:</strong> ${esc(t.admin.total(o.sites.length, bytesLabel(lang, total)))}</li>
+    <li><span class="dot-status on" aria-hidden="true"></span>${esc(t.admin.liveTotal(o.sites.length - guests))}</li>
+    <li><span class="dot-status ${guests ? "warn" : "off"}" aria-hidden="true"></span>${esc(t.admin.guestsCount(guests))}</li>
+  </ul>
+  <section class="block" aria-labelledby="sites-title">
+    <h2 id="sites-title" class="sr-only">${esc(t.admin.sitesTitle)}</h2>
+    <form method="get" action="${href("/admin/sites")}" class="panel filter-panel">
+      <div class="form-row">
+        <label for="owner">${esc(t.admin.filter)}</label>
+        <select id="owner" name="owner">${opt("all", t.admin.all)}${opt("guest", t.admin.guests)}${o.teams.map((x) => opt(x.id, x.name)).join("")}</select>
+        <button class="button small" type="submit">${esc(t.admin.apply)}</button>
+      </div>
+    </form>
+    ${
+      o.sites.length
+        ? `<div class="table-wrap"><table class="data stack">
       <caption class="sr-only">${esc(t.admin.sitesTitle)}</caption>
       <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.admin.owner)}</th><th scope="col">${esc(t.common.link)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`
-      : emptyState(t.admin.noSites, "")
-  }
+        : emptyState(t.admin.noSites, t.admin.sitesSub)
+    }
+  </section>
 </div>`;
   return layout({
     lang,
