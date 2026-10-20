@@ -57,6 +57,22 @@ claude mcp add --transport http marsa-<siteId> \
   --header "Authorization: Bearer marsa_mcp_…"
 ```
 
+**Claude Desktop** (`claude_desktop_config.json`). It can't send a header to a remote server itself,
+so bridge with [`mcp-remote`](https://www.npmjs.com/package/mcp-remote):
+
+```json
+{
+  "mcpServers": {
+    "marsa-<siteId>": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://marsa.example.com/mcp/s/<siteId>",
+               "--header", "Authorization:${AUTH_HEADER}"],
+      "env": { "AUTH_HEADER": "Bearer marsa_mcp_…" }
+    }
+  }
+}
+```
+
 **VS Code** (`.vscode/mcp.json`):
 
 ```json

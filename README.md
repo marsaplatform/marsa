@@ -8,7 +8,7 @@ Turn any static page, HTML report or prototype into a shareable link in seconds,
 **edit token** to update, extend or delete it. It's one Node.js process and one data folder, with no
 database, and it's MIT licensed.
 
-> [العربية ↓](#بالعربي)
+> [العربية ↓](#بالعربي) · Hosted instance: <https://spaces.marsaplatform.com> · All Marsa projects: <https://marsaplatform.com/products>
 
 ## Why Marsa
 
@@ -130,8 +130,54 @@ const { url, expiresAt, id, editToken } = await res.json();
 Shell, Node.js and Python deploy scripts are in [`examples/agent/`](examples/agent). More details
 are in [docs/agents.md](docs/agents.md).
 
-Each site also has its own **MCP server** at `/mcp/s/<siteId>` (Streamable HTTP) with per-site
-read-only or read-write tokens made on the site page. See [docs/mcp.md](docs/mcp.md).
+### MCP per space
+
+Each site also has its own **MCP server** at `/mcp/s/<siteId>` (Streamable HTTP, stateless), e.g.
+`https://spaces.marsaplatform.com/mcp/s/<siteId>` on the hosted instance. Create a read-only or
+read-write token (`marsa_mcp_…`, shown once) on the site page of the team dashboard, then:
+
+**Cursor** (`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "marsa-<siteId>": {
+      "url": "https://spaces.marsaplatform.com/mcp/s/<siteId>",
+      "headers": { "Authorization": "Bearer marsa_mcp_…" }
+    }
+  }
+}
+```
+
+**Claude Code**:
+
+```bash
+claude mcp add --transport http marsa-<siteId> \
+  https://spaces.marsaplatform.com/mcp/s/<siteId> \
+  --header "Authorization: Bearer marsa_mcp_…"
+```
+
+**Claude Desktop** (`claude_desktop_config.json`, via [`mcp-remote`](https://www.npmjs.com/package/mcp-remote)
+because the token goes in a header):
+
+```json
+{
+  "mcpServers": {
+    "marsa-<siteId>": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://spaces.marsaplatform.com/mcp/s/<siteId>",
+               "--header", "Authorization:${AUTH_HEADER}"],
+      "env": { "AUTH_HEADER": "Bearer marsa_mcp_…" }
+    }
+  }
+}
+```
+
+Tools: `get_site_info`, `list_files`, `read_file` (read-only) and `replace_site_files` (read-write);
+with the team backend also `kv_list`, `kv_get`, `list_uploads` (read-only) and `kv_put`, `kv_delete`,
+`upload_file`, `delete_file` (read-write). A token only sees the tools its scope allows. Without a
+valid token the endpoint answers `401`. Example prompt: *"List the files in this space and summarise
+index.html"*. Full reference: [docs/mcp.md](docs/mcp.md).
 
 ### Managing with the token
 
@@ -281,6 +327,14 @@ Marsa is open source because a place to drop work should be one you control:
 
 <div dir="rtl">
 
+## Sibling Marsa projects · مشاريع مرسى الشقيقة
+
+| Project | What | Link |
+| --- | --- | --- |
+| **Atlas MCP · أطلس** | Source-cited migration & asylum services, organizations and legal references for Egypt (21 tools, no key) | <https://atlas.marsaplatform.com/mcp> · [GitHub](https://github.com/marsaplatform/atlas-mcp) |
+| **ERX · مرصد مصر البحثي** | Egypt Research Commons: research archive + MCP for Egyptian public affairs (hosted MCP needs a free API key) | <https://egypt-research.marsaplatform.com> · [GitHub](https://github.com/marsaplatform/erx-mcp) |
+| **Malja MCP · ملجأ** | Humanitarian & refugee data (UNHCR, World Bank, HDX, ReliefWeb) with sources; self-hosted, hosted endpoint coming soon | [Project page](https://spaces.marsaplatform.com/s/k3sb9ww3dj/) |
+
 ## بالعربي
 
 **Marsa هو المرسى اللي شغل الـ AI agent بتاعك بيرسى فيه.**
@@ -320,6 +374,9 @@ npm install && npm run dev
 - **الـ API**: `POST /api/sites` بملف zip أو JSON، والرد فيه `url` و`editToken`.
 - **الـ agents**: وجّه الـ agent لـ `/llms.txt` أو ادّيله البرومبت اللي في `examples/agent/prompt.md`.
 - **الإدارة**: `PUT` و`PATCH` و`DELETE` على `/api/sites/<id>` بالهيدر `Authorization: Bearer <editToken>`.
+- **MCP لكل مساحة**: كل موقع ليه خادم MCP على `/mcp/s/<siteId>` (مثلًا `https://spaces.marsaplatform.com/mcp/s/<siteId>`). اعمل توكن قراءة بس أو قراءة وكتابة من صفحة الموقع في لوحة الفريق (بيظهر مرة واحدة)، وابعته في الهيدر `Authorization: Bearer marsa_mcp_…`. إعدادات Cursor وClaude Code وClaude Desktop في القسم الإنجليزي فوق وفي [`docs/mcp.md`](docs/mcp.md).
+
+النسخة المستضافة: <https://spaces.marsaplatform.com> · كل مشاريع مرسى: <https://marsaplatform.com/products>
 
 الدليل الكامل بالعربي في [`docs/ar/guide.md`](docs/ar/guide.md) وعلى `/ar/docs`.
 
