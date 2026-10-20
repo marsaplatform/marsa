@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { APP_CSS, APP_JS } from "./assets.js";
+import { mountBackendRoutes } from "./backend/routes.js";
+import type { SiteBackend } from "./backend/types.js";
 import { APP_NAME } from "./brand.js";
 import { clientIp } from "./client-ip.js";
 import type { Config } from "./config.js";
@@ -20,8 +22,10 @@ import {
 import { llmsTxt } from "./llms.js";
 import { openapi } from "./openapi.js";
 import { RateLimiter } from "./rate-limit.js";
+import { SDK_JS } from "./sdk.js";
 import { APP_CSP, baseHeaders, SITE_CSP } from "./security.js";
 import { publicMeta, type SiteMeta, type SiteStore } from "./store.js";
+import { removeSite, sweepExpired } from "./sweep.js";
 import { bearer, hashToken, newEditToken, newSiteId, safeEqual } from "./tokens.js";
 import {
   docPageHtml,
@@ -40,6 +44,8 @@ export interface AppDeps {
   store: SiteStore;
   /** Rendered guide pages; loaded from docs/ when omitted. */
   docs?: DocPage[];
+  /** Optional data/files backend (Appwrite). null/omitted = off. */
+  backend?: SiteBackend | null;
   limiter?: RateLimiter;
   now?: () => number;
 }
@@ -54,6 +60,7 @@ export function createApp({
   limiter = new RateLimiter(),
   now = Date.now,
   docs = loadDocs(config.publicUrl),
+  backend = null,
 }: AppDeps) {
   const app = new Hono();
   /** Language for pages outside the /ar tree: Arabic if the browser prefers it. */
@@ -193,6 +200,16 @@ export function createApp({
       maxSiteBytes: config.maxSiteBytes,
       maxFiles: config.maxFiles,
       uploadsPerHour: config.uploadsPerHour,
+      backend: backend
+        ? {
+            enabled: true,
+            kind: backend.kind,
+            publicRead: config.backend.publicRead,
+            maxValueBytes: config.backend.maxValueBytes,
+            maxKeys: config.backend.maxKeys,
+            maxFiles: config.backend.maxFiles,
+          }
+        : { enabled: false },
     }),
   );
 
@@ -251,9 +268,12 @@ export function createApp({
   app.delete("/api/sites/:id", async (c) => {
     const meta = await authorizeSite(c);
     if (meta instanceof Response) return meta;
-    await store.delete(meta.id);
+    await removeSite(store, backend, meta.id);
     return c.body(null, 204);
   });
+
+  // ---- optional per-site data/files backend --------------------------------
+  mountBackendRoutes(app, { config, store, backend, now, uploadRate });
 
   // ---- optional self-host admin (enabled only when ADMIN_TOKEN is set) -----
   app.use("/api/admin/*", async (c, next) => {
@@ -278,10 +298,12 @@ export function createApp({
   app.delete("/api/admin/sites/:id", async (c) => {
     const id = c.req.param("id");
     if (!(await store.exists(id))) return apiError(c, 404, "NOT_FOUND", "site not found");
-    await store.delete(id);
+    await removeSite(store, backend, id);
     return c.body(null, 204);
   });
-  app.post("/api/admin/sweep", async (c) => c.json({ removed: await store.sweepExpired(now()) }));
+  app.post("/api/admin/sweep", async (c) =>
+    c.json({ removed: await sweepExpired(store, backend, now()) }),
+  );
 
   // ---- the app's own UI ---------------------------------------------------
   const appPage = (c: Context, html: string, status = 200) => {
@@ -326,6 +348,10 @@ export function createApp({
   );
   app.get("/favicon.svg", asset("image/svg+xml", FAVICON_SVG));
   app.get("/favicon.ico", (c) => c.redirect("/favicon.svg", 302));
+  app.get("/sdk.js", (c) => {
+    c.header("Access-Control-Allow-Origin", "*");
+    return asset("text/javascript; charset=utf-8", SDK_JS)(c);
+  });
   app.get("/assets/app.js", asset("text/javascript; charset=utf-8", APP_JS));
   app.get("/assets/app.css", asset("text/css; charset=utf-8", APP_CSS));
 

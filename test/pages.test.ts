@@ -95,6 +95,7 @@ describe("docs", () => {
       "managing",
       "use-cases",
       "self-hosting",
+      "backend",
     ]) {
       expect(html).toContain(`/docs/${slug}`);
     }
@@ -191,6 +192,7 @@ describe("examples", () => {
     "event-page",
     "class-assignment",
     "ci-preview/site",
+    "backend-notes",
   ];
   for (const name of sites) {
     it(`publishes examples/${name}`, async () => {

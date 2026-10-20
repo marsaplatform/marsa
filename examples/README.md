@@ -10,6 +10,7 @@ and places in them are **fictional**.
 | [`event-page/`](event-page) | A temporary event page |
 | [`class-assignment/`](class-assignment) | A student's class assignment |
 | [`ci-preview/`](ci-preview) | A GitHub Actions workflow that posts a preview link for each PR, plus a sample built site |
+| [`backend-notes/`](backend-notes) | A live page reading data an agent writes (needs the optional [backend](../docs/backend.md)) |
 | [`agent/`](agent) | A prompt plus deploy scripts (shell, Node.js, Python) for agents |
 
 Publish any of them (replace the URL with your instance, e.g. `http://localhost:8080`):

@@ -13,6 +13,7 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY docs ./docs
+COPY scripts/appwrite-setup.mjs ./scripts/appwrite-setup.mjs
 COPY package.json LICENSE NOTICE ./
 RUN mkdir -p /data && chown node:node /data
 USER node

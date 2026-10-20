@@ -38,6 +38,18 @@ Use it when you have produced a web page, HTML report, dashboard or prototype th
 - Rejected: server scripts and executables (.php, .py, .sh, .exe, ...). Dotfiles are dropped.
 - Pages run in a browser sandbox: no cookies or localStorage; fetch() to CORS-enabled public APIs works.
 
+## Optional data/files backend
+
+${
+  config.appwrite
+    ? `Enabled on this instance. Per site, deleted with it. Writes need the edit token; reads are ${config.backend.publicRead ? "public while the site is live" : "token-only"}.
+
+- PUT ${base}/api/sites/<id>/kv/<key> with {"value": <any JSON>} (max ${Math.round(config.backend.maxValueBytes / 1024)} KB, ${config.backend.maxKeys} keys); GET/DELETE the same URL; GET ${base}/api/sites/<id>/kv lists keys
+- POST ${base}/api/sites/<id>/files (multipart field "file"); GET ${base}/api/sites/<id>/files lists; GET/DELETE ${base}/api/sites/<id>/files/<fileId>
+- In pages: <script src="/sdk.js"></script> then marsa.kv.get(key), marsa.files.list(). Never put the edit token in a page.`
+    : "Not enabled on this instance: the /api/sites/<id>/kv and /files routes answer 503 BACKEND_NOT_CONFIGURED. Static publishing works normally."
+}
+
 ## Errors
 
 JSON {"error": {"code", "message", "path"?}}. Codes: EMPTY_UPLOAD, INVALID_REQUEST, INVALID_PATH, ZIP_SLIP_REJECTED, INVALID_ZIP, FILE_TOO_LARGE, SITE_TOO_LARGE, TOO_MANY_FILES, BLOCKED_FILE_TYPE (415), RATE_LIMITED (429, see Retry-After), NOT_FOUND, EXPIRED (410). Fix the files and retry.
@@ -46,6 +58,7 @@ JSON {"error": {"code", "message", "path"?}}. Codes: EMPTY_UPLOAD, INVALID_REQUE
 
 - [API reference](${base}/docs/api)
 - [Guide for AI agents](${base}/docs/agents)
+- [Data & files backend](${base}/docs/backend)
 - [OpenAPI spec](${base}/openapi.json)
 `;
 }

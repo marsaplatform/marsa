@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-10-20
+
+### Added
+- Optional per-site data/files backend backed by Appwrite (Cloud or self-hosted), off by default:
+  KV (`/api/sites/:id/kv[/:key]`) and files (`/api/sites/:id/files[/:fileId]`), writes with the
+  edit token, public reads by default (`BACKEND_PUBLIC_READ`), per-site caps, CORS for sandboxed pages.
+- Browser SDK at `/sdk.js` (`marsa.kv.*`, `marsa.files.*`, `marsa.auth()`).
+- Site deletion and expiry also purge the site's backend data.
+- `scripts/appwrite-setup.mjs` creates the table, columns, index and bucket.
+- Docs: `docs/backend.md`, a "Do I need to install anything?" section, Arabic guide section;
+  backend routes in `/openapi.json` and `/llms.txt`; `examples/backend-notes`.
+- Without `APPWRITE_*` config every backend route answers `503 BACKEND_NOT_CONFIGURED`;
+  a partial config fails at startup naming the missing variables.
+
 ## [0.2.0] - 2026-10-20
 
 ### Added

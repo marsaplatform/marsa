@@ -1,0 +1,6 @@
+body{margin:0;font:17px/1.6 system-ui,sans-serif;background:#f5f8f7;color:#15232b}
+main{max-width:680px;margin:0 auto;padding:48px 24px}
+.muted{color:#5d6b73}
+ul{background:#fff;border:1px solid #dfe7e4;border-radius:14px;padding:16px 16px 16px 36px}
+li{margin:6px 0}
+pre{background:#10232d;color:#d5ecf2;padding:14px;border-radius:10px;overflow:auto;font-size:13px}

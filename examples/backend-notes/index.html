@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team notes · fictional demo</title>
+<link rel="stylesheet" href="style.css">
+<script src="/sdk.js"></script>
+</head>
+<body>
+<main>
+  <h1>Team notes</h1>
+  <p class="muted">A live page that reads data an agent writes with the optional Marsa backend. Fictional content.</p>
+  <ul id="notes"><li class="muted">Loading…</li></ul>
+  <p id="status" class="muted"></p>
+  <details>
+    <summary>How the agent updates this page</summary>
+    <pre>curl -X PUT "$MARSA_URL/api/sites/$ID/kv/notes" \
+  -H "Authorization: Bearer $EDIT_TOKEN" -H "Content-Type: application/json" \
+  -d '{"value": ["Demo for Example Client on Friday", "Draft the Q3 report"]}'</pre>
+  </details>
+</main>
+<script src="notes.js"></script>
+</body>
+</html>

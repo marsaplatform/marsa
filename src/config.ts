@@ -23,6 +23,27 @@ export interface Config {
   adminToken: string;
   /** How often the expiry sweeper runs, in seconds. */
   sweepIntervalSeconds: number;
+  /** Optional Appwrite-backed data/files backend. null = off (the default). */
+  appwrite: AppwriteConfig | null;
+  backend: BackendLimits;
+}
+
+export interface AppwriteConfig {
+  endpoint: string;
+  projectId: string;
+  /** Server-side only. Never sent to browsers. */
+  apiKey: string;
+  databaseId: string;
+  kvTableId: string;
+  bucketId: string;
+}
+
+export interface BackendLimits {
+  /** Anyone may read a live site's KV values and files (writes always need the edit token). */
+  publicRead: boolean;
+  maxValueBytes: number;
+  maxKeys: number;
+  maxFiles: number;
 }
 
 type Env = Record<string, string | undefined>;
@@ -63,6 +84,13 @@ export function loadConfig(env: Env = process.env): Config {
     trustProxy: bool(env, "TRUST_PROXY", false),
     adminToken: env.ADMIN_TOKEN?.trim() ?? "",
     sweepIntervalSeconds: int(env, "SWEEP_INTERVAL_SECONDS", 60, 5),
+    appwrite: appwriteConfig(env),
+    backend: {
+      publicRead: bool(env, "BACKEND_PUBLIC_READ", true),
+      maxValueBytes: int(env, "BACKEND_MAX_VALUE_KB", 64, 1) * 1024,
+      maxKeys: int(env, "BACKEND_MAX_KEYS", 1000, 1),
+      maxFiles: int(env, "BACKEND_MAX_FILES", 100, 1),
+    },
   };
   if (cfg.minTtlHours > cfg.maxTtlHours) {
     throw new Error("MIN_TTL_HOURS must be <= MAX_TTL_HOURS");
@@ -73,4 +101,40 @@ export function loadConfig(env: Env = process.env): Config {
   }
   if (cfg.maxFileBytes > cfg.maxSiteBytes) cfg.maxFileBytes = cfg.maxSiteBytes;
   return cfg;
+}
+
+const APPWRITE_REQUIRED = [
+  "APPWRITE_ENDPOINT",
+  "APPWRITE_PROJECT_ID",
+  "APPWRITE_API_KEY",
+  "APPWRITE_DATABASE_ID",
+] as const;
+
+/**
+ * The backend is enabled only when every required APPWRITE_* variable is set.
+ * None set = off (normal). Some but not all set = a startup error, so a typo
+ * doesn't silently disable it.
+ */
+function appwriteConfig(env: Env): AppwriteConfig | null {
+  const v = (k: string) => env[k]?.trim() ?? "";
+  const set = APPWRITE_REQUIRED.filter((k) => v(k));
+  if (set.length === 0) return null;
+  if (set.length < APPWRITE_REQUIRED.length) {
+    const missing = APPWRITE_REQUIRED.filter((k) => !v(k));
+    throw new Error(
+      `Appwrite backend is partly configured. Missing: ${missing.join(", ")}. Set them all, or none to keep the backend off.`,
+    );
+  }
+  const endpoint = v("APPWRITE_ENDPOINT").replace(/\/+$/, "");
+  if (!/^https?:\/\//.test(endpoint)) {
+    throw new Error("APPWRITE_ENDPOINT must be an http(s) URL, e.g. https://cloud.appwrite.io/v1");
+  }
+  return {
+    endpoint,
+    projectId: v("APPWRITE_PROJECT_ID"),
+    apiKey: v("APPWRITE_API_KEY"),
+    databaseId: v("APPWRITE_DATABASE_ID"),
+    kvTableId: v("APPWRITE_KV_TABLE_ID") || "marsa_kv",
+    bucketId: v("APPWRITE_BUCKET_ID") || "marsa_files",
+  };
 }

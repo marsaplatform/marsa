@@ -12,6 +12,7 @@ Marsa, it is replaced with that instance's real URL.
 | [Managing a site](managing.md) | Update, extend or delete with your edit token |
 | [Use cases](use-cases.md) | Reports, prototypes, event pages, assignments, CI previews |
 | [Self-hosting](self-hosting.md) | Docker, configuration, reverse proxy, admin |
+| [Data & files backend](backend.md) | Optional KV and files via Appwrite (Cloud or self-hosted) |
 | [دليل بالعربي](ar/guide.md) | The whole guide in Arabic |
 
 Machine-readable: [`/llms.txt`](https://marsa.example.com/llms.txt) and

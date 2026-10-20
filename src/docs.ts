@@ -52,6 +52,12 @@ const PAGES: { slug: string; lang: Lang; file: string; summary: string }[] = [
     summary: "Docker, configuration, reverse proxy and admin.",
   },
   {
+    slug: "backend",
+    lang: "en",
+    file: "backend.md",
+    summary: "Optional KV and files for pages and agents, backed by Appwrite.",
+  },
+  {
     slug: "guide",
     lang: "ar",
     file: "ar/guide.md",
