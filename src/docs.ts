@@ -64,6 +64,12 @@ const PAGES: { slug: string; lang: Lang; file: string; summary: string }[] = [
     summary: "Admin console: teams, team keys, backend access and the public directory.",
   },
   {
+    slug: "mcp",
+    lang: "en",
+    file: "mcp.md",
+    summary: "An MCP server per space: scoped tokens, client config and tools for AI agents.",
+  },
+  {
     slug: "guide",
     lang: "ar",
     file: "ar/guide.md",

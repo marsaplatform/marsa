@@ -10,3 +10,6 @@ export const PRODUCT_NAME = { en: "Marsa Spaces", ar: "مساحات مرسى" } 
 
 /** The parent platform the app links back to (header/footer). */
 export const PLATFORM_URL = "https://marsaplatform.com";
+
+/** Released version (kept in step with package.json). */
+export const APP_VERSION = "0.9.0";

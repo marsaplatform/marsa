@@ -205,6 +205,29 @@ export interface Strings {
     signedInAs: string;
     pickZip: string;
   };
+  mcp: {
+    title: string;
+    sub: string;
+    endpoint: string;
+    tokens: string;
+    none: string;
+    name: string;
+    namePlaceholder: string;
+    scope: string;
+    ro: string;
+    rw: string;
+    rwNote: string;
+    create: string;
+    created: string;
+    createdNote: string;
+    revoke: string;
+    revoked: string;
+    confirmRevoke: string;
+    tooMany: string;
+    snippets: string;
+    snippetNote: string;
+    tools: string;
+  };
   admin: {
     eyebrow: string;
     title: string;
@@ -531,6 +554,29 @@ const en: Strings = {
     valueTruncated: "Long value, shortened here.",
     signedInAs: "Signed in as",
     pickZip: "Choose files or a .zip",
+  },
+  mcp: {
+    title: "MCP access",
+    sub: "Let an AI agent (Claude, Cursor, VS Code…) read and work on this space over MCP. Each token is for this space only; revoke it any time.",
+    endpoint: "MCP endpoint",
+    tokens: "Tokens",
+    none: "No MCP tokens yet.",
+    name: "Name",
+    namePlaceholder: "e.g. Claude on my laptop",
+    scope: "Scope",
+    ro: "Read-only",
+    rw: "Read-write",
+    rwNote: "Read-write can replace the published files and change KV data and uploaded files.",
+    create: "Create token",
+    created: "MCP token created.",
+    createdNote: "Copy it now: it is shown only once. Put it in your MCP client config below.",
+    revoke: "Revoke",
+    revoked: "Token revoked.",
+    confirmRevoke: "Revoke this token? Clients using it stop working at once.",
+    tooMany: "A space can have at most 10 MCP tokens. Revoke one first.",
+    snippets: "Connect a client",
+    snippetNote: "Replace marsa_mcp_… with your token. Streamable HTTP; no install needed.",
+    tools: "Tools",
   },
   admin: {
     eyebrow: "Admin",
@@ -863,6 +909,29 @@ const ar: Strings = {
     valueTruncated: "قيمة طويلة، مختصرة هنا.",
     signedInAs: "دخلت باسم",
     pickZip: "اختر ملفات أو ملف zip",
+  },
+  mcp: {
+    title: "وصول MCP",
+    sub: "اسمح لوكيل ذكي (Claude أو Cursor أو VS Code…) أن يقرأ هذه المساحة ويعمل عليها عبر MCP. كل رمز خاص بهذه المساحة وحدها، ويمكنك إلغاؤه في أي وقت.",
+    endpoint: "عنوان MCP",
+    tokens: "الرموز",
+    none: "لا توجد رموز MCP بعد.",
+    name: "الاسم",
+    namePlaceholder: "مثلًا: Claude على جهازي",
+    scope: "الصلاحية",
+    ro: "قراءة فقط",
+    rw: "قراءة وكتابة",
+    rwNote: "صلاحية الكتابة تسمح باستبدال الملفات المنشورة وتعديل بيانات KV والملفات المرفوعة.",
+    create: "أنشئ رمزًا",
+    created: "تم إنشاء رمز MCP.",
+    createdNote: "انسخه الآن، فلن يظهر مرة أخرى. ضعه في إعدادات عميل MCP بالأسفل.",
+    revoke: "ألغِ",
+    revoked: "تم إلغاء الرمز.",
+    confirmRevoke: "إلغاء هذا الرمز؟ أي عميل يستخدمه سيتوقف فورًا.",
+    tooMany: "لكل مساحة 10 رموز MCP بحد أقصى. ألغِ رمزًا أولًا.",
+    snippets: "اربط عميلًا",
+    snippetNote: "استبدل marsa_mcp_… برمزك. النقل Streamable HTTP، ولا يحتاج تثبيت أي شيء.",
+    tools: "الأدوات",
   },
   admin: {
     eyebrow: "الإدارة",

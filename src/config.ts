@@ -30,6 +30,8 @@ export interface Config {
   backend: BackendLimits;
   /** Browser sign-in for teams and the admin (signed session cookies). */
   sessions: SessionConfig;
+  /** MCP endpoint limits (per token, and a server-wide daily cap on KV writes via MCP). */
+  mcp: { requestsPerMinute: number; writesPerHour: number; kvWritesPerDay: number };
   /** Default per-team quotas (the admin can override them per team). */
   teamMaxSites: number;
   teamMaxBytes: number;
@@ -121,6 +123,11 @@ export function loadConfig(env: Env = process.env): Config {
     adminToken: env.ADMIN_TOKEN?.trim() ?? "",
     sweepIntervalSeconds: int(env, "SWEEP_INTERVAL_SECONDS", 60, 5),
     cloudflare: cloudflareConfig(env),
+    mcp: {
+      requestsPerMinute: int(env, "MCP_REQUESTS_PER_MINUTE", 60, 1),
+      writesPerHour: int(env, "MCP_WRITES_PER_HOUR", 60, 1),
+      kvWritesPerDay: int(env, "MCP_KV_WRITES_PER_DAY", 500, 1),
+    },
     teamMaxSites: int(env, "TEAM_MAX_SITES", 50, 1),
     teamMaxBytes: int(env, "TEAM_MAX_MB", 200, 1) * MB,
     featuredSites: (env.FEATURED_SITES ?? "")

@@ -775,8 +775,14 @@ export interface KvRowView {
   truncated?: boolean;
 }
 
+export interface McpPanel {
+  endpoint: string;
+  tokens: { id: string; name: string; scope: "ro" | "rw"; prefix: string; createdAt: string }[];
+}
+
 export interface TeamSitePageOpts extends TeamPageOpts {
   site: TeamSiteRow & { files: [string, number][]; ceiling: string };
+  mcp?: McpPanel;
   backendBrowser:
     | { state: "off"; reason?: string }
     | {
@@ -919,6 +925,7 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
     ${backendStatus}
     ${backendHtml}
   </section>
+  ${o.mcp ? mcpSection(lang, o.mcp, o.csrf, href(base), s.id) : ""}
 </div>`;
   return layout({
     lang,
@@ -930,6 +937,60 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
     active: "team",
     noindex: true,
   });
+}
+
+function mcpSection(lang: Lang, m: McpPanel, csrf: string, base: string, siteId: string): string {
+  const t = STRINGS[lang];
+  const rows = m.tokens
+    .map(
+      (x) =>
+        `<tr><th scope="row"><bdi>${esc(x.name)}</bdi></th>${td(t.mcp.scope, `<span class="badge ${x.scope === "rw" ? "warn" : "on"}">${esc(x.scope === "rw" ? t.mcp.rw : t.mcp.ro)}</span>`)}${td(t.admin.key, `<code class="ltr">${esc(x.prefix)}…</code>`)}${td(t.common.created, timeTag(lang, x.createdAt))}<td class="cell-actions">${postForm(
+          `${base}/mcp/${x.id}/delete`,
+          csrf,
+          `<button class="button small danger" type="submit" aria-label="${esc(`${t.mcp.revoke}: ${x.name}`)}">${esc(t.mcp.revoke)}</button>`,
+          { confirm: t.mcp.confirmRevoke },
+        )}</td></tr>`,
+    )
+    .join("");
+  const table = m.tokens.length
+    ? `<div class="table-wrap"><table class="data stack" aria-labelledby="mcp-tokens-title"><thead><tr><th scope="col">${esc(t.mcp.name)}</th><th scope="col">${esc(t.mcp.scope)}</th><th scope="col">${esc(t.admin.key)}</th><th scope="col">${esc(t.common.created)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
+    : `<p class="meta">${esc(t.mcp.none)}</p>`;
+  const server = `marsa-${siteId}`;
+  const ep = esc(m.endpoint);
+  return `<section class="block mcp-block" id="mcp" aria-labelledby="mcp-title">
+    <h2 id="mcp-title">${esc(t.mcp.title)}</h2>
+    <p>${esc(t.mcp.sub)}</p>
+    <div class="copy-row mcp-endpoint"><strong>${esc(t.mcp.endpoint)}:</strong> <code id="mcpUrl" dir="ltr">${ep}</code><button type="button" class="button small ghost" data-copy="#mcpUrl" data-copied="${esc(t.common.copied)}">${esc(t.common.copy)}</button></div>
+    <h3 id="mcp-tokens-title">${esc(t.mcp.tokens)}</h3>
+    ${table}
+    <form method="post" action="${esc(`${base}/mcp`)}" class="panel mcp-create">
+      ${csrfField(csrf)}
+      <div class="form-row">
+        <label class="grow"><span>${esc(t.mcp.name)}</span><input name="name" type="text" required maxlength="60" dir="auto" placeholder="${esc(t.mcp.namePlaceholder)}"></label>
+        <label><span>${esc(t.mcp.scope)}</span><select name="scope"><option value="ro">${esc(t.mcp.ro)}</option><option value="rw">${esc(t.mcp.rw)}</option></select></label>
+        <button class="button" type="submit">${esc(t.mcp.create)}</button>
+      </div>
+      <p class="meta">${esc(t.mcp.rwNote)}</p>
+    </form>
+    <h3>${esc(t.mcp.snippets)}</h3>
+    <p class="meta">${esc(t.mcp.snippetNote)}</p>
+    <div class="two-col mcp-snippets">
+      <div><p class="snippet-label">Cursor · <code>.cursor/mcp.json</code> · Claude Desktop (Connectors)</p><pre class="code" dir="ltr"><code>{
+  "mcpServers": {
+    "${esc(server)}": {
+      "url": "${ep}",
+      "headers": { "Authorization": "Bearer marsa_mcp_…" }
+    }
+  }
+}</code></pre></div>
+      <div><p class="snippet-label">Claude Code</p><pre class="code" dir="ltr"><code>claude mcp add --transport http ${esc(server)} \
+  ${ep} \
+  --header "Authorization: Bearer marsa_mcp_…"</code></pre>
+      <p class="snippet-label">VS Code · <code>.vscode/mcp.json</code></p><pre class="code" dir="ltr"><code>{ "servers": { "${esc(server)}": {
+  "type": "http", "url": "${ep}",
+  "headers": { "Authorization": "Bearer marsa_mcp_…" } } } }</code></pre></div>
+    </div>
+  </section>`;
 }
 
 // ---- admin ---------------------------------------------------------------------

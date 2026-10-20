@@ -45,6 +45,9 @@ Every setting is an environment variable with a safe default. Copy
 | `LOGIN_ATTEMPTS_PER_15_MIN` | `10` | Sign-in attempts per client IP per 15 minutes |
 | `TEAM_MAX_SITES` | `50` | Default quota: live sites per team (admin can override per team) |
 | `TEAM_MAX_MB` | `200` | Default quota: MB across a team's live sites (admin can override per team) |
+| `MCP_REQUESTS_PER_MINUTE` | `60` | MCP requests per space token per minute (see [MCP](mcp.md)) |
+| `MCP_WRITES_PER_HOUR` | `60` | MCP write tool calls per token per hour |
+| `MCP_KV_WRITES_PER_DAY` | `500` | MCP `kv_put`/`kv_delete` calls per day, instance-wide (KV free plan: 1000/day) |
 | `FEATURED_SITES` | empty | Site ids for the home page's Featured card, comma-separated (first live one). Empty = newest listed page |
 
 Generate an admin token and a session secret with `openssl rand -hex 32`. Without `SESSION_SECRET`

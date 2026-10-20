@@ -24,6 +24,8 @@ export interface SiteMeta {
   permanent?: boolean;
   /** When the current timed life started (set when permanence ends); the TTL ceiling counts from here. */
   ttlFrom?: string;
+  /** Per-space MCP tokens (hashes only). */
+  mcpTokens?: import("./mcp.js").McpToken[];
   fileCount: number;
   totalBytes: number;
   files: Record<string, SiteFile>;
@@ -31,7 +33,7 @@ export interface SiteMeta {
 
 /** Public view of a site (never includes the token hash). */
 export function publicMeta(m: SiteMeta) {
-  const { tokenHash: _omit, ...rest } = m;
+  const { tokenHash: _omit, mcpTokens: _tokens, ...rest } = m;
   return rest;
 }
 

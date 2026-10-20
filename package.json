@@ -1,6 +1,6 @@
 {
   "name": "marsa",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Marsa: a lightweight, self-hostable drop-in for static sites. Upload files or a ZIP, get a shareable link that expires on its own. No accounts.",
   "license": "MIT",
@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@types/node": "^20.19.0",
     "@types/yauzl": "^3.4.0",
     "fflate": "^0.8.3",

@@ -14,6 +14,7 @@ Marsa, it is replaced with that instance's real URL.
 | [Self-hosting](self-hosting.md) | Docker, configuration, reverse proxy, admin |
 | [Data & files backend](backend.md) | Optional KV and files via Cloudflare (Workers KV + R2) |
 | [Teams](teams.md) | Admin console, team keys, backend access per team, public directory |
+| [MCP per space](mcp.md) | Connect Claude, Cursor or VS Code to one space with a scoped token |
 | [دليل بالعربي](ar/guide.md) | The whole guide in Arabic |
 
 Machine-readable: [`/llms.txt`](https://marsa.example.com/llms.txt) and

@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-10-20
+
+### Added
+- **MCP per space.** Every site has a Streamable HTTP MCP endpoint at `/mcp/s/<siteId>` (stateless JSON;
+  protocol versions 2025-11-25, 2025-06-18 and 2025-03-26; `initialize`, `ping`, `tools/list` and
+  `tools/call`).
+- **Scoped tokens** are created, listed and revoked in the new **MCP access** section of the site page.
+  - A token is `marsa_mcp_…`, it is shown once and only a SHA-256 hash is stored.
+  - Scopes are read-only and read-write, with up to 10 tokens per site.
+  - Tokens are never exposed by `GET /api/sites/<id>`.
+- **Read-only tools:** `get_site_info`, `list_files` and `read_file` (text files up to 256 KB). With the
+  backend: `kv_list`, `kv_get` and `list_uploads`.
+- **Read-write tools:** `replace_site_files`. With the backend: `kv_put`, `kv_delete`, `upload_file` and
+  `delete_file`.
+- Backend tools only appear for teams with backend access.
+- The site page has copy-ready snippets for Cursor, Claude Code and VS Code, with a placeholder token.
+- **Limits:**
+  - `MCP_REQUESTS_PER_MINUTE` (60 per token).
+  - `MCP_WRITES_PER_HOUR` (60 per token).
+  - `MCP_KV_WRITES_PER_DAY` (500 for the whole instance, half of Cloudflare KV's free 1000 writes a day).
+- **Protections:** the Origin check, the MCP-Protocol-Version check and rejecting batches.
+- Docs: `docs/mcp.md`, an Arabic section, `llms.txt` and the env reference.
+
+### Fixed
+- Flash redirects to an in-page anchor keep the flash parameter before the `#fragment`.
+
 ## [0.8.0] - 2026-10-20
 
 ### Added

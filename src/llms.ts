@@ -34,6 +34,10 @@ Use it when you have produced a web page, HTML report, dashboard or prototype th
 
 If the operator gave you a team key, add the header X-Team-Key: <team key> to POST ${base}/api/sites. The site then belongs to that team (it may get the data/files backend and be listed in the public directory at ${base}/api/directory). Never put the team key in a page. A wrong key answers 401 INVALID_TEAM_KEY; omit the header to upload as a guest. Humans on the team can sign in at ${base}/login with the same key to manage the team's sites in a dashboard (publish, replace, extend, delete, browse KV and files).
 
+## MCP per space
+
+Each site has a Streamable HTTP MCP server at ${base}/mcp/s/<siteId>. Auth: Authorization: Bearer marsa_mcp_... (a per-site token a team member creates on the site page; read-only or read-write). Tools: get_site_info, list_files, read_file, replace_site_files (rw), and with the backend kv_list, kv_get, kv_put, kv_delete, list_uploads, upload_file, delete_file.
+
 ## Limits on this instance
 
 - ttlHours: ${config.minTtlHours}-${config.maxTtlHours} (default ${config.defaultTtlHours}); a link never outlives created + ${config.maxTtlHours}h

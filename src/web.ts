@@ -6,6 +6,7 @@ import type { Config } from "./config.js";
 import { UploadError } from "./errors.js";
 import { type Lang, STRINGS } from "./i18n.js";
 import type { UploadEntry } from "./ingest.js";
+import { addMcpToken, cleanTokenName, MAX_MCP_TOKENS } from "./mcp.js";
 import type { RateLimiter } from "./rate-limit.js";
 import { fingerprint, type Session, type Sessions, sameOrigin } from "./session.js";
 import type { SiteMeta, SiteStore } from "./store.js";
@@ -117,7 +118,12 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
 
   /** Redirect after a POST (or JSON for the page script). */
   const done = (c: Context, s: Session, to: string, flash?: Flash) => {
-    const url = flash ? `${to}${to.includes("?") ? "&" : "?"}f=${putFlash(s, flash)}` : to;
+    const hashAt = to.indexOf("#");
+    const path = hashAt < 0 ? to : to.slice(0, hashAt);
+    const hash = hashAt < 0 ? "" : to.slice(hashAt);
+    const url = flash
+      ? `${path}${path.includes("?") ? "&" : "?"}f=${putFlash(s, flash)}${hash}`
+      : to;
     if (wantsJson(c)) return c.json({ ok: flash?.kind !== "err", redirect: url });
     return c.redirect(url, 303);
   };
@@ -370,6 +376,16 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           .sort((a, b) => a[0].localeCompare(b[0])),
         ceiling: new Date(d.ceilingOf(m)).toISOString(),
       };
+      const mcp = {
+        endpoint: `${config.publicUrl}/mcp/s/${m.id}`,
+        tokens: (m.mcpTokens ?? []).map(({ id, name, scope, prefix, createdAt }) => ({
+          id,
+          name,
+          scope,
+          prefix,
+          createdAt,
+        })),
+      };
       return page(
         c,
         teamSiteHtml(lang, config, {
@@ -378,6 +394,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           sites: [],
           site,
           backendBrowser,
+          mcp,
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
         }),
@@ -455,6 +472,30 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       await store.updateMeta(m);
       d.invalidateDirectory();
       return done(c, s, back, { kind: "ok", text: t.team.listingSaved });
+    });
+
+    sitePost("mcp", async (c, { s, m, form, back }) => {
+      const name = cleanTokenName(field(form, "name"));
+      const scope = field(form, "scope") === "rw" ? "rw" : "ro";
+      if (!name) return done(c, s, back, { kind: "err", text: t.badRequest });
+      if ((m.mcpTokens ?? []).length >= MAX_MCP_TOKENS) {
+        return done(c, s, back, { kind: "err", text: t.mcp.tooMany });
+      }
+      const { secret } = addMcpToken(m, name, scope, now());
+      await store.updateMeta(m);
+      return done(c, s, `${back}#mcp`, {
+        kind: "ok",
+        text: t.mcp.created,
+        secret: { label: `${t.mcp.tokens}: ${name}`, note: t.mcp.createdNote, value: secret },
+      });
+    });
+
+    sitePost("mcp/:tid/delete", async (c, { s, m, back }) => {
+      const tid = c.req.param("tid");
+      m.mcpTokens = (m.mcpTokens ?? []).filter((x) => x.id !== tid);
+      if (!m.mcpTokens.length) delete m.mcpTokens;
+      await store.updateMeta(m);
+      return done(c, s, `${back}#mcp`, { kind: "ok", text: t.mcp.revoked });
     });
 
     const backendFor = (team: Team) =>

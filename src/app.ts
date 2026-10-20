@@ -22,6 +22,7 @@ import {
   type UploadEntry,
 } from "./ingest.js";
 import { llmsTxt } from "./llms.js";
+import { mountMcpRoutes } from "./mcp.js";
 import { openapi } from "./openapi.js";
 import { RateLimiter } from "./rate-limit.js";
 import { SDK_JS } from "./sdk.js";
@@ -556,6 +557,9 @@ export function createApp({
     invalidateDirectory();
     return c.body(null, 204);
   });
+
+  // ---- one MCP server per space ---------------------------------------------
+  mountMcpRoutes(app, { config, store, teams, backend, limiter, now, siteUrl, replaceSite });
 
   // ---- optional per-site data/files backend --------------------------------
   mountBackendRoutes(app, { config, store, backend, teams, now, uploadRate });

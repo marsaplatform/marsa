@@ -129,6 +129,9 @@ const { url, expiresAt, id, editToken } = await res.json();
 Shell, Node.js and Python deploy scripts are in [`examples/agent/`](examples/agent). More details
 are in [docs/agents.md](docs/agents.md).
 
+Each site also has its own **MCP server** at `/mcp/s/<siteId>` (Streamable HTTP) with per-site
+read-only or read-write tokens made on the site page. See [docs/mcp.md](docs/mcp.md).
+
 ### Managing with the token
 
 ```bash
