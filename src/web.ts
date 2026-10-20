@@ -13,6 +13,7 @@ import type { SiteMeta, SiteStore } from "./store.js";
 import { cleanTeamName, type Team, type TeamPatch, type TeamStore } from "./teams.js";
 import { safeEqual } from "./tokens.js";
 import {
+  type AdminSiteRow,
   adminSitesHtml,
   adminTeamsHtml,
   type Flash,
@@ -23,6 +24,7 @@ import {
   teamHtml,
   teamSiteHtml,
 } from "./ui.js";
+import type { VisitCounter, VisitSummary } from "./visits.js";
 
 export interface WebDeps {
   config: Config;
@@ -48,6 +50,7 @@ export interface WebDeps {
   setPermanent: (meta: SiteMeta, on: boolean) => Promise<SiteMeta>;
   quotaOf: (team: Team) => { sites: number; bytes: number };
   usageOf: (team: Team, except?: string) => Promise<{ sites: number; bytes: number }>;
+  visits: VisitCounter;
   siteUrl: (id: string) => string;
   invalidateDirectory: () => void;
   siteCounts: () => Promise<Map<string, number>>;
@@ -208,6 +211,15 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     unlisted: !!m.unlisted,
     permanent: !!m.permanent,
   });
+  const withVisits = async <T extends { id: string; visits?: VisitSummary }>(rows: T[]) => {
+    if (!d.visits.enabled) return rows;
+    await Promise.all(
+      rows.map(async (r) => {
+        r.visits = await d.visits.summary(r.id);
+      }),
+    );
+    return rows;
+  };
   const teamInfo = async (team: Team) => ({
     team,
     quota: d.quotaOf(team),
@@ -296,6 +308,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         .filter((m) => m.teamId === team.id && live(m))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .map((m) => teamRow(m, team));
+      await withVisits(sites);
       return page(
         c,
         teamHtml(lang, config, {
@@ -371,6 +384,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       }
       const site = {
         ...teamRow(m, team),
+        visits: d.visits.enabled ? await d.visits.summary(m.id) : undefined,
         files: Object.entries(m.files)
           .map(([p, f]) => [p, f.size] as [string, number])
           .sort((a, b) => a[0].localeCompare(b[0])),
@@ -700,8 +714,9 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             expiresAt: m.expiresAt,
             totalBytes: m.totalBytes,
             permanent: !!m.permanent,
-          };
+          } as AdminSiteRow;
         });
+      await withVisits(sites);
       return page(
         c,
         adminSitesHtml(lang, config, {

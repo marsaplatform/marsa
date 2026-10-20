@@ -141,6 +141,21 @@ export interface Strings {
     signedOut: string;
     expired: string;
   };
+  visits: {
+    title: string;
+    column: string;
+    views: string;
+    visitors: string;
+    today: string;
+    last7: string;
+    last30: string;
+    short: (d7: string, d30: string) => string;
+    chart: (total: string) => string;
+    day: (day: string, views: string, visitors: string) => string;
+    privacy: string;
+    off: string;
+    adminTotal: (n: string) => string;
+  };
   team: {
     eyebrow: string;
     sites: string;
@@ -410,8 +425,8 @@ const en: Strings = {
     privacyTitle: "Privacy",
     privacy: [
       "Anyone with the link can view the site.",
-      "No tracking cookies and no analytics. Teams get one sign-in cookie, nothing else.",
-      "Your IP is used only in memory for rate limits. It is not stored.",
+      "No tracking cookies and no third-party analytics. Page views are counted on this server as daily totals only. Teams get one sign-in cookie, nothing else.",
+      "Your IP is used only in memory, for rate limits and an hourly visitor count. It is not stored.",
       "Published pages run in a browser sandbox and can't reach this app or your session.",
       "Expired and deleted sites are removed from the server.",
     ],
@@ -488,6 +503,22 @@ const en: Strings = {
     adminLink: "Admin sign-in",
     signedOut: "You are signed out.",
     expired: "Your session ended. Please sign in again.",
+  },
+  visits: {
+    title: "Visits",
+    column: "Visits",
+    views: "Page views",
+    visitors: "Visitors (approx.)",
+    today: "Today",
+    last7: "Last 7 days",
+    last30: "Last 30 days",
+    short: (d7, d30) => `7 d: ${d7} · 30 d: ${d30}`,
+    chart: (total) => `Page views per day over the last 30 days, ${total} in total`,
+    day: (day, views, visitors) => `${day}: ${views} views, ${visitors} visitors`,
+    privacy:
+      "Counted on this server only: no cookies, no IP addresses stored, no third parties. Bots and link previews are skipped. Days are UTC; visitors are counted once per hour.",
+    off: "Visit counting is turned off on this instance.",
+    adminTotal: (n) => `${n} page views in the last 30 days`,
   },
   team: {
     eyebrow: "Team dashboard",
@@ -752,8 +783,8 @@ const ar: Strings = {
     privacyTitle: "الخصوصية",
     privacy: [
       "أي شخص لديه الرابط يستطيع رؤية الموقع.",
-      "لا ملفات تتبّع ولا تحليلات. للفرق ملف دخول واحد فقط.",
-      "يُستخدم عنوان IP في الذاكرة فقط لحدود الاستخدام، ولا يُخزَّن.",
+      "لا ملفات تتبّع ولا تحليلات من طرف ثالث. تُعدّ مشاهدات الصفحات على هذا الخادم كمجاميع يومية فقط. للفرق ملف دخول واحد فقط.",
+      "يُستخدم عنوان IP في الذاكرة فقط، لحدود الاستخدام ولعدّ الزوار كل ساعة، ولا يُخزَّن.",
       "تعمل الصفحات المنشورة داخل بيئة معزولة في المتصفح، ولا تصل إلى التطبيق أو إلى جلستك.",
       "تُحذف المواقع المنتهية والمحذوفة من الخادم.",
     ],
@@ -830,6 +861,22 @@ const ar: Strings = {
     adminLink: "دخول المسؤول",
     signedOut: "خرجت من حسابك.",
     expired: "انتهت جلستك. ادخل مرة أخرى.",
+  },
+  visits: {
+    title: "الزيارات",
+    column: "الزيارات",
+    views: "مشاهدات الصفحات",
+    visitors: "الزوار (تقريبًا)",
+    today: "اليوم",
+    last7: "آخر 7 أيام",
+    last30: "آخر 30 يومًا",
+    short: (d7, d30) => `7 أيام: ${d7} · 30 يومًا: ${d30}`,
+    chart: (total) => `مشاهدات الصفحات يوميًا خلال آخر 30 يومًا، والمجموع ${total}`,
+    day: (day, views, visitors) => `${day}: ${views} مشاهدة، ${visitors} زائر`,
+    privacy:
+      "العدّ يتم على هذا الخادم فقط: بلا كوكيز، ولا تُحفظ عناوين IP، ولا يشارك فيه أي طرف ثالث. لا تُحسب برامج الزحف ولا معاينات الروابط. الأيام بتوقيت UTC، ويُحسب الزائر مرة واحدة كل ساعة.",
+    off: "عدّ الزيارات متوقف على هذه النسخة.",
+    adminTotal: (n) => `${n} مشاهدة خلال آخر 30 يومًا`,
   },
   team: {
     eyebrow: "لوحة الفريق",

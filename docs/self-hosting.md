@@ -45,6 +45,9 @@ Every setting is an environment variable with a safe default. Copy
 | `LOGIN_ATTEMPTS_PER_15_MIN` | `10` | Sign-in attempts per client IP per 15 minutes |
 | `TEAM_MAX_SITES` | `50` | Default quota: live sites per team (admin can override per team) |
 | `TEAM_MAX_MB` | `200` | Default quota: MB across a team's live sites (admin can override per team) |
+| `VISITS` | `true` | Count page views per site per day, privately (see [Teams](teams.md#visit-counts)) |
+| `VISITS_RETENTION_DAYS` | `90` | Days of visit counts kept (minimum 31) |
+| `VISITS_FLUSH_SECONDS` | `60` | How often buffered counts are written to disk |
 | `MCP_REQUESTS_PER_MINUTE` | `60` | MCP requests per space token per minute (see [MCP](mcp.md)) |
 | `MCP_WRITES_PER_HOUR` | `60` | MCP write tool calls per token per hour |
 | `MCP_KV_WRITES_PER_DAY` | `500` | MCP `kv_put`/`kv_delete` calls per day, instance-wide (KV free plan: 1000/day) |

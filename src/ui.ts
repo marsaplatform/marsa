@@ -5,6 +5,7 @@ import { hashIndex, initialOf } from "./cover.js";
 import type { DocPage } from "./docs.js";
 import { bytesLabel, hoursLabel, type Lang, type LimitValues, STRINGS } from "./i18n.js";
 import { isPermanentIso } from "./store.js";
+import type { VisitSummary } from "./visits.js";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
@@ -616,6 +617,61 @@ export interface TeamSiteRow {
   listed: boolean;
   unlisted: boolean;
   permanent: boolean;
+  visits?: VisitSummary;
+}
+
+function sparkline(lang: Lang, v: VisitSummary): string {
+  const t = STRINGS[lang];
+  const W = 120;
+  const H = 28;
+  const vals = v.days.map((d) => d.views);
+  const max = Math.max(1, ...vals);
+  const step = W / Math.max(1, vals.length - 1);
+  const pts = vals
+    .map((n, i) => `${(i * step).toFixed(1)},${(H - 2 - (n / max) * (H - 4)).toFixed(1)}`)
+    .join(" ");
+  return `<svg class="spark" dir="ltr" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(t.visits.chart(fmt(lang, v.views30)))}" focusable="false"><polygon class="spark-area" points="0,${H} ${pts} ${W},${H}"/><polyline class="spark-line" points="${pts}"/></svg>`;
+}
+
+function visitsCell(lang: Lang, v: VisitSummary | undefined): string {
+  if (!v) return `<span class="meta">–</span>`;
+  const t = STRINGS[lang];
+  return `<div class="visits-cell">${sparkline(lang, v)}<span class="meta">${esc(t.visits.short(fmt(lang, v.views7), fmt(lang, v.views30)))}</span></div>`;
+}
+
+function visitsSection(lang: Lang, v: VisitSummary | undefined): string {
+  const t = STRINGS[lang];
+  if (!v) {
+    return `<section class="block visits-block" aria-labelledby="visits-title"><h2 id="visits-title">${esc(t.visits.title)}</h2><p class="meta">${esc(t.visits.off)}</p></section>`;
+  }
+  const W = 600;
+  const H = 120;
+  const gap = 4;
+  const bw = W / v.days.length - gap;
+  const max = Math.max(1, ...v.days.map((d) => d.views));
+  const bars = v.days
+    .map((d, i) => {
+      const h = d.views ? Math.max(2, (d.views / max) * (H - 6)) : 1;
+      return `<rect x="${(i * (bw + gap) + gap / 2).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" class="${d.views ? "bar" : "bar zero"}"><title>${esc(t.visits.day(d.day, fmt(lang, d.views), fmt(lang, d.visitors)))}</title></rect>`;
+    })
+    .join("");
+  const fact = (label: string, n: number) =>
+    `<div><dt>${esc(label)}</dt><dd class="num">${esc(fmt(lang, n))}</dd></div>`;
+  return `<section class="block visits-block" aria-labelledby="visits-title">
+    <h2 id="visits-title">${esc(t.visits.title)}</h2>
+    <dl class="facts visits-facts">
+      ${fact(t.visits.today, v.today)}
+      ${fact(`${t.visits.views} · ${t.visits.last7}`, v.views7)}
+      ${fact(`${t.visits.views} · ${t.visits.last30}`, v.views30)}
+      ${fact(`${t.visits.visitors} · ${t.visits.last7}`, v.visitors7)}
+      ${fact(`${t.visits.visitors} · ${t.visits.last30}`, v.visitors30)}
+    </dl>
+    <figure class="visits-chart">
+      <svg dir="ltr" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(t.visits.chart(fmt(lang, v.views30)))}">${bars}</svg>
+      <figcaption dir="ltr"><span>${esc(v.days[0]?.day ?? "")}</span><span>${esc(v.days[v.days.length - 1]?.day ?? "")}</span></figcaption>
+    </figure>
+    <p class="meta">${esc(t.visits.privacy)}</p>
+  </section>`;
 }
 
 export interface TeamPageOpts {
@@ -712,6 +768,7 @@ export function teamHtml(lang: Lang, c: Config, o: TeamPageOpts): string {
         ${td(t.common.expires, timeTag(lang, s.expiresAt))}
         ${td(t.common.size, esc(bytesLabel(lang, s.totalBytes)))}
         ${td(t.admin.directory, listing)}
+        ${td(t.visits.column, visitsCell(lang, s.visits))}
         <td class="cell-actions"><div class="acts"><a class="button small ghost" href="${href(`/team/sites/${s.id}`)}">${esc(t.team.manage)}</a>${postForm(
           href(`/team/sites/${s.id}/delete`),
           o.csrf,
@@ -724,7 +781,7 @@ export function teamHtml(lang: Lang, c: Config, o: TeamPageOpts): string {
   const table = o.sites.length
     ? `<div class="table-wrap"><table class="data stack">
       <caption class="sr-only">${esc(t.team.sites)}</caption>
-      <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.link)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(t.admin.directory)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
+      <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.link)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(t.admin.directory)}</th><th scope="col">${esc(t.visits.column)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`
     : emptyState(t.team.empty, t.team.emptySub);
   const body = `<div class="wrap page-wide">
@@ -913,6 +970,7 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
       <p class="meta">${s.permanent ? esc(t.team.permanentNote) : `${esc(t.team.capped)} (${timeTag(lang, s.ceiling)})`}</p>
     </div>
   </section>
+  ${visitsSection(lang, s.visits)}
   <section class="block" aria-label="${esc(t.team.replace)}">
     ${teamUploader(lang, c, o.csrf, href(`${base}/replace`), t.team.replace, t.team.replaceHelp, t.team.replace, false, true)}
   </section>
@@ -1140,6 +1198,7 @@ export interface AdminSiteRow {
   expiresAt: string;
   totalBytes: number;
   permanent: boolean;
+  visits?: VisitSummary;
 }
 
 export function adminSitesHtml(
@@ -1160,6 +1219,8 @@ export function adminSitesHtml(
   const total = o.sites.reduce((n, s) => n + s.totalBytes, 0);
   const guests = o.sites.filter((s) => !s.owner).length;
   const perms = o.sites.filter((s) => s.permanent).length;
+  const views30 = o.sites.reduce((n, s) => n + (s.visits?.views30 ?? 0), 0);
+  const counting = o.sites.some((s) => s.visits);
   const rows = o.sites
     .map(
       (s) => `<tr>
@@ -1168,6 +1229,7 @@ export function adminSitesHtml(
       ${td(t.common.link, `<a href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a>`)}
       ${td(t.common.expires, timeTag(lang, s.expiresAt))}
       ${td(t.common.size, esc(bytesLabel(lang, s.totalBytes)))}
+      ${td(t.visits.column, visitsCell(lang, s.visits))}
       ${td(
         t.common.actions,
         `<div class="acts">${postForm(
@@ -1197,6 +1259,7 @@ export function adminSitesHtml(
     <li><span class="dot-status on" aria-hidden="true"></span>${esc(t.admin.liveTotal(o.sites.length - guests))}</li>
     <li><span class="dot-status ${guests ? "warn" : "off"}" aria-hidden="true"></span>${esc(t.admin.guestsCount(guests))}</li>
     <li><span class="dot-status ${perms ? "on" : "off"}" aria-hidden="true"></span>${esc(t.admin.permanentCount(perms))}</li>
+    ${counting ? `<li><span class="dot-status ${views30 ? "on" : "off"}" aria-hidden="true"></span>${esc(t.visits.adminTotal(fmt(lang, views30)))}</li>` : ""}
   </ul>
   <section class="block" aria-labelledby="sites-title">
     <h2 id="sites-title" class="sr-only">${esc(t.admin.sitesTitle)}</h2>
@@ -1211,7 +1274,7 @@ export function adminSitesHtml(
       o.sites.length
         ? `<div class="table-wrap"><table class="data stack">
       <caption class="sr-only">${esc(t.admin.sitesTitle)}</caption>
-      <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.admin.owner)}</th><th scope="col">${esc(t.common.link)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
+      <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.admin.owner)}</th><th scope="col">${esc(t.common.link)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(t.visits.column)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`
         : emptyState(t.admin.noSites, t.admin.sitesSub)
     }

@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] - 2026-10-20
+
+### Added
+- **Visit counts with privacy built in.** Page views are counted per site per UTC day when an HTML
+  page under `/s/<id>/` is served.
+  - Nothing is collected beyond the count: no cookies, no IP addresses or user agents stored, no third
+    parties, and nothing injected into pages.
+  - Bots, link previews, headless browsers, scripts, prefetches, `HEAD` and asset requests aren't
+    counted.
+- **Approximate visitors**: a distinct `sha256(hourly in-memory salt + site + IP + UA)` within each
+  hour. The salt is never stored. Do Not Track and GPC count as views only.
+- Counts are buffered in memory and flushed to `sites/<id>/visits.json` every `VISITS_FLUSH_SECONDS`
+  (60) and on shutdown. They don't use KV.
+  - Retention is `VISITS_RETENTION_DAYS` (90). `VISITS=false` turns counting off.
+  - Counts are removed with the site, whether it is deleted or swept.
+- **Where they show:**
+  - Dashboard: a sparkline plus 7- and 30-day views for each site.
+  - Site page: a *Visits* section with a 30-day bar chart and views and visitors for today, 7 days and
+    30 days.
+  - Admin *All sites*: the same column, plus a 30-day total.
+- Docs: *Visit counts* in `docs/teams.md` and the Arabic guide. The privacy notes are updated.
+
 ## [0.9.1] - 2026-10-20
 
 ### Fixed

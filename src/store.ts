@@ -144,8 +144,15 @@ export class SiteStore {
     return target.startsWith(base + sep) ? target : null;
   }
 
+  private deleteListeners: ((id: string) => void)[] = [];
+  /** Run fn whenever a site is deleted (explicitly or by the sweeper). */
+  onDelete(fn: (id: string) => void): void {
+    this.deleteListeners.push(fn);
+  }
+
   async delete(id: string): Promise<void> {
     await rm(this.siteDir(id), { recursive: true, force: true });
+    for (const fn of this.deleteListeners) fn(id);
   }
 
   /** Delete every expired site; returns the ids removed. */

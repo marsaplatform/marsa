@@ -108,6 +108,30 @@ API; empty, `0` or `null` goes back to the default). An upload or a replace that
 Size the quotas to your disk: every team's quota together should fit the data volume with room for
 guest uploads.
 
+## Visit counts
+
+The dashboard shows each site's page views for the last 7 and 30 days, with a sparkline. The site
+page adds a per-day chart and approximate visitor counts. *All sites* in the admin console shows the
+same figures for every site.
+
+- **Private by design.** Counting happens on this server: no cookies, no IP addresses or user agents
+  stored, no third parties, and nothing added to the published pages.
+- **What counts:** successful `GET` requests for HTML pages under `/s/<id>/`. Assets don't count,
+  and neither do bots, link-preview fetchers (WhatsApp, Telegram, Slack…), headless browsers,
+  scripts (`curl`, `python-requests`…) or prefetches.
+- **Visitors (approx.):** within one UTC hour, a visitor is a distinct `sha256(hourly salt + site +
+  IP + user agent)`. The salt is random, held in memory only and replaced every hour, so the hashes
+  can't be linked across hours or recomputed later. Only the daily totals are kept, so one person
+  who comes back in a later hour counts again. With Do Not Track or Global Privacy Control, a visit
+  counts as a view only.
+- **Storage:** counts are buffered in memory and flushed every `VISITS_FLUSH_SECONDS` (60 s), and on
+  shutdown, to `sites/<id>/visits.json` as `{"v":1,"days":{"YYYY-MM-DD":[views,visitors]}}`.
+  - They never touch the KV backend and its daily write limit.
+  - Days older than `VISITS_RETENTION_DAYS` (90) are dropped.
+  - Deleting a site, or its expiry, deletes its counts.
+- If the server crashes, up to one flush interval of counts can be lost. Set `VISITS=false` to turn
+  counting off.
+
 ## Who may use the backend
 
 | Site | Backend configured | Backend **not** configured |

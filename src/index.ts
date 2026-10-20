@@ -6,6 +6,7 @@ import { loadConfig } from "./config.js";
 import { SiteStore } from "./store.js";
 import { sweepExpired } from "./sweep.js";
 import { TeamStore } from "./teams.js";
+import { VisitCounter } from "./visits.js";
 
 let config: ReturnType<typeof loadConfig>;
 try {
@@ -21,7 +22,10 @@ const teams = new TeamStore(config.dataDir);
 await teams.init();
 
 const backend = config.cloudflare ? new CloudflareBackend(config.cloudflare) : null;
-const app = createApp({ config, store, backend, teams });
+const visits = new VisitCounter(config.dataDir, config.visits);
+const app = createApp({ config, store, backend, teams, visits });
+const flushTimer = setInterval(() => void visits.flush(), config.visits.flushSeconds * 1000);
+flushTimer.unref();
 
 const sweep = async () => {
   try {
@@ -50,6 +54,8 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     server.close();
-    process.exit(0);
+    const bye = setTimeout(() => process.exit(0), 3000);
+    bye.unref();
+    visits.flush().finally(() => process.exit(0));
   });
 }

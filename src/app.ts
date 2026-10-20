@@ -49,6 +49,7 @@ import {
   newHtml,
   notFoundHtml,
 } from "./ui.js";
+import { VisitCounter } from "./visits.js";
 import { mountWebRoutes } from "./web.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -84,6 +85,8 @@ export interface AppDeps {
   limiter?: RateLimiter;
   /** Browser sessions (team dashboard, admin). Built from config when omitted. */
   sessions?: Sessions;
+  /** Page-view counter. Built from config when omitted (the caller flushes it). */
+  visits?: VisitCounter;
   now?: () => number;
 }
 
@@ -100,7 +103,9 @@ export function createApp({
   backend = null,
   teams = new TeamStore(config.dataDir),
   sessions,
+  visits = new VisitCounter(config.dataDir, config.visits, now),
 }: AppDeps) {
+  store.onDelete((id) => visits.purge(id));
   const session = sessions ?? new Sessions(config, now);
   const app = new Hono();
   /** Language for pages outside the /ar tree: Arabic if the browser prefers it. */
@@ -763,6 +768,7 @@ export function createApp({
     setPermanent,
     quotaOf,
     usageOf,
+    visits,
     siteUrl,
     invalidateDirectory,
     siteCounts,
@@ -875,6 +881,22 @@ export function createApp({
     // fonts and fetch() calls are cross-origin: allow read access.
     h.set("Access-Control-Allow-Origin", "*");
     h.set("X-Robots-Tag", "noindex, nofollow");
+    if (
+      status === 200 &&
+      c.req.method === "GET" &&
+      h.get("Content-Type")?.startsWith("text/html")
+    ) {
+      const purpose = `${c.req.header("sec-purpose") ?? ""} ${c.req.header("purpose") ?? ""} ${c.req.header("x-moz") ?? ""}`;
+      if (!/prefetch|prerender/i.test(purpose)) {
+        visits.record(id, {
+          ip:
+            (config.trustProxy && c.req.header("cf-connecting-ip")?.trim()) ||
+            clientIp(c, config.trustProxy),
+          ua: c.req.header("user-agent") ?? "",
+          noTrack: c.req.header("dnt") === "1" || c.req.header("sec-gpc") === "1",
+        });
+      }
+    }
     return new Response(body, { status, headers: h });
   });
 

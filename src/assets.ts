@@ -240,6 +240,19 @@ a.card:hover{border-color:var(--accent);transform:translateY(-2px);color:var(--i
 .quota-field input{width:100%;padding:6px 8px;font-size:14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper)}
 @media (max-width:820px){.quota-form{grid-template-columns:repeat(2,90px)}}
 
+/* visits */
+.visits-cell{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.spark{display:block;flex:none;color:var(--accent)}
+.spark-line{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
+.spark-area{fill:currentColor;opacity:.12}
+.visits-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin:12px 0 0}
+.visits-facts dd.num{font-size:24px;font-variant-numeric:tabular-nums}
+.visits-chart{margin:18px 0 6px}
+.visits-chart svg{display:block;width:100%;height:120px}
+.visits-chart .bar{fill:var(--accent)}
+.visits-chart .bar.zero{fill:var(--line)}
+.visits-chart figcaption{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:6px;font-family:var(--mono)}
+
 /* MCP panel */
 .mcp-block>p{max-width:70ch}
 .mcp-endpoint{margin:14px 0 6px;flex-wrap:wrap}

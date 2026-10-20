@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { SiteStore } from "../src/store.js";
+import { VisitCounter } from "../src/visits.js";
 import { MemoryBackend } from "./fake-backend.js";
 
 export const ADMIN = "test-admin-token-0123456789abcdef";
@@ -73,7 +74,8 @@ export async function makeApp(env: Record<string, string> = {}) {
   const store = new SiteStore(config.dataDir);
   await store.init();
   const backend = new MemoryBackend();
-  const app = createApp({ config, store, backend, now: () => clock.now });
+  const visits = new VisitCounter(config.dataDir, config.visits, () => clock.now);
+  const app = createApp({ config, store, backend, visits, now: () => clock.now });
   const api = (
     method: string,
     path: string,
@@ -130,6 +132,7 @@ export async function makeApp(env: Record<string, string> = {}) {
     adminBrowser,
     store,
     backend,
+    visits,
     clock,
     config,
     dir,
