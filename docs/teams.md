@@ -18,7 +18,8 @@ token is stored in the browser.
 
 | Who | Where | With | Session |
 | --- | --- | --- | --- |
-| Team member | `/login` (Arabic `/ar/login`) | the team key | `SESSION_TTL_HOURS` (default 7 days) |
+| Team member | `/login` (Arabic `/ar/login`) | username + password (see [Members](#members-roles-and-the-audit-log)) | `SESSION_TTL_HOURS` (default 7 days) |
+| Team (owner fallback) | `/login`, *Or use the team key* | the team key | `SESSION_TTL_HOURS` |
 | Admin | `/admin/login` (Arabic `/ar/admin/login`) | `ADMIN_TOKEN` | `ADMIN_SESSION_TTL_HOURS` (default 12 hours) |
 
 - Sign-in attempts are rate-limited per client IP (`LOGIN_ATTEMPTS_PER_15_MIN`, default 10).
@@ -29,6 +30,72 @@ token is stored in the browser.
   out; changing `ADMIN_TOKEN` or `SESSION_SECRET` signs everyone out.
 - Without `SESSION_SECRET`, a random secret is generated at start, so sessions end on every restart.
   Set one in production: `openssl rand -hex 32`.
+
+## Members, roles and the audit log
+
+A team can have up to 50 **members**, each with a personal sign-in. No email is involved.
+
+**Inviting.** The admin, or any owner, creates a **single-use invite link** that expires after 24
+hours, 3 days (default) or 7 days. Owners do it on *Members* (`/team/members`); the admin uses the
+console (*Members* column → *Create invite link*) or the API. The link is shown once, and you send it
+to the person yourself. Whoever opens it first chooses:
+
+- a **username**: 3–32 characters (`a-z 0-9 . _ -`), unique on the instance;
+- a **display name**;
+- a **password**: at least 10 characters, not containing the username.
+
+The invite is consumed and they are signed in. Links that were used, revoked or have expired answer
+`404`. At most 20 invites can be pending per team.
+
+**Roles**
+
+| Role | Can |
+| --- | --- |
+| Owner | Everything, including inviting, changing roles and removing members |
+| Editor | Publish, replace, extend, make permanent, list or hide, and delete sites; MCP tokens; delete KV keys and uploaded files |
+| Viewer | Read-only: sites, visit counts, files, KV, MCP endpoint and activity |
+
+The server enforces roles on every request, and the pages hide what a role can't do. Role changes
+and removals take effect at once, and a removed member's sessions end.
+
+**Passwords and sessions**
+
+- Passwords are hashed with **scrypt** (N=2¹⁵, r=8, p=1, 16-byte salt) and stored only as a hash.
+  Invite tokens are stored only as a SHA-256 hash.
+- Sign-ins are rate-limited, and an unknown username takes as long to check as a wrong password.
+- Every member has their own sessions. *Change password* and *Sign out everywhere else* (on
+  *Members* → *Your account*) end the member's other sessions.
+- There is no email reset. If a member forgets their password, an owner removes them and sends a
+  new invite.
+
+**The team key still works.**
+
+- Agents, scripts and CI keep using `X-Team-Key` with the API, unchanged.
+- Signing in with the team key in a browser (*Or use the team key* on `/login`) acts as an
+  **owner**, so existing teams keep working with no migration step. Teams start with no members.
+- Recommended: invite yourself as an owner and use that account day to day. Keep the key for
+  agents. If you rotate the key, its browser sessions end and agents need the new key, but member
+  accounts are unaffected.
+
+**Audit log.** Changes are recorded with who made them: a member's name, *team key*, *edit token*,
+*admin* or an MCP token's name. That covers publishing, replacing, expiry changes, permanence,
+listing, deleting, MCP tokens, KV and file deletions, invites, joins, role changes, removals and
+password changes. The site page shows the last 30 entries for that site under *Activity on this
+site*, and *Members* shows the last 100 for the team. The last 500 entries per team are kept in
+`<DATA_DIR>/audit.json`. Members and invites live in `<DATA_DIR>/members.json` (mode 600). Deleting
+a team deletes its members, invites and log.
+
+Admin API:
+
+```bash
+# Invite (role owner|editor|viewer, default owner; ttlHours 1-168, default 72)
+curl -s -X POST "$BASE/api/admin/teams/t_abc123/invites" -H "$AUTH" \
+  -H "Content-Type: application/json" -d '{"role":"editor","ttlHours":72}'
+# -> {"invite":{...},"url":"https://marsa.example.com/join/marsa_inv_..."}
+curl -s "$BASE/api/admin/teams/t_abc123/members" -H "$AUTH"   # members + pending invites
+curl -s -X DELETE "$BASE/api/admin/teams/t_abc123/members/m_xyz" -H "$AUTH"
+curl -s -X DELETE "$BASE/api/admin/teams/t_abc123/invites/<inviteId>" -H "$AUTH"
+```
 
 ## The team dashboard
 

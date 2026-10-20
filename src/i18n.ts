@@ -141,6 +141,86 @@ export interface Strings {
     signedOut: string;
     expired: string;
   };
+  members: {
+    nav: string;
+    title: string;
+    sub: string;
+    memberTitle: string;
+    keyTitle: string;
+    keySub: string;
+    username: string;
+    usernameHelp: string;
+    displayName: string;
+    password: string;
+    passwordHelp: string;
+    confirm: string;
+    signInMember: string;
+    invalidMember: string;
+    signedInAs: (name: string, role: string) => string;
+    viaKey: string;
+    roles: Record<"owner" | "editor" | "viewer", string>;
+    roleHelp: Record<"owner" | "editor" | "viewer", string>;
+    listTitle: string;
+    none: string;
+    joined: string;
+    lastSeen: string;
+    never: string;
+    role: string;
+    save: string;
+    remove: string;
+    confirmRemove: string;
+    removed: string;
+    roleSaved: string;
+    notSelf: string;
+    notAllowed: string;
+    invitesTitle: string;
+    invitesNone: string;
+    inviteSub: string;
+    invite: string;
+    inviteExpiry: string;
+    inviteCreated: string;
+    inviteNote: string;
+    inviteLink: string;
+    inviteRevoked: string;
+    tooManyInvites: string;
+    tooManyMembers: string;
+    expires: string;
+    by: string;
+    revoke: string;
+    hours: (n: number) => string;
+    accountTitle: string;
+    current: string;
+    newPassword: string;
+    changePassword: string;
+    passwordChanged: string;
+    wrongPassword: string;
+    signOutAll: string;
+    signOutAllHelp: string;
+    signedOutAll: string;
+    keyAccount: string;
+    joinTitle: (team: string) => string;
+    joinSub: (role: string) => string;
+    join: string;
+    joined2: string;
+    inviteInvalid: string;
+    inviteInvalidSub: string;
+    taken: string;
+    badUsername: string;
+    badName: string;
+    short: string;
+    long: string;
+    same: string;
+    mismatch: string;
+    auditTitle: string;
+    auditSiteTitle: string;
+    auditNone: string;
+    when: string;
+    who: string;
+    what: string;
+    actions: Record<string, string>;
+    actorKinds: Record<"member" | "key" | "admin" | "api" | "mcp", string>;
+    count: (n: number) => string;
+  };
   visits: {
     title: string;
     column: string;
@@ -504,6 +584,111 @@ const en: Strings = {
     signedOut: "You are signed out.",
     expired: "Your session ended. Please sign in again.",
   },
+  members: {
+    nav: "Members",
+    title: "Members",
+    sub: "Invite people with a one-time link, give each a role and see who did what.",
+    memberTitle: "Member sign-in",
+    keyTitle: "Or use the team key",
+    keySub: "The team key works as an owner. Agents and scripts keep using it for the API.",
+    username: "Username",
+    usernameHelp: "3–32 characters: a–z, 0–9, dot, dash or underscore. Used to sign in.",
+    displayName: "Your name",
+    password: "Password",
+    passwordHelp: "At least 10 characters. Stored only as a scrypt hash.",
+    confirm: "Repeat password",
+    signInMember: "Sign in",
+    invalidMember: "Wrong username or password.",
+    signedInAs: (name, role) => `Signed in as ${name} · ${role}`,
+    viaKey: "team key (owner)",
+    roles: { owner: "Owner", editor: "Editor", viewer: "Viewer" },
+    roleHelp: {
+      owner: "Everything, including members and invites",
+      editor: "Publish, replace, extend and delete sites",
+      viewer: "Read-only",
+    },
+    listTitle: "People",
+    none: "No members yet. Invite someone below.",
+    joined: "Joined",
+    lastSeen: "Last sign-in",
+    never: "never",
+    role: "Role",
+    save: "Save",
+    remove: "Remove",
+    confirmRemove: "Remove this member? They are signed out at once.",
+    removed: "Member removed.",
+    roleSaved: "Role saved.",
+    notSelf: "You can't change or remove your own membership here.",
+    notAllowed: "Your role doesn't allow that.",
+    invitesTitle: "Pending invites",
+    invitesNone: "No pending invites.",
+    inviteSub: "An invite link works once and expires. Send it yourself (no email is sent).",
+    invite: "Create invite link",
+    inviteExpiry: "Expires after",
+    inviteCreated: "Invite link created.",
+    inviteNote: "Copy it now: it is shown only once. Whoever opens it first joins with this role.",
+    inviteLink: "Invite link",
+    inviteRevoked: "Invite revoked.",
+    tooManyInvites: "Too many pending invites. Revoke some first.",
+    tooManyMembers: "This team has reached its member limit.",
+    expires: "Expires",
+    by: "Created by",
+    revoke: "Revoke",
+    hours: (n) => (n % 24 === 0 ? `${n / 24} day${n === 24 ? "" : "s"}` : `${n} hours`),
+    accountTitle: "Your account",
+    current: "Current password",
+    newPassword: "New password",
+    changePassword: "Change password",
+    passwordChanged: "Password changed. Your other sessions were signed out.",
+    wrongPassword: "The current password is wrong.",
+    signOutAll: "Sign out everywhere else",
+    signOutAllHelp: "Ends every other session of your account.",
+    signedOutAll: "Your other sessions were signed out.",
+    keyAccount:
+      "You signed in with the team key, which acts as an owner. Ask an owner for an invite (or invite yourself) to get a personal account.",
+    joinTitle: (team) => `Join ${team}`,
+    joinSub: (role) =>
+      `You were invited as ${role}. Choose a username and password to create your account.`,
+    join: "Create account and sign in",
+    joined2: "Welcome! Your account is ready.",
+    inviteInvalid: "This invite link doesn't work",
+    inviteInvalidSub: "It was already used, revoked or has expired. Ask for a new one.",
+    taken: "That username is taken. Choose another.",
+    badUsername: "Use 3–32 characters: a–z, 0–9, dot, dash or underscore.",
+    badName: "Enter your name (up to 80 characters).",
+    short: "The password must be at least 10 characters.",
+    long: "The password is too long.",
+    same: "The password must not contain the username.",
+    mismatch: "The passwords don't match.",
+    auditTitle: "Activity",
+    auditSiteTitle: "Activity on this site",
+    auditNone: "Nothing recorded yet.",
+    when: "When",
+    who: "Who",
+    what: "What",
+    actions: {
+      publish: "Published",
+      replace: "Replaced the files",
+      extend: "Changed the expiry",
+      permanent: "Made permanent",
+      delete: "Deleted",
+      "listing-on": "Listed on the home page",
+      "listing-off": "Hidden from the home page",
+      "mcp-token": "Created an MCP token",
+      "mcp-revoke": "Revoked an MCP token",
+      "kv-delete": "Deleted a KV key",
+      "file-delete": "Deleted an uploaded file",
+      "sign-in": "Signed in",
+      invite: "Created an invite",
+      "invite-revoke": "Revoked an invite",
+      "member-join": "Joined the team",
+      "member-remove": "Removed a member",
+      "member-role": "Changed a role",
+      password: "Changed their password",
+    },
+    actorKinds: { member: "member", key: "team key", admin: "admin", api: "API", mcp: "MCP" },
+    count: (n) => `${n} member${n === 1 ? "" : "s"}`,
+  },
   visits: {
     title: "Visits",
     column: "Visits",
@@ -862,6 +1047,110 @@ const ar: Strings = {
     signedOut: "خرجت من حسابك.",
     expired: "انتهت جلستك. ادخل مرة أخرى.",
   },
+  members: {
+    nav: "الأعضاء",
+    title: "الأعضاء",
+    sub: "ادعُ الأشخاص برابط يُستخدم مرة واحدة، وأعطِ كلًّا منهم دورًا، واعرف من فعل ماذا.",
+    memberTitle: "دخول الأعضاء",
+    keyTitle: "أو استخدم مفتاح الفريق",
+    keySub: "مفتاح الفريق يعمل بصلاحيات المالك، وتستمر الوكلاء والبرامج في استخدامه للـ API.",
+    username: "اسم المستخدم",
+    usernameHelp: "من 3 إلى 32 حرفًا: a–z و0–9 والنقطة والشرطة والشرطة السفلية. تستخدمه للدخول.",
+    displayName: "اسمك",
+    password: "كلمة المرور",
+    passwordHelp: "10 أحرف على الأقل. تُحفظ كـ hash بخوارزمية scrypt فقط.",
+    confirm: "أعد كتابة كلمة المرور",
+    signInMember: "ادخل",
+    invalidMember: "اسم المستخدم أو كلمة المرور غير صحيحة.",
+    signedInAs: (name, role) => `أنت داخل باسم ${name} · ${role}`,
+    viaKey: "مفتاح الفريق (مالك)",
+    roles: { owner: "مالك", editor: "محرّر", viewer: "مشاهد" },
+    roleHelp: {
+      owner: "كل شيء، ومنه إدارة الأعضاء والدعوات",
+      editor: "نشر المواقع واستبدالها وتمديدها وحذفها",
+      viewer: "قراءة فقط",
+    },
+    listTitle: "الأشخاص",
+    none: "لا يوجد أعضاء بعد. ادعُ أحدًا بالأسفل.",
+    joined: "انضم",
+    lastSeen: "آخر دخول",
+    never: "أبدًا",
+    role: "الدور",
+    save: "احفظ",
+    remove: "أزِل",
+    confirmRemove: "إزالة هذا العضو؟ سيخرج من حسابه فورًا.",
+    removed: "تمت إزالة العضو.",
+    roleSaved: "تم حفظ الدور.",
+    notSelf: "لا يمكنك تغيير عضويتك أو إزالتها من هنا.",
+    notAllowed: "دورك لا يسمح بذلك.",
+    invitesTitle: "دعوات معلّقة",
+    invitesNone: "لا توجد دعوات معلّقة.",
+    inviteSub: "رابط الدعوة يعمل مرة واحدة وينتهي. أرسله بنفسك، فلا يُرسل أي بريد.",
+    invite: "أنشئ رابط دعوة",
+    inviteExpiry: "ينتهي بعد",
+    inviteCreated: "تم إنشاء رابط الدعوة.",
+    inviteNote: "انسخه الآن، فلن يظهر مرة أخرى. أول من يفتحه ينضم بهذا الدور.",
+    inviteLink: "رابط الدعوة",
+    inviteRevoked: "تم إلغاء الدعوة.",
+    tooManyInvites: "الدعوات المعلّقة كثيرة. ألغِ بعضها أولًا.",
+    tooManyMembers: "وصل هذا الفريق إلى الحد الأقصى للأعضاء.",
+    expires: "ينتهي",
+    by: "أنشأها",
+    revoke: "ألغِ",
+    hours: (n) => (n % 24 === 0 ? (n === 24 ? "يوم واحد" : `${n / 24} أيام`) : `${n} ساعة`),
+    accountTitle: "حسابك",
+    current: "كلمة المرور الحالية",
+    newPassword: "كلمة المرور الجديدة",
+    changePassword: "غيّر كلمة المرور",
+    passwordChanged: "تم تغيير كلمة المرور، وأُنهيت جلساتك الأخرى.",
+    wrongPassword: "كلمة المرور الحالية غير صحيحة.",
+    signOutAll: "اخرج من كل الأجهزة الأخرى",
+    signOutAllHelp: "يُنهي كل جلسات حسابك الأخرى.",
+    signedOutAll: "أُنهيت جلساتك الأخرى.",
+    keyAccount:
+      "دخلت بمفتاح الفريق، وهو يعمل بصلاحيات المالك. اطلب دعوة من أحد الملاك، أو ادعُ نفسك، لتحصل على حساب شخصي.",
+    joinTitle: (team) => `انضم إلى ${team}`,
+    joinSub: (role) => `وصلتك دعوة بدور ${role}. اختر اسم مستخدم وكلمة مرور لإنشاء حسابك.`,
+    join: "أنشئ الحساب وادخل",
+    joined2: "أهلًا بك! حسابك جاهز.",
+    inviteInvalid: "رابط الدعوة هذا لا يعمل",
+    inviteInvalidSub: "إما أنه استُخدم من قبل، أو أُلغي، أو انتهت مدته. اطلب رابطًا جديدًا.",
+    taken: "اسم المستخدم هذا مأخوذ. اختر اسمًا آخر.",
+    badUsername: "استخدم من 3 إلى 32 حرفًا: a–z و0–9 والنقطة والشرطة والشرطة السفلية.",
+    badName: "اكتب اسمك (حتى 80 حرفًا).",
+    short: "يجب ألا تقل كلمة المرور عن 10 أحرف.",
+    long: "كلمة المرور طويلة جدًا.",
+    same: "يجب ألا تحتوي كلمة المرور على اسم المستخدم.",
+    mismatch: "كلمتا المرور غير متطابقتين.",
+    auditTitle: "النشاط",
+    auditSiteTitle: "النشاط على هذا الموقع",
+    auditNone: "لم يُسجَّل شيء بعد.",
+    when: "متى",
+    who: "من",
+    what: "ماذا",
+    actions: {
+      publish: "نشر الموقع",
+      replace: "استبدل الملفات",
+      extend: "غيّر مدة الانتهاء",
+      permanent: "جعله دائمًا",
+      delete: "حذف الموقع",
+      "listing-on": "أظهره في الصفحة الرئيسية",
+      "listing-off": "أخفاه من الصفحة الرئيسية",
+      "mcp-token": "أنشأ رمز MCP",
+      "mcp-revoke": "ألغى رمز MCP",
+      "kv-delete": "حذف مفتاح KV",
+      "file-delete": "حذف ملفًا مرفوعًا",
+      "sign-in": "دخل",
+      invite: "أنشأ دعوة",
+      "invite-revoke": "ألغى دعوة",
+      "member-join": "انضم إلى الفريق",
+      "member-remove": "أزال عضوًا",
+      "member-role": "غيّر دورًا",
+      password: "غيّر كلمة مروره",
+    },
+    actorKinds: { member: "عضو", key: "مفتاح الفريق", admin: "المسؤول", api: "API", mcp: "MCP" },
+    count: (n) => (n === 1 ? "عضو واحد" : `${n} أعضاء`),
+  },
   visits: {
     title: "الزيارات",
     column: "الزيارات",
@@ -870,7 +1159,7 @@ const ar: Strings = {
     today: "اليوم",
     last7: "آخر 7 أيام",
     last30: "آخر 30 يومًا",
-    short: (d7, d30) => `7 أيام: ${d7} · 30 يومًا: ${d30}`,
+    short: (d7, d30) => `٧ أيام: ${d7} · ٣٠ يومًا: ${d30}`,
     chart: (total) => `مشاهدات الصفحات يوميًا خلال آخر 30 يومًا، والمجموع ${total}`,
     day: (day, views, visitors) => `${day}: ${views} مشاهدة، ${visitors} زائر`,
     privacy:

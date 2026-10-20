@@ -7,6 +7,7 @@ import { APP_VERSION, PRODUCT_NAME } from "./brand.js";
 import type { Config } from "./config.js";
 import { UploadError } from "./errors.js";
 import { type FileInput, fromFilesArray, type UploadEntry } from "./ingest.js";
+import type { AuditEntry } from "./members.js";
 import { isBlocked, mimeFor } from "./mime.js";
 import type { RateLimiter } from "./rate-limit.js";
 import type { SiteMeta, SiteStore } from "./store.js";
@@ -68,6 +69,8 @@ export function findMcpToken(meta: SiteMeta, secret: string): McpToken | null {
 }
 
 export interface McpDeps {
+  /** Audit log for writes (team sites only). */
+  audit?: (e: Omit<AuditEntry, "at" | "teamId"> & { teamId?: string }) => Promise<void>;
   config: Config;
   store: SiteStore;
   teams: TeamStore;
@@ -527,7 +530,21 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
           try {
             // Fresh meta for writes that change it (replace_site_files).
             const fresh = (await store.get(meta.id)) ?? meta;
-            return c.json(rpc(id, await tool.run(args, { meta: fresh, token })));
+            const out = await tool.run(args, { meta: fresh, token });
+            if (tool.write && !(out as { isError?: boolean }).isError) {
+              await d.audit?.({
+                teamId: meta.teamId,
+                siteId: meta.id,
+                actor: { kind: "mcp", label: token.name },
+                action: `mcp:${tool.name}`,
+                ...(typeof args.key === "string"
+                  ? { detail: args.key }
+                  : typeof args.name === "string"
+                    ? { detail: args.name }
+                    : {}),
+              });
+            }
+            return c.json(rpc(id, out));
           } catch (err) {
             if (err instanceof ToolError) return c.json(rpc(id, fail(err.message)));
             console.error(`[mcp] ${tool.name} on ${meta.id} failed`, err);

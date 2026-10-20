@@ -26,6 +26,8 @@ export interface Session {
   role: Role;
   /** Team id (role "team"). */
   teamId?: string;
+  /** Member id, when a team member signed in with a password (absent for the team key). */
+  memberId?: string;
   /** Fingerprint of the credential the session was made from. */
   fp: string;
   iat: number;
@@ -60,7 +62,7 @@ export class Sessions {
   }
 
   /** Create a session and set its cookie. */
-  start(c: Context, role: Role, fp: string, teamId?: string): Session {
+  start(c: Context, role: Role, fp: string, teamId?: string, memberId?: string): Session {
     const ttlHours =
       role === "admin" ? this.config.sessions.adminTtlHours : this.config.sessions.teamTtlHours;
     const iat = this.now();
@@ -68,6 +70,7 @@ export class Sessions {
       sid: randomBytes(16).toString("base64url"),
       role,
       ...(teamId ? { teamId } : {}),
+      ...(memberId ? { memberId } : {}),
       fp,
       iat,
       exp: iat + ttlHours * 3600_000,

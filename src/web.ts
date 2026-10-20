@@ -7,6 +7,22 @@ import { UploadError } from "./errors.js";
 import { type Lang, STRINGS } from "./i18n.js";
 import type { UploadEntry } from "./ingest.js";
 import { addMcpToken, cleanTokenName, MAX_MCP_TOKENS } from "./mcp.js";
+import {
+  type Actor,
+  type AuditEntry,
+  burnPasswordCheck,
+  cleanMemberName,
+  cleanUsername,
+  isRole,
+  MAX_INVITES,
+  MAX_MEMBERS,
+  type Member,
+  type MemberRole,
+  MemberStore,
+  passwordProblem,
+  roleRank,
+  verifyPassword,
+} from "./members.js";
 import type { RateLimiter } from "./rate-limit.js";
 import { fingerprint, type Session, type Sessions, sameOrigin } from "./session.js";
 import type { SiteMeta, SiteStore } from "./store.js";
@@ -14,11 +30,14 @@ import { cleanTeamName, type Team, type TeamPatch, type TeamStore } from "./team
 import { safeEqual } from "./tokens.js";
 import {
   type AdminSiteRow,
+  type AuditView,
   adminSitesHtml,
   adminTeamsHtml,
   type Flash,
+  joinHtml,
   localePath,
   loginHtml,
+  membersHtml,
   messageHtml,
   type TeamSiteRow,
   teamHtml,
@@ -51,6 +70,8 @@ export interface WebDeps {
   quotaOf: (team: Team) => { sites: number; bytes: number };
   usageOf: (team: Team, except?: string) => Promise<{ sites: number; bytes: number }>;
   visits: VisitCounter;
+  members: MemberStore;
+  audit: (e: Omit<AuditEntry, "at" | "teamId"> & { teamId?: string }) => Promise<void>;
   siteUrl: (id: string) => string;
   invalidateDirectory: () => void;
   siteCounts: () => Promise<Map<string, number>>;
@@ -185,14 +206,55 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     );
 
   // ---- who is signed in -----------------------------------------------------------
-  function teamSession(c: Context): { s: Session; team: Team } | null {
+  const { members } = d;
+  /** Session fingerprint of a member: a password change, "sign out everywhere" or removal ends it. */
+  const memberFp = (m: Member) => fingerprint(`member:${m.id}:${m.passwordHash}:${m.epoch}`);
+  interface TeamCtx {
+    s: Session;
+    team: Team;
+    member: Member | null;
+    role: MemberRole;
+    actor: Actor;
+  }
+  function teamSession(c: Context): TeamCtx | null {
     const s = sessions.read(c);
     if (s?.role !== "team") return null;
     const team = teams.get(s.teamId);
-    // A rotated key or a deleted team ends the session.
-    if (!team || !safeEqual(s.fp, fingerprint(team.keyHash))) return null;
-    return { s, team };
+    if (!team) return null;
+    if (s.memberId) {
+      const m = members.get(s.memberId);
+      if (!m || m.teamId !== team.id || !safeEqual(s.fp, memberFp(m))) return null;
+      return {
+        s,
+        team,
+        member: m,
+        role: m.role,
+        actor: { kind: "member", label: m.name, memberId: m.id },
+      };
+    }
+    // Team-key sign-in acts as an owner. A rotated key or a deleted team ends the session.
+    if (!safeEqual(s.fp, fingerprint(team.keyHash))) return null;
+    return { s, team, member: null, role: "owner", actor: { kind: "key", label: "team key" } };
   }
+  const meOf = (ts: TeamCtx) => ({
+    name: ts.member?.name ?? "",
+    role: ts.role,
+    viaKey: !ts.member,
+  });
+  const auditView = (e: AuditEntry, titles?: Map<string, string>): AuditView => ({
+    at: e.at,
+    who: e.actor.label,
+    kind: e.actor.kind,
+    action: e.action,
+    ...(e.detail ? { detail: e.detail } : {}),
+    ...(e.siteId
+      ? {
+          site: titles?.has(e.siteId)
+            ? { id: e.siteId, title: titles.get(e.siteId) ?? e.siteId }
+            : null,
+        }
+      : {}),
+  });
   function adminSession(c: Context): Session | null {
     const s = sessions.read(c);
     if (s?.role !== "admin" || !config.adminToken) return null;
@@ -260,6 +322,25 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       if (!sameOrigin(c, config.publicUrl) || !sessions.checkLoginCsrf(c, field(form, "_csrf"))) {
         return render(t.login.csrf, 403);
       }
+      if (form?.has("username")) {
+        const username = cleanUsername(field(form, "username"));
+        const pw = field(form, "password");
+        const m = username ? members.byUsername(username) : null;
+        if (!m || !teams.get(m.teamId)) {
+          await burnPasswordCheck(pw);
+          return render(t.members.invalidMember, 401);
+        }
+        if (!(await verifyPassword(pw, m.passwordHash)))
+          return render(t.members.invalidMember, 401);
+        const fresh = (await members.touchLogin(m.id)) ?? m;
+        sessions.start(c, "team", memberFp(fresh), fresh.teamId, fresh.id);
+        await d.audit({
+          teamId: fresh.teamId,
+          actor: { kind: "member", label: fresh.name, memberId: fresh.id },
+          action: "sign-in",
+        });
+        return c.redirect(href("/team"), 303);
+      }
       const team = teams.byTeamKey(field(form, "key").trim());
       if (!team) return render(t.login.invalid, 401);
       sessions.start(c, "team", fingerprint(team.keyHash), team.id);
@@ -280,9 +361,15 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     });
 
     // ---- team dashboard -----------------------------------------------------------
-    const needTeam = (c: Context) => {
+    const needTeam = (c: Context, min: MemberRole = "viewer"): TeamCtx | Response => {
       const ts = teamSession(c);
-      if (ts) return ts;
+      if (ts) {
+        if (roleRank[ts.role] >= roleRank[min]) return ts;
+        if (wantsJson(c)) {
+          return c.json({ error: { code: "FORBIDDEN", message: t.members.notAllowed } }, 403);
+        }
+        return done(c, ts.s, href("/team"), { kind: "err", text: t.members.notAllowed });
+      }
       if (wantsJson(c)) {
         return c.json({ error: { code: "UNAUTHORIZED", message: t.login.expired } }, 401);
       }
@@ -313,6 +400,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         c,
         teamHtml(lang, config, {
           ...(await teamInfo(team)),
+          me: meOf(ts),
           backendConfigured: !!backend,
           sites,
           csrf: sessions.csrfFor(s),
@@ -322,7 +410,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     });
 
     app.post(`${prefix}/team/sites`, d.uploadLimit, async (c) => {
-      const ts = needTeam(c);
+      const ts = needTeam(c, "editor");
       if (ts instanceof Response) return ts;
       const { s, team } = ts;
       const form = await guardPost(c, s, lang, href("/team"));
@@ -332,6 +420,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       try {
         const { entries, ttl } = await d.readUpload(c);
         const { meta } = await d.createSite(entries, ttl, team);
+        await d.audit({
+          teamId: team.id,
+          siteId: meta.id,
+          actor: ts.actor,
+          action: "publish",
+          detail: meta.title,
+        });
         return done(c, s, href("/team"), {
           kind: "ok",
           text: t.team.published,
@@ -409,6 +504,8 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           site,
           backendBrowser,
           mcp,
+          me: meOf(ts),
+          audit: members.entries(team.id, m.id, 30).map((e) => auditView(e)),
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
         }),
@@ -420,12 +517,19 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       path: string,
       fn: (
         c: Context,
-        ctx: { s: Session; team: Team; m: SiteMeta; form: FormData; back: string },
+        ctx: {
+          s: Session;
+          team: Team;
+          m: SiteMeta;
+          form: FormData;
+          back: string;
+          log: (action: string, detail?: string) => void;
+        },
       ) => Promise<Response>,
       upload = false,
     ) => {
       const handler = async (c: Context) => {
-        const ts = needTeam(c);
+        const ts = needTeam(c, "editor");
         if (ts instanceof Response) return ts;
         const { s, team } = ts;
         const back = href(`/team/sites/${c.req.param("id")}`);
@@ -433,7 +537,15 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         if (form instanceof Response) return form;
         const m = await ownSite(c, team);
         if (!m) return notYours(c, s);
-        return fn(c, { s, team, m, form, back });
+        const log = (action: string, detail?: string) =>
+          d.audit({
+            teamId: team.id,
+            siteId: m.id,
+            actor: ts.actor,
+            action,
+            ...(detail ? { detail } : {}),
+          });
+        return fn(c, { s, team, m, form, back, log });
       };
       if (upload) app.post(`${prefix}/team/sites/:id/${path}`, d.uploadLimit, handler);
       else app.post(`${prefix}/team/sites/:id/${path}`, handler);
@@ -441,12 +553,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
 
     sitePost(
       "replace",
-      async (c, { s, m, back }) => {
+      async (c, { s, m, back, log }) => {
         const limited = await d.uploadRate(c);
         if (limited) return done(c, s, back, { kind: "err", text: t.tooMany });
         try {
           const { entries } = await d.readUpload(c);
           await d.replaceSite(m, entries);
+          await log("replace");
           return done(c, s, back, { kind: "ok", text: t.team.replaced, link: d.siteUrl(m.id) });
         } catch (err) {
           return done(c, s, back, { kind: "err", text: uploadErr(err) });
@@ -455,9 +568,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       true,
     );
 
-    sitePost("extend", async (c, { s, m, form, back }) => {
+    sitePost("extend", async (c, { s, m, form, back, log }) => {
       try {
         const out = await d.extendSite(m, field(form, "ttlHours"));
+        await log(
+          out.permanent ? "permanent" : "extend",
+          out.permanent ? undefined : out.expiresAt,
+        );
         return done(c, s, back, {
           kind: "ok",
           text: out.permanent ? t.team.madePermanent : t.team.extended,
@@ -467,28 +584,31 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       }
     });
 
-    sitePost("permanent", async (c, { s, team, m, back }) => {
+    sitePost("permanent", async (c, { s, team, m, back, log }) => {
       if (!team.permanent)
         return done(c, s, back, { kind: "err", text: t.team.permanentNotAllowed });
       await d.setPermanent(m, true);
+      await log("permanent");
       return done(c, s, back, { kind: "ok", text: t.team.madePermanent });
     });
 
-    sitePost("delete", async (c, { s, m }) => {
+    sitePost("delete", async (c, { s, m, log }) => {
       await d.deleteSite(m.id);
+      await log("delete", m.title || m.id);
       return done(c, s, href("/team"), { kind: "ok", text: t.team.deleted });
     });
 
-    sitePost("listing", async (c, { s, m, form, back }) => {
+    sitePost("listing", async (c, { s, m, form, back, log }) => {
       if (field(form, "listed") === "1") delete m.unlisted;
       else m.unlisted = true;
+      await log(m.unlisted ? "listing-off" : "listing-on");
       m.updatedAt = new Date(now()).toISOString();
       await store.updateMeta(m);
       d.invalidateDirectory();
       return done(c, s, back, { kind: "ok", text: t.team.listingSaved });
     });
 
-    sitePost("mcp", async (c, { s, m, form, back }) => {
+    sitePost("mcp", async (c, { s, m, form, back, log }) => {
       const name = cleanTokenName(field(form, "name"));
       const scope = field(form, "scope") === "rw" ? "rw" : "ro";
       if (!name) return done(c, s, back, { kind: "err", text: t.badRequest });
@@ -497,6 +617,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       }
       const { secret } = addMcpToken(m, name, scope, now());
       await store.updateMeta(m);
+      await log("mcp-token", `${name} (${scope})`);
       return done(c, s, `${back}#mcp`, {
         kind: "ok",
         text: t.mcp.created,
@@ -504,8 +625,10 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       });
     });
 
-    sitePost("mcp/:tid/delete", async (c, { s, m, back }) => {
+    sitePost("mcp/:tid/delete", async (c, { s, m, back, log }) => {
       const tid = c.req.param("tid");
+      const gone = (m.mcpTokens ?? []).find((x) => x.id === tid);
+      if (gone) await log("mcp-revoke", gone.name);
       m.mcpTokens = (m.mcpTokens ?? []).filter((x) => x.id !== tid);
       if (!m.mcpTokens.length) delete m.mcpTokens;
       await store.updateMeta(m);
@@ -515,18 +638,270 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     const backendFor = (team: Team) =>
       backend && (team.backend || config.backend.guestAccess) ? backend : null;
 
-    sitePost("kv/delete", async (c, { s, team, m, form, back }) => {
+    sitePost("kv/delete", async (c, { s, team, m, form, back, log }) => {
       const b = backendFor(team);
       const key = field(form, "key");
-      if (b && /^[A-Za-z0-9._:-]{1,128}$/.test(key)) await b.kvDelete(m.id, key);
+      if (b && /^[A-Za-z0-9._:-]{1,128}$/.test(key)) {
+        await b.kvDelete(m.id, key);
+        await log("kv-delete", key);
+      }
       return done(c, s, back, { kind: "ok", text: t.team.keyDeleted });
     });
 
-    sitePost("files/delete", async (c, { s, team, m, form, back }) => {
+    sitePost("files/delete", async (c, { s, team, m, form, back, log }) => {
       const b = backendFor(team);
       const id = field(form, "fileId");
-      if (b && /^[A-Za-z0-9._-]{1,36}$/.test(id)) await b.fileDelete(m.id, id);
+      if (b && /^[A-Za-z0-9._-]{1,36}$/.test(id)) {
+        await b.fileDelete(m.id, id);
+        await log("file-delete", id);
+      }
       return done(c, s, back, { kind: "ok", text: t.team.fileDeleted });
+    });
+
+    // ---- members ----------------------------------------------------------------------
+    const membersBack = href("/team/members");
+    app.get(`${prefix}/team/members`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const titles = new Map(
+        (await store.list())
+          .filter((m) => m.teamId === team.id)
+          .map((m) => [m.id, m.title || m.id]),
+      );
+      return page(
+        c,
+        membersHtml(lang, config, {
+          ...(await teamInfo(team)),
+          backendConfigured: !!backend,
+          sites: [],
+          me: meOf(ts),
+          meId: ts.member?.id ?? null,
+          members: members.list(team.id).map((m) => ({
+            id: m.id,
+            name: m.name,
+            username: m.username,
+            role: m.role,
+            createdAt: m.createdAt,
+            ...(m.lastLoginAt ? { lastLoginAt: m.lastLoginAt } : {}),
+          })),
+          invites: ts.role === "owner" ? members.listInvites(team.id).map((i) => ({ ...i })) : [],
+          audit: members.entries(team.id, undefined, 100).map((e) => auditView(e, titles)),
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+
+    /** A POST on the members page; owner-only unless `min` says otherwise. */
+    const teamPost = (
+      path: string,
+      fn: (c: Context, ctx: TeamCtx & { form: FormData }) => Promise<Response>,
+      min: MemberRole = "owner",
+    ) => {
+      app.post(`${prefix}${path}`, async (c) => {
+        const ts = needTeam(c, min);
+        if (ts instanceof Response) return ts;
+        const form = await guardPost(c, ts.s, lang, membersBack);
+        if (form instanceof Response) return form;
+        return fn(c, { ...ts, form });
+      });
+    };
+
+    const inviteTtl = (raw: string) => ([24, 72, 168].includes(Number(raw)) ? Number(raw) : 72);
+    const inviteFlash = (token: string): Flash => ({
+      kind: "ok",
+      text: t.members.inviteCreated,
+      secret: {
+        label: t.members.inviteLink,
+        note: t.members.inviteNote,
+        value: `${config.publicUrl}${lang === "ar" ? "/ar" : ""}/join/${token}`,
+      },
+    });
+
+    teamPost("/team/members/invite", async (c, { s, team, form, actor }) => {
+      const role = field(form, "role");
+      if (!isRole(role)) return done(c, s, membersBack, { kind: "err", text: t.badRequest });
+      if (members.listInvites(team.id).length >= MAX_INVITES) {
+        return done(c, s, membersBack, { kind: "err", text: t.members.tooManyInvites });
+      }
+      if (members.count(team.id) >= MAX_MEMBERS) {
+        return done(c, s, membersBack, { kind: "err", text: t.members.tooManyMembers });
+      }
+      const { token } = await members.createInvite(
+        team.id,
+        role,
+        inviteTtl(field(form, "ttlHours")),
+        actor.label,
+      );
+      await d.audit({ teamId: team.id, actor, action: "invite", detail: t.members.roles[role] });
+      return done(c, s, membersBack, inviteFlash(token));
+    });
+
+    teamPost("/team/members/invites/:iid/delete", async (c, { s, team, actor }) => {
+      const inv = members.listInvites(team.id).find((i) => i.id === c.req.param("iid"));
+      if (inv) {
+        await members.revokeInvite(inv.id);
+        await d.audit({
+          teamId: team.id,
+          actor,
+          action: "invite-revoke",
+          detail: t.members.roles[inv.role],
+        });
+      }
+      return done(c, s, membersBack, { kind: "ok", text: t.members.inviteRevoked });
+    });
+
+    const otherMember = (c: Context, ts: TeamCtx) => {
+      const m = members.get(c.req.param("mid"));
+      if (!m || m.teamId !== ts.team.id) return { err: t.notFound };
+      if (ts.member?.id === m.id) return { err: t.members.notSelf };
+      return { m };
+    };
+    teamPost("/team/members/:mid/role", async (c, ctx) => {
+      const r = otherMember(c, ctx);
+      if (!r.m) return done(c, ctx.s, membersBack, { kind: "err", text: r.err ?? t.notFound });
+      const role = field(ctx.form, "role");
+      if (!isRole(role)) return done(c, ctx.s, membersBack, { kind: "err", text: t.badRequest });
+      await members.setRole(r.m.id, role);
+      await d.audit({
+        teamId: ctx.team.id,
+        actor: ctx.actor,
+        action: "member-role",
+        detail: `${r.m.name} → ${t.members.roles[role]}`,
+      });
+      return done(c, ctx.s, membersBack, { kind: "ok", text: t.members.roleSaved });
+    });
+    teamPost("/team/members/:mid/delete", async (c, ctx) => {
+      const r = otherMember(c, ctx);
+      if (!r.m) return done(c, ctx.s, membersBack, { kind: "err", text: r.err ?? t.notFound });
+      await members.remove(r.m.id);
+      await d.audit({
+        teamId: ctx.team.id,
+        actor: ctx.actor,
+        action: "member-remove",
+        detail: r.m.name,
+      });
+      return done(c, ctx.s, membersBack, { kind: "ok", text: t.members.removed });
+    });
+
+    const pwError = (p: ReturnType<typeof passwordProblem>) =>
+      p === "short" ? t.members.short : p === "long" ? t.members.long : t.members.same;
+
+    teamPost(
+      "/team/account/password",
+      async (c, { s, team, member, form, actor }) => {
+        if (!member) return done(c, s, membersBack, { kind: "err", text: t.members.keyAccount });
+        if (!(await verifyPassword(field(form, "current"), member.passwordHash))) {
+          return done(c, s, membersBack, { kind: "err", text: t.members.wrongPassword });
+        }
+        const pw = field(form, "password");
+        const problem = passwordProblem(pw, member.username);
+        if (problem) return done(c, s, membersBack, { kind: "err", text: pwError(problem) });
+        if (pw !== field(form, "confirm")) {
+          return done(c, s, membersBack, { kind: "err", text: t.members.mismatch });
+        }
+        const fresh = await members.setPassword(member.id, pw);
+        if (!fresh) return done(c, s, membersBack, { kind: "err", text: t.notFound });
+        // Keep this browser signed in; every other session of the member ends.
+        const ns = sessions.start(c, "team", memberFp(fresh), team.id, fresh.id);
+        await d.audit({ teamId: team.id, actor, action: "password" });
+        return done(c, ns, membersBack, { kind: "ok", text: t.members.passwordChanged });
+      },
+      "viewer",
+    );
+
+    teamPost(
+      "/team/account/signout-all",
+      async (c, { s, team, member }) => {
+        if (!member) return done(c, s, membersBack, { kind: "err", text: t.members.keyAccount });
+        const fresh = await members.endSessions(member.id);
+        if (!fresh) return done(c, s, membersBack, { kind: "err", text: t.notFound });
+        const ns = sessions.start(c, "team", memberFp(fresh), team.id, fresh.id);
+        return done(c, ns, membersBack, { kind: "ok", text: t.members.signedOutAll });
+      },
+      "viewer",
+    );
+
+    // ---- joining with an invite link -------------------------------------------------
+    const joinInvalid = (c: Context) =>
+      page(
+        c,
+        messageHtml(lang, config, "404", t.members.inviteInvalid, t.members.inviteInvalidSub, {
+          href: href("/login"),
+          label: t.login.title,
+        }),
+        404,
+      );
+    app.get(`${prefix}/join/:token`, (c) => {
+      const inv = members.findInvite(c.req.param("token"));
+      const team = inv && teams.get(inv.teamId);
+      if (!inv || !team) return joinInvalid(c);
+      c.header("Referrer-Policy", "no-referrer");
+      return page(
+        c,
+        joinHtml(lang, config, {
+          team: team.name,
+          role: inv.role,
+          csrf: sessions.loginCsrf(c),
+          action: href(`/join/${c.req.param("token")}`),
+        }),
+      );
+    });
+    app.post(`${prefix}/join/:token`, async (c) => {
+      const token = c.req.param("token");
+      const inv = members.findInvite(token);
+      const team = inv && teams.get(inv.teamId);
+      if (!inv || !team) return joinInvalid(c);
+      const form = await formOf(c);
+      const values = { username: field(form, "username"), name: field(form, "name") };
+      const render = (error: string, status: number) =>
+        page(
+          c,
+          joinHtml(lang, config, {
+            team: team.name,
+            role: inv.role,
+            csrf: sessions.loginCsrf(c),
+            action: href(`/join/${token}`),
+            error,
+            values,
+          }),
+          status,
+        );
+      const r = loginRate(c);
+      if (!r.allowed) {
+        c.header("Retry-After", String(r.retryAfterSec));
+        return render(t.login.limited, 429);
+      }
+      if (!sameOrigin(c, config.publicUrl) || !sessions.checkLoginCsrf(c, field(form, "_csrf"))) {
+        return render(t.login.csrf, 403);
+      }
+      const username = cleanUsername(values.username);
+      if (!username) return render(t.members.badUsername, 400);
+      const name = cleanMemberName(values.name);
+      if (!name) return render(t.members.badName, 400);
+      const pw = field(form, "password");
+      const problem = passwordProblem(pw, username);
+      if (problem) return render(pwError(problem), 400);
+      if (pw !== field(form, "confirm")) return render(t.members.mismatch, 400);
+      if (members.byUsername(username)) return render(t.members.taken, 409);
+      if (members.count(team.id) >= MAX_MEMBERS) return render(t.members.tooManyMembers, 409);
+      let m: Member | null;
+      try {
+        m = await members.redeem(token, username, name, pw);
+      } catch (err) {
+        if ((err as Error).message === MemberStore.TAKEN) return render(t.members.taken, 409);
+        throw err;
+      }
+      if (!m) return joinInvalid(c);
+      const s = sessions.start(c, "team", memberFp(m), m.teamId, m.id);
+      await d.audit({
+        teamId: m.teamId,
+        actor: { kind: "member", label: m.name, memberId: m.id },
+        action: "member-join",
+        detail: t.members.roles[m.role],
+      });
+      return done(c, s, href("/team"), { kind: "ok", text: t.members.joined2 });
     });
 
     // ---- admin ----------------------------------------------------------------------
@@ -604,6 +979,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             keyPrefix: x.keyPrefix,
             createdAt: x.createdAt,
             liveSites: counts.get(x.id) ?? 0,
+            members: members.count(x.id),
           })),
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
@@ -666,6 +1042,29 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       return done(c, s, href("/admin"), { kind: "ok", text: t.admin.saved });
     });
 
+    adminPost("/admin/teams/:id/invite", async (c, { s, form }) => {
+      const id = c.req.param("id") ?? "";
+      if (!teams.get(id)) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
+      const role = field(form, "role") || "owner";
+      if (!isRole(role)) return done(c, s, href("/admin"), { kind: "err", text: t.badRequest });
+      if (members.listInvites(id).length >= MAX_INVITES) {
+        return done(c, s, href("/admin"), { kind: "err", text: t.members.tooManyInvites });
+      }
+      const { token } = await members.createInvite(
+        id,
+        role,
+        inviteTtl(field(form, "ttlHours")),
+        "admin",
+      );
+      await d.audit({
+        teamId: id,
+        actor: { kind: "admin", label: "admin" },
+        action: "invite",
+        detail: t.members.roles[role],
+      });
+      return done(c, s, href("/admin"), inviteFlash(token));
+    });
+
     adminPost("/admin/teams/:id/rotate", async (c, { s }) => {
       const r = await teams.rotate(c.req.param("id") ?? "", now());
       if (!r) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
@@ -679,6 +1078,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         for (const m of await store.list()) if (m.teamId === id) await d.deleteSite(m.id);
       }
       await teams.delete(id);
+      await members.purgeTeam(id);
       d.invalidateDirectory();
       return done(c, s, href("/admin"), { kind: "ok", text: t.admin.deleted });
     });

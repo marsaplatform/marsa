@@ -23,6 +23,17 @@ import {
 } from "./ingest.js";
 import { llmsTxt } from "./llms.js";
 import { mountMcpRoutes } from "./mcp.js";
+import {
+  type Actor,
+  type AuditEntry,
+  INVITE_TTL_DEFAULT,
+  INVITE_TTL_MAX,
+  isRole,
+  MAX_INVITES,
+  MemberStore,
+  publicInvite,
+  publicMember,
+} from "./members.js";
 import { openapi } from "./openapi.js";
 import { RateLimiter } from "./rate-limit.js";
 import { SDK_JS } from "./sdk.js";
@@ -87,6 +98,8 @@ export interface AppDeps {
   sessions?: Sessions;
   /** Page-view counter. Built from config when omitted (the caller flushes it). */
   visits?: VisitCounter;
+  /** Team members, invites and the audit log. Loaded from <dataDir> when omitted. */
+  members?: MemberStore;
   now?: () => number;
 }
 
@@ -104,7 +117,17 @@ export function createApp({
   teams = new TeamStore(config.dataDir),
   sessions,
   visits = new VisitCounter(config.dataDir, config.visits, now),
+  members = new MemberStore(config.dataDir, now),
 }: AppDeps) {
+  /** Record an action on a team's site (or the team) in its audit log. */
+  const audit = async (e: Omit<AuditEntry, "at" | "teamId"> & { teamId?: string }) => {
+    if (e.teamId && teams.get(e.teamId)) await members.log({ ...e, teamId: e.teamId });
+  };
+  /** Who is calling the API: the team key, or a site's edit token. */
+  const apiActor = (c: Context): Actor =>
+    c.req.header("x-team-key") || isTeamKey(bearer(c.req.header("authorization")) ?? "")
+      ? { kind: "api", label: "team key" }
+      : { kind: "api", label: "edit token" };
   store.onDelete((id) => visits.purge(id));
   const session = sessions ?? new Sessions(config, now);
   const app = new Hono();
@@ -139,6 +162,7 @@ export function createApp({
   // ---- baseline headers + API rate limit ----------------------------------
   app.use("*", async (c, next) => {
     await teams.ready();
+    await members.ready();
     await next();
     baseHeaders(c.res.headers);
   });
@@ -526,6 +550,14 @@ export function createApp({
     if (limited) return limited;
     const { entries, ttl } = await readUpload(c);
     const { meta, token } = await createSite(entries, ttl, team);
+    if (team)
+      await audit({
+        teamId: team.id,
+        siteId: meta.id,
+        actor: apiActor(c),
+        action: "publish",
+        detail: meta.title,
+      });
     return c.json({ ...view(meta), editToken: token }, 201);
   });
 
@@ -540,7 +572,9 @@ export function createApp({
     const limited = await uploadRate(c);
     if (limited) return limited;
     const { entries } = await readUpload(c);
-    return c.json(view(await replaceSite(meta, entries)));
+    const out = await replaceSite(meta, entries);
+    await audit({ teamId: meta.teamId, siteId: meta.id, actor: apiActor(c), action: "replace" });
+    return c.json(view(out));
   });
 
   /** Change the expiry. A link can never outlive createdAt + MAX_TTL_HOURS. */
@@ -552,7 +586,15 @@ export function createApp({
       permanent?: unknown;
     };
     const ttl = body.permanent === true ? "permanent" : body.ttlHours;
-    return c.json(view(await extendSite(meta, ttl)));
+    const out = await extendSite(meta, ttl);
+    await audit({
+      teamId: meta.teamId,
+      siteId: meta.id,
+      actor: apiActor(c),
+      action: ttl === "permanent" ? "permanent" : "extend",
+      detail: out.expiresAt,
+    });
+    return c.json(view(out));
   });
 
   app.delete("/api/sites/:id", async (c) => {
@@ -560,11 +602,28 @@ export function createApp({
     if (meta instanceof Response) return meta;
     await removeSite(store, backend, meta.id);
     invalidateDirectory();
+    await audit({
+      teamId: meta.teamId,
+      siteId: meta.id,
+      actor: apiActor(c),
+      action: "delete",
+      detail: meta.title,
+    });
     return c.body(null, 204);
   });
 
   // ---- one MCP server per space ---------------------------------------------
-  mountMcpRoutes(app, { config, store, teams, backend, limiter, now, siteUrl, replaceSite });
+  mountMcpRoutes(app, {
+    config,
+    store,
+    teams,
+    backend,
+    limiter,
+    now,
+    siteUrl,
+    replaceSite,
+    audit,
+  });
 
   // ---- optional per-site data/files backend --------------------------------
   mountBackendRoutes(app, { config, store, backend, teams, now, uploadRate });
@@ -632,6 +691,7 @@ export function createApp({
     ...publicTeam(t),
     quota: { sites: quotaOf(t).sites, mb: Math.round(quotaOf(t).bytes / 1024 / 1024) },
     ...(counts ? { liveSites: counts.get(t.id) ?? 0 } : {}),
+    members: members.count(t.id),
   });
   const readFlags = (body: Record<string, unknown>, c: Context) => {
     const out: TeamPatch = {};
@@ -703,6 +763,58 @@ export function createApp({
     if (!r) return apiError(c, 404, "NOT_FOUND", "team not found");
     return c.json({ team: teamView(r.team), key: r.key });
   });
+  // Members and invites (no email: the admin hands the invite link over).
+  app.get("/api/admin/teams/:id/members", (c) => {
+    const id = c.req.param("id");
+    if (!teams.get(id)) return apiError(c, 404, "NOT_FOUND", "team not found");
+    return c.json({
+      members: members.list(id).map(publicMember),
+      invites: members.listInvites(id).map(publicInvite),
+    });
+  });
+  app.post("/api/admin/teams/:id/invites", async (c) => {
+    const id = c.req.param("id");
+    if (!teams.get(id)) return apiError(c, 404, "NOT_FOUND", "team not found");
+    const body = (await c.req.json().catch(() => ({}))) as { role?: unknown; ttlHours?: unknown };
+    const role = body.role === undefined ? "owner" : body.role;
+    if (!isRole(role))
+      return apiError(c, 400, "BAD_REQUEST", '"role" must be owner, editor or viewer');
+    const ttl = body.ttlHours === undefined ? INVITE_TTL_DEFAULT : Number(body.ttlHours);
+    if (!Number.isInteger(ttl) || ttl < 1 || ttl > INVITE_TTL_MAX) {
+      return apiError(c, 400, "BAD_REQUEST", `"ttlHours" must be 1-${INVITE_TTL_MAX}`);
+    }
+    if (members.listInvites(id).length >= MAX_INVITES) {
+      return apiError(c, 409, "TOO_MANY_INVITES", `a team can have ${MAX_INVITES} pending invites`);
+    }
+    const { invite, token } = await members.createInvite(id, role, ttl, "admin");
+    await audit({
+      teamId: id,
+      actor: { kind: "admin", label: "admin" },
+      action: "invite",
+      detail: role,
+    });
+    return c.json({ invite: publicInvite(invite), url: `${config.publicUrl}/join/${token}` }, 201);
+  });
+  app.delete("/api/admin/teams/:id/invites/:iid", async (c) => {
+    const inv = members.listInvites(c.req.param("id")).find((i) => i.id === c.req.param("iid"));
+    if (!inv) return apiError(c, 404, "NOT_FOUND", "invite not found");
+    await members.revokeInvite(inv.id);
+    return c.body(null, 204);
+  });
+  app.delete("/api/admin/teams/:id/members/:mid", async (c) => {
+    const m = members.get(c.req.param("mid"));
+    if (!m || m.teamId !== c.req.param("id"))
+      return apiError(c, 404, "NOT_FOUND", "member not found");
+    await members.remove(m.id);
+    await audit({
+      teamId: m.teamId,
+      actor: { kind: "admin", label: "admin" },
+      action: "member-remove",
+      detail: m.name,
+    });
+    return c.body(null, 204);
+  });
+
   app.delete("/api/admin/teams/:id", async (c) => {
     const id = c.req.param("id");
     if (!teams.get(id)) return apiError(c, 404, "NOT_FOUND", "team not found");
@@ -718,6 +830,7 @@ export function createApp({
       }
     }
     await teams.delete(id);
+    await members.purgeTeam(id);
     invalidateDirectory();
     return c.json({ deleted: id, removedSites });
   });
@@ -769,6 +882,8 @@ export function createApp({
     quotaOf,
     usageOf,
     visits,
+    members,
+    audit,
     siteUrl,
     invalidateDirectory,
     siteCounts,

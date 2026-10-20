@@ -240,6 +240,20 @@ a.card:hover{border-color:var(--accent);transform:translateY(-2px);color:var(--i
 .quota-field input{width:100%;padding:6px 8px;font-size:14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper)}
 @media (max-width:820px){.quota-form{grid-template-columns:repeat(2,90px)}}
 
+/* members */
+.member-login{margin-bottom:8px}
+.member-login h2{margin:0 0 4px}
+.login-or{margin:28px 0 2px}
+.invite-form,.role-form{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
+.invite-form select,.role-form select{width:auto;min-width:0;padding:4px 8px;font-size:13px}
+.invite-panel .form-row{align-items:flex-end;flex-wrap:wrap;gap:12px}
+.invite-panel label{display:flex;flex-direction:column;gap:4px;font-weight:600;font-size:14px}
+.role-help{margin:12px 0 0;padding-inline-start:18px}
+.role-help li{margin:2px 0}
+.audit-table td{vertical-align:top}
+.account-block .panel input{width:100%}
+.head-tools .segmented{margin-inline-end:8px}
+
 /* visits */
 .visits-cell{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .spark{display:block;flex:none;color:var(--accent)}

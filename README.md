@@ -56,7 +56,8 @@ backend access can use it (see [Teams](docs/teams.md)).
 - **Admin console** at `/admin/login`: create teams with a team key, choose per team whether its sites
   get the data/files backend and whether they appear in the **public directory** on the homepage
   (`GET /api/directory`), and see or delete every live site, filtered by team or guests.
-  See [docs/teams.md](docs/teams.md).
+  Teams can invite **members** (owner, editor, viewer) with single-use links; the team key keeps
+  working for agents and as an owner sign-in. See [docs/teams.md](docs/teams.md).
 - **Marsa platform look**: the Zad typeface (self-hosted, SIL OFL), the marsaplatform.com palette,
   Arabic first and RTL-correct, light and dark, responsive, keyboard and screen-reader friendly.
 - **Optional data/files backend** (Cloudflare Workers KV + R2): per-site KV and files, a browser SDK at `/sdk.js`, and

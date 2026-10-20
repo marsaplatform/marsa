@@ -32,7 +32,7 @@ Use it when you have produced a web page, HTML report, dashboard or prototype th
 
 ## Teams (optional)
 
-If the operator gave you a team key, add the header X-Team-Key: <team key> to POST ${base}/api/sites. The site then belongs to that team (it may get the data/files backend and be listed in the public directory at ${base}/api/directory). Never put the team key in a page. A wrong key answers 401 INVALID_TEAM_KEY; omit the header to upload as a guest. Humans on the team can sign in at ${base}/login with the same key to manage the team's sites in a dashboard (publish, replace, extend, delete, browse KV and files).
+If the operator gave you a team key, add the header X-Team-Key: <team key> to POST ${base}/api/sites. The site then belongs to that team (it may get the data/files backend and be listed in the public directory at ${base}/api/directory). Never put the team key in a page. A wrong key answers 401 INVALID_TEAM_KEY; omit the header to upload as a guest. Humans on the team sign in at ${base}/login with their own member account (invited by an owner; roles owner/editor/viewer) or with the team key (acts as owner) to manage the team's sites in a dashboard (publish, replace, extend, delete, browse KV and files).
 
 ## MCP per space
 

@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] - 2026-10-20
+
+### Added
+- **Team members.** The admin, or a team owner, creates **single-use, expiring invite links**: 24 h,
+  72 h (default) or 7 days, at most 20 pending per team. There is no email provider: whoever opens the
+  link picks a username, a display name and a password, and is signed in.
+  - Passwords are hashed with scrypt (N=2¹⁵, r=8, p=1). Invite tokens are stored only as SHA-256.
+  - Usernames are unique on the instance. A team can have up to 50 members.
+- **Roles:**
+  - **owner**: everything, including members.
+  - **editor**: publish and manage sites, and MCP tokens.
+  - **viewer**: read-only.
+  - The server enforces roles on every route, and the UI hides what a role can't do.
+- **Sessions per member.** A member session is bound to that member's password and epoch, so it
+  ends on a password change, on *Sign out everywhere else* and on removal.
+- **Members page** (`/team/members`):
+  - the people with their roles, joined and last sign-in dates;
+  - role changes and removal (owners);
+  - pending invites;
+  - *Your account* (change password, sign out everywhere else);
+  - the team's activity log.
+- **Audit log.**
+  - Covers dashboard actions, API calls (team key or edit token), MCP writes, invites, joins and role
+    changes.
+  - The site page shows the last 30 entries for the site; the team keeps the last 500 in
+    `audit.json`.
+- **Admin:** a *Members* column with an invite form in the console. API:
+  - `POST /api/admin/teams/:id/invites`
+  - `GET /api/admin/teams/:id/members`
+  - `DELETE /api/admin/teams/:id/members/:mid`
+  - `DELETE /api/admin/teams/:id/invites/:iid`
+  - Team delete purges members, invites and the log.
+
+### Unchanged (migration)
+- The team key keeps working for `X-Team-Key` uploads and the API.
+- Browser sign-in with the key still works and acts as an **owner**, so existing teams need no
+  migration. The login page now offers a member sign-in first and the team key below it.
+
+### Changed
+- Arabic sparkline label uses Arabic-Indic digits throughout.
+
 ## [0.10.0] - 2026-10-20
 
 ### Added
