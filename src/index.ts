@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
-import { AppwriteBackend } from "./backend/appwrite.js";
+import { CloudflareBackend } from "./backend/cloudflare.js";
 import { APP_NAME } from "./brand.js";
 import { loadConfig } from "./config.js";
 import { SiteStore } from "./store.js";
@@ -20,7 +20,7 @@ await store.init();
 const teams = new TeamStore(config.dataDir);
 await teams.init();
 
-const backend = config.appwrite ? new AppwriteBackend(config.appwrite) : null;
+const backend = config.cloudflare ? new CloudflareBackend(config.cloudflare) : null;
 const app = createApp({ config, store, backend, teams });
 
 const sweep = async () => {
@@ -43,7 +43,7 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
     `admin API: ${config.adminToken ? `enabled (${teams.list().length} team(s); console at /admin)` : "disabled"}`,
   );
   console.log(
-    `data/files backend: ${config.appwrite ? `appwrite (${new URL(config.appwrite.endpoint).host})` : "off (static publishing only)"}`,
+    `data/files backend: ${config.cloudflare ? `cloudflare (KV namespace ${config.cloudflare.kvNamespaceId}, R2 bucket ${config.cloudflare.r2Bucket})` : "off (static publishing only)"}`,
   );
 });
 

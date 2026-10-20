@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-10-20
+
+### Changed
+- **The optional data/files backend now runs on Cloudflare instead of Appwrite.** KV values live in a
+  Workers KV namespace (REST API, keys `<siteId>/<key>`), files in an R2 bucket (S3-compatible API,
+  objects `<siteId>/<fileId>/<name>`), called straight from Node; no Worker needed. The HTTP API,
+  status codes, the 403/503 rules, `BACKEND_PUBLIC_READ` and the purge on delete/expiry are unchanged.
+- Configuration: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_KV_NAMESPACE_ID`,
+  `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (all five or none), optional `R2_BUCKET`
+  (default `marsa-files`) and `R2_ENDPOINT`.
+- New `scripts/cloudflare-setup.mjs` (idempotent) creates the KV namespace and the R2 bucket and can
+  derive the R2 S3 keys from the API token.
+
+### Removed
+- Appwrite support: `src/backend/appwrite.ts`, the `node-appwrite` dependency,
+  `scripts/appwrite-setup.mjs` and the `APPWRITE_*` variables. Data stored in Appwrite is not migrated.
+
 ## [0.4.0] - 2026-10-20
 
 ### Added

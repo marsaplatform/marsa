@@ -1,33 +1,34 @@
-# Optional data & files backend (Appwrite)
+# Optional data & files backend (Cloudflare)
 
 Static publishing is all most people need, and it **never requires a backend**. When a page or an
 agent also needs to **store a little data** (a counter, form results, a JSON state blob) or
 **files** (uploaded images, generated exports), Marsa can proxy those to
-[Appwrite](https://appwrite.io), an open-source backend server.
+[Cloudflare](https://www.cloudflare.com): values go to **Workers KV**, files to **R2**. Marsa talks to
+Cloudflare's public HTTP APIs straight from Node; no Worker to deploy, nothing to install.
 
 ## Do I need to install anything?
 
 | You want to… | You need |
 | --- | --- |
 | Use someone's Marsa instance | Nothing. Upload in the browser or call the API. |
-| Host your own Marsa | Only Marsa: `docker compose up -d --build`. No database, no Appwrite. |
-| Give pages/agents KV and files | An Appwrite project, either **Appwrite Cloud** (nothing to install) or a **self-hosted Appwrite**, connected with four env vars. |
+| Host your own Marsa | Only Marsa: `docker compose up -d --build`. No database, no Cloudflare account. |
+| Give pages/agents KV and files | A Cloudflare account (the free plan works) with one KV namespace and one R2 bucket, connected with five env vars. |
 
-With no `APPWRITE_*` variables set, Marsa starts normally, the log says
+With no `CLOUDFLARE_*` / `R2_*` variables set, Marsa starts normally, the log says
 `data/files backend: off (static publishing only)`, `/api/config` reports `"backend": {"enabled": false}`,
 and every backend route answers:
 
 ```json
 HTTP 503
 { "error": { "code": "BACKEND_NOT_CONFIGURED",
-  "message": "This Marsa instance has no data/files backend. Static publishing works; set the APPWRITE_* variables to enable KV and files." } }
+  "message": "This Marsa instance has no data/files backend. Static publishing works; set the CLOUDFLARE_* and R2_* variables to enable KV and files." } }
 ```
 
 ## Who may use it
 
 Only sites uploaded with the key of a **team** that the admin gave **backend access** (see
 [Teams](teams.md)). Guest uploads and sites of other teams get `403 BACKEND_NOT_ALLOWED`. Allowed
-sites on an instance without Appwrite get the `503` above. Set `BACKEND_GUEST_ACCESS=true` to let
+sites on an instance without the backend configured get the `503` above. Set `BACKEND_GUEST_ACCESS=true` to let
 every site use the backend, as in 0.3.
 
 ## What it adds
@@ -43,56 +44,64 @@ Rules:
 - **Writes always need the site's edit token** (`Authorization: Bearer …`).
 - **Reads are public** while the site is live (`BACKEND_PUBLIC_READ=true`, the default): the data is as
   public as the page. Set `BACKEND_PUBLIC_READ=false` to require the token for reads too.
-- When the site expires or is deleted, its KV rows and files are **removed from Appwrite**.
-- The Appwrite **API key never leaves the server**. Browsers only talk to Marsa.
+- When the site expires or is deleted, its KV entries and files are **removed from Cloudflare**.
+- The Cloudflare **API token and R2 keys never leave the server**. Browsers only talk to Marsa.
 - Limits: `BACKEND_MAX_VALUE_KB` (64) per value, `BACKEND_MAX_KEYS` (1000) and `BACKEND_MAX_FILES` (100)
   per site, `MAX_FILE_MB` per file; file uploads count toward `UPLOADS_PER_HOUR`; blocked file types
   are rejected like in site uploads; downloads are served with the sandbox CSP.
 
 ## Setup
 
-### 1. Get an Appwrite project
+### 1. Create a Cloudflare API token
 
-- **Appwrite Cloud**: create a free project at [cloud.appwrite.io](https://cloud.appwrite.io). Your endpoint
-  is shown in the project settings (for example `https://<region>.cloud.appwrite.io/v1`).
-- **Self-hosted**: follow the official
-  [self-hosting guide](https://appwrite.io/docs/advanced/self-hosting). Appwrite runs as its own
-  multi-container stack, so it isn't bundled into Marsa's compose file; run it next to Marsa and use
-  its URL, e.g. `https://appwrite.example.com/v1`.
+Cloudflare dashboard → **Manage account → Account API tokens → Create token → Custom token** (a user
+API token works too). Permissions, all **Account** scope, limited to your account:
 
-### 2. Create an API key
+| Permission | Why |
+| --- | --- |
+| `Workers KV Storage: Edit` | read/write/list/delete KV values; create the namespace |
+| `Workers R2 Storage: Edit` | create the bucket; the S3 keys derived from this token read/write objects |
 
-In the Appwrite console: **Project → Overview → Integrations → API keys → Create**. Grant only:
-`databases.read`, `databases.write`, `tables.read`, `tables.write`, `rows.read`, `rows.write`,
-`buckets.read`, `buckets.write`, `files.read`, `files.write`.
+Note your **Account ID** (dashboard → Workers & Pages → right sidebar, or any zone's overview page).
+
+### 2. Create the KV namespace and the R2 bucket
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… node scripts/cloudflare-setup.mjs --write-env .env
+```
+
+The script is idempotent: it verifies the token, then creates (or reuses, matched by name) a KV namespace
+titled `marsa-kv` and an R2 bucket `marsa-files` (override with `CLOUDFLARE_KV_TITLE` / `R2_BUCKET`). It
+never touches other namespaces or buckets. It prints the namespace id, the bucket and the R2 access key
+id. Secrets are never printed; `--write-env FILE` writes them into that file (mode 600) instead.
+
+**R2 S3 credentials.** R2 objects are read and written through R2's S3-compatible API, which signs
+requests with an access key pair. Cloudflare documents that any API token with R2 permissions doubles
+as one: **Access Key ID = the token's id**, **Secret Access Key = the SHA-256 hex digest of the token
+value** ([R2 docs: Get S3 API credentials from an API token](https://developers.cloudflare.com/r2/api/tokens/#get-s3-api-credentials-from-an-api-token)).
+The setup script derives both for you. If you prefer a separate, bucket-scoped key, create one under
+**R2 → Manage API tokens** (permission *Object Read & Write*, limited to the bucket) and use its
+Access Key ID / Secret Access Key instead.
 
 ### 3. Configure Marsa
 
 In `.env` (placeholders shown):
 
 ```bash
-APPWRITE_ENDPOINT=https://appwrite.example.com/v1
-APPWRITE_PROJECT_ID=your-project-id
-APPWRITE_API_KEY=your-server-api-key
-APPWRITE_DATABASE_ID=marsa
+CLOUDFLARE_ACCOUNT_ID=0123456789abcdef0123456789abcdef
+CLOUDFLARE_API_TOKEN=your-api-token
+CLOUDFLARE_KV_NAMESPACE_ID=your-kv-namespace-id
+R2_ACCESS_KEY_ID=your-r2-access-key-id
+R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
 # optional
-APPWRITE_KV_TABLE_ID=marsa_kv
-APPWRITE_BUCKET_ID=marsa_files
+R2_BUCKET=marsa-files
+# R2_ENDPOINT=https://<account>.eu.r2.cloudflarestorage.com   # only for EU/FedRAMP jurisdiction buckets
 BACKEND_PUBLIC_READ=true
 ```
 
-Set all four required values or none: a partial config stops Marsa at startup with a message naming
-the missing ones.
-
-### 4. Create the table and bucket
-
-```bash
-node --env-file=.env scripts/appwrite-setup.mjs
-```
-
-It creates (or keeps, if they exist) the database, a `marsa_kv` table with `siteId`, `key` and `value`
-columns plus an index on `siteId`, and a `marsa_files` bucket. Neither has any public permissions:
-only the API key can reach them. Restart Marsa; the log should say `data/files backend: appwrite (…)`.
+Set all five required values or none: a partial config stops Marsa at startup with a message naming
+the missing ones. Restart Marsa; the log should say
+`data/files backend: cloudflare (KV namespace …, R2 bucket …)`.
 
 ## Using it
 
@@ -157,12 +166,28 @@ A sample page is in [`examples/backend-notes`](../examples/backend-notes).
 \* the edit token is required when `BACKEND_PUBLIC_READ=false`. Keys are 1–128 characters of
 `A-Z a-z 0-9 . _ : -`.
 
-## Data layout in Appwrite
+## Data layout in Cloudflare
 
-- Table `marsa_kv`: one row per (site, key); row id = `k` + 35 hex chars of `sha256(siteId + "\n" + key)`;
-  columns `siteId`, `key`, `value` (JSON text).
-- Bucket `marsa_files`: file name `<siteId>/<original name>`.
+- **Workers KV** namespace: one entry per (site, key), named `<siteId>/<key>`, value = the JSON text.
+  Listing a site's keys is a prefix list on `<siteId>/`.
+- **R2** bucket: one object per file, named `<siteId>/<fileId>/<percent-encoded original name>`, stored
+  with its content type. The file id (`f` + base36 time + 16 hex chars) keeps uploads with the same name
+  apart and makes listings come back in upload order.
+- Deleting or expiring a site removes every `<siteId>/` KV entry (bulk delete) and R2 object.
 
-If a cleanup call to Appwrite fails (for example Appwrite is down at expiry time), Marsa logs
-`[backend] purge of <id> failed`. Such leftovers can be found by `siteId` / name prefix and removed in
-the Appwrite console.
+### Things to know about Cloudflare
+
+- Calls to Workers KV go through the Cloudflare REST API, which is rate limited to
+  **1,200 requests per 5 minutes** per token ([Cloudflare API limits](https://developers.cloudflare.com/fundamentals/api/reference/limits/)).
+  Each KV read or write from a page costs one or two of those. R2 (S3 API) is not under that limit.
+- Workers KV accepts **one write per second to the same key**; Marsa retries a rate-limited (429) or
+  failed (5xx) call twice with a short back-off before giving up.
+- KV is **eventually consistent**. Reads and writes through the REST API are normally immediate, but a
+  list, or a read right after a bulk delete, can lag for up to about a minute. `BACKEND_MAX_KEYS` is
+  therefore a soft limit.
+- The free plan includes 100,000 KV reads and 1,000 KV writes per day, and 10 GB of R2 storage
+  ([KV limits](https://developers.cloudflare.com/kv/platform/limits/), [R2 pricing](https://developers.cloudflare.com/r2/pricing/)).
+
+If a cleanup call to Cloudflare fails (for example Cloudflare is unreachable at expiry time), Marsa logs
+`[backend] purge of <id> failed`. Such leftovers can be found by the `<siteId>/` prefix and removed in
+the Cloudflare dashboard (KV namespace → entries, R2 bucket → objects).

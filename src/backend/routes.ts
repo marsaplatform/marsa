@@ -27,7 +27,7 @@ const err = (c: Context, status: number, code: string, message: string) =>
 
 /**
  * Optional per-site backend: KV values and files, proxied server-side to the
- * configured store (Appwrite). Only sites of a team with backend access may
+ * configured store (Cloudflare Workers KV + R2). Only sites of a team with backend access may
  * use it (403 BACKEND_NOT_ALLOWED otherwise, unless BACKEND_GUEST_ACCESS=true). Reads are public when BACKEND_PUBLIC_READ=true
  * (the default; the data is as public as the site), writes always need the
  * site's edit token. With no backend configured, allowed sites get 503
@@ -71,7 +71,7 @@ export function mountBackendRoutes(app: Hono, deps: BackendRouteDeps): void {
           c,
           503,
           "BACKEND_NOT_CONFIGURED",
-          "This Marsa instance has no data/files backend. Static publishing works; set the APPWRITE_* variables to enable KV and files.",
+          "This Marsa instance has no data/files backend. Static publishing works; set the CLOUDFLARE_* and R2_* variables to enable KV and files.",
         );
       }
       await next();

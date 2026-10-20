@@ -55,7 +55,7 @@ const PAGES: { slug: string; lang: Lang; file: string; summary: string }[] = [
     slug: "backend",
     lang: "en",
     file: "backend.md",
-    summary: "Optional KV and files for pages and agents, backed by Appwrite.",
+    summary: "Optional KV and files for pages and agents, backed by Cloudflare Workers KV and R2.",
   },
   {
     slug: "teams",

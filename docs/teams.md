@@ -46,14 +46,14 @@ curl -s -X POST "https://marsa.example.com/api/sites?ttlHours=72" \
 
 ## Who may use the backend
 
-| Site | Appwrite configured | Appwrite **not** configured |
+| Site | Backend configured | Backend **not** configured |
 | --- | --- | --- |
 | Team with backend access | Works (edit token for writes) | `503 BACKEND_NOT_CONFIGURED` |
 | Team without backend access | `403 BACKEND_NOT_ALLOWED` | `403 BACKEND_NOT_ALLOWED` |
 | Guest upload | `403 BACKEND_NOT_ALLOWED` | `403 BACKEND_NOT_ALLOWED` |
 
 The check runs on every request, so turning a team's access off blocks its sites at once.
-Real KV/files storage still needs the `APPWRITE_*` variables (see [the backend guide](backend.md)).
+Real KV/files storage still needs the `CLOUDFLARE_*` / `R2_*` variables (see [the backend guide](backend.md)).
 To go back to the old open policy (every site may use the backend) set `BACKEND_GUEST_ACCESS=true`.
 
 ## The public directory

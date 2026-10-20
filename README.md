@@ -27,10 +27,10 @@ database, and it's MIT licensed.
 | --- | --- |
 | Use a Marsa instance someone runs | **Nothing.** Upload in the browser or call the API. |
 | Host your own Marsa | **Only Marsa**, one Docker command (below). No database, no other services. All publishing features work without anything else. |
-| Give pages and agents data/file storage | The **optional** backend: an [Appwrite](https://appwrite.io) project, either **Appwrite Cloud** (nothing to install) or **self-hosted Appwrite**, connected with env vars. Off by default. |
+| Give pages and agents data/file storage | The **optional** backend: a [Cloudflare](https://www.cloudflare.com) account (free plan works) with a Workers KV namespace and an R2 bucket, connected with env vars. Nothing to install. Off by default. |
 
-Without any `APPWRITE_*` variables, Marsa starts normally and the backend routes answer
-`503 BACKEND_NOT_CONFIGURED`. Even with Appwrite configured, only sites of a **team** the admin gave
+Without the `CLOUDFLARE_*` / `R2_*` variables, Marsa starts normally and the backend routes answer
+`503 BACKEND_NOT_CONFIGURED`. Even with Cloudflare configured, only sites of a **team** the admin gave
 backend access can use it (see [Teams](docs/teams.md)).
 
 ## Features
@@ -52,7 +52,7 @@ backend access can use it (see [Teams](docs/teams.md)).
 - **Teams and an admin console** at `/admin`: create teams with a team key, choose per team whether
   its sites get the data/files backend, and whether they appear in the **public directory** on the
   homepage (`GET /api/directory`). Guests keep uploading as before. See [docs/teams.md](docs/teams.md).
-- **Optional data/files backend** (Appwrite): per-site KV and files, a browser SDK at `/sdk.js`, and
+- **Optional data/files backend** (Cloudflare Workers KV + R2): per-site KV and files, a browser SDK at `/sdk.js`, and
   automatic cleanup when a site goes away.
 
 ## Who it's for
@@ -134,34 +134,38 @@ curl -s -X DELETE "$BASE/api/sites/$ID" -H "Authorization: Bearer $TOKEN"       
 
 A wrong token and a missing site both return `404`. See [docs/managing.md](docs/managing.md).
 
-## Optional data & files backend (Appwrite)
+## Optional data & files backend (Cloudflare)
 
 For pages and agents that need to store a little state (KV) or files, Marsa can proxy per-site
-storage to Appwrite. Here's what it adds:
+storage to Cloudflare (values in Workers KV, files in R2, over Cloudflare's HTTP APIs; no Worker needed).
+Here's what it adds:
 
 - `GET/PUT/DELETE /api/sites/:id/kv/:key`, plus `GET /api/sites/:id/kv` to list keys
 - `POST/GET /api/sites/:id/files` and `GET/DELETE /api/sites/:id/files/:fileId`
 - `/sdk.js` for pages: `marsa.kv.get(key)`, `marsa.files.list()`, and writes after `marsa.auth(token)`
 - Writes always need the edit token. Reads are public while the site is live (`BACKEND_PUBLIC_READ=true`).
-- Data is purged from Appwrite when the site expires or is deleted. The Appwrite API key never reaches browsers.
+- Data is purged from Cloudflare when the site expires or is deleted. The API token and R2 keys never reach browsers.
 - **Only sites uploaded with the key of a team that has backend access** may use it. Others get
   `403 BACKEND_NOT_ALLOWED` (set `BACKEND_GUEST_ACCESS=true` to allow every site). Allowed teams on an
-  instance without Appwrite get `503 BACKEND_NOT_CONFIGURED`.
+  instance without the backend configured get `503 BACKEND_NOT_CONFIGURED`.
 
 Setup (placeholders):
 
 ```bash
-APPWRITE_ENDPOINT=https://appwrite.example.com/v1   # or your Appwrite Cloud endpoint
-APPWRITE_PROJECT_ID=your-project-id
-APPWRITE_API_KEY=your-server-api-key
-APPWRITE_DATABASE_ID=marsa
+# token permissions: Workers KV Storage: Edit + Workers R2 Storage: Edit
+CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… \
+  node scripts/cloudflare-setup.mjs --write-env .env   # creates/reuses the KV namespace + R2 bucket
 ```
 
 ```bash
-node --env-file=.env scripts/appwrite-setup.mjs     # creates the table, columns, index and bucket
+CLOUDFLARE_ACCOUNT_ID=0123456789abcdef0123456789abcdef
+CLOUDFLARE_API_TOKEN=your-api-token
+CLOUDFLARE_KV_NAMESPACE_ID=your-kv-namespace-id
+R2_ACCESS_KEY_ID=your-r2-access-key-id          # = the token id (derived by the setup script)
+R2_SECRET_ACCESS_KEY=your-r2-secret-access-key  # = sha256(token value) (derived by the setup script)
 ```
 
-You must set all four required values or none; a partial config stops startup with a message. The full
+You must set all five required values or none; a partial config stops startup with a message. The full
 guide is in [docs/backend.md](docs/backend.md).
 
 ## Configuration
@@ -180,8 +184,9 @@ All settings are environment variables, and all are optional. See [`.env.example
 | `API_REQUESTS_PER_MINUTE` | `120` | Any `/api` request per IP per minute |
 | `TRUST_PROXY` | `false` | Use `X-Real-IP` / the last `X-Forwarded-For` hop as the client IP |
 | `ADMIN_TOKEN` | empty (off) | Enables `/api/admin/*` (min. 24 chars) |
-| `APPWRITE_ENDPOINT` / `APPWRITE_PROJECT_ID` / `APPWRITE_API_KEY` / `APPWRITE_DATABASE_ID` | empty (off) | Optional backend; set all four or none |
-| `APPWRITE_KV_TABLE_ID` / `APPWRITE_BUCKET_ID` | `marsa_kv` / `marsa_files` | Backend table and bucket |
+| `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_KV_NAMESPACE_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | empty (off) | Optional backend; set all five or none |
+| `R2_BUCKET` | `marsa-files` | R2 bucket for backend files |
+| `R2_ENDPOINT` | `https://<account>.r2.cloudflarestorage.com` | Only for EU/FedRAMP jurisdiction buckets |
 | `BACKEND_GUEST_ACCESS` | `false` | `true` lets every site (guests too) use the backend; default is teams with backend access only |
 | `BACKEND_PUBLIC_READ` | `true` | Public reads of a live site's KV and files |
 | `BACKEND_MAX_VALUE_KB` / `BACKEND_MAX_KEYS` / `BACKEND_MAX_FILES` | `64` / `1000` / `100` | Backend caps per site |
@@ -213,9 +218,9 @@ All settings are environment variables, and all are optional. See [`.env.example
 │  serve  /s/<id>/*    sandbox CSP (security.ts)           │
 │  opt.   /api/sites/:id/kv|files  backend/routes.ts       │
 └──────────┬──────────────────────────────┬────────────────┘
-           │ store.ts (staged + rename)   │ backend/appwrite.ts (node-appwrite)
+           │ store.ts (staged + rename)   │ backend/cloudflare.ts (fetch + aws4fetch)
    DATA_DIR/sites/<id>/meta.json          ▼
-   DATA_DIR/sites/<id>/files/…      Appwrite: marsa_kv table, marsa_files bucket
+   DATA_DIR/sites/<id>/files/…      Cloudflare: Workers KV namespace, R2 bucket
            ▲
   index.ts + sweep.ts: delete expired sites (and their backend data) every minute
 ```
@@ -223,15 +228,15 @@ All settings are environment variables, and all are optional. See [`.env.example
 - Each site is a folder with a `meta.json` (expiry, file list, token hash). Writes are staged in
   `DATA_DIR/tmp` and swapped in with `rename()`.
 - UI strings live in `src/i18n.ts`, and pages are rendered per language on the server.
-- The backend is an interface (`src/backend/types.ts`) with an Appwrite implementation. Tests use an
-  in-memory one and a mocked node-appwrite client.
+- The backend is an interface (`src/backend/types.ts`) with a Cloudflare implementation. Tests use an
+  in-memory one and a mocked Cloudflare HTTP API (`test/fake-cloudflare.ts`).
 
 ```
 src/       app index config brand ui assets i18n docs llms openapi sdk sweep
            ingest paths mime store tokens rate-limit security client-ip errors
-src/backend/  types appwrite routes
+src/backend/  types cloudflare routes
 docs/      guides served at /docs        examples/  sample sites, CI workflow, agent scripts
-test/      vitest suites                 scripts/   smoke.mjs, appwrite-setup.mjs, rename.mjs
+test/      vitest suites                 scripts/   smoke.mjs, cloudflare-setup.mjs, rename.mjs
 ```
 
 ## Contributing
@@ -253,8 +258,8 @@ see [NOTICE](NOTICE).
 Marsa is open source because a place to drop work should be one you control:
 
 - **Self-host** it next to your agents, on your own domain, with your own limits.
-- **Own your data.** Uploads live in a folder on your server (plus your Appwrite project if you enable
-  the backend), and they're deleted when they expire.
+- **Own your data.** Uploads live in a folder on your server (plus your own Cloudflare account if you
+  enable the backend), and they're deleted when they expire.
 - **Build on it.** It's small, typed and tested. Fork it, embed it in your agent platform, or add
   storage drivers.
 
@@ -276,10 +281,10 @@ Marsa is open source because a place to drop work should be one you control:
 ### محتاج أنزّل حاجة؟
 - **لو بتستخدم نسخة شغالة**: ولا حاجة. ارفع من المتصفح أو استخدم الـ API.
 - **لو هتشغّل نسختك**: Marsa بس، بأمر Docker واحد. من غير قاعدة بيانات ولا خدمات تانية، وكل مميزات النشر شغالة.
-- **الـ backend الاختياري للبيانات والملفات**: محتاج Appwrite، سواء Appwrite Cloud من غير تنزيل أو Appwrite على سيرفرك، وبيتربط بمتغيرات البيئة. ومقفول افتراضيًا، والـ routes بتاعته بترد `503 BACKEND_NOT_CONFIGURED`.
+- **الـ backend الاختياري للبيانات والملفات**: محتاج حساب Cloudflare (الخطة المجانية كفاية) فيه Workers KV وR2، من غير ما تنزّل حاجة، وبيتربط بمتغيرات البيئة. ومقفول افتراضيًا، والـ routes بتاعته بترد `503 BACKEND_NOT_CONFIGURED`.
 
 ### المميزات
-رفع بالسحب والإفلات، وAPI للنشر (ZIP أو ملفات أو JSON)، وروابط بتنتهي لوحدها، ومفتاح للتعديل والمسح، و`/llms.txt` و`/openapi.json` للـ agents، وحدود ضد الإساءة، وعرض آمن جوه sandbox، وواجهة ودليل بالعربي والإنجليزي، ولوحة أدمن اختيارية على `/admin` فيها فرق بمفاتيح خاصة (تحدد لكل فريق إذا كان ليه باك إند وإذا كان يظهر في دليل الصفحات العام على الرئيسية)، وbackend اختياري (KV وملفات) عن طريق Appwrite.
+رفع بالسحب والإفلات، وAPI للنشر (ZIP أو ملفات أو JSON)، وروابط بتنتهي لوحدها، ومفتاح للتعديل والمسح، و`/llms.txt` و`/openapi.json` للـ agents، وحدود ضد الإساءة، وعرض آمن جوه sandbox، وواجهة ودليل بالعربي والإنجليزي، ولوحة أدمن اختيارية على `/admin` فيها فرق بمفاتيح خاصة (تحدد لكل فريق إذا كان ليه باك إند وإذا كان يظهر في دليل الصفحات العام على الرئيسية)، وbackend اختياري (KV وملفات) عن طريق Cloudflare Workers KV وR2.
 
 ### لمين؟
 اللي بيبنوا agents، والمطورين اللي بيعرضوا شغل على عملاء، ومعاينات الـ CI، والمدرّسين والطلبة، وصفحات الإيفنتات المؤقتة. وفي `examples/` أمثلة وهمية لكل حالة.

@@ -9,8 +9,8 @@ There is no account: whoever holds the **edit token** can manage the site.
 - **Hosting your own**: only Marsa, one command: `docker compose up -d --build`. No database and no
   other services. All publishing features work out of the box.
 - **The optional data/files backend** (KV and file storage for pages and agents) is the only thing that
-  uses [Appwrite](backend.md), and it's off by default. You can use Appwrite Cloud (nothing to install)
-  or a self-hosted Appwrite, connected with environment variables.
+  uses an outside service: [Cloudflare Workers KV and R2](backend.md), off by default. Nothing to
+  install; you connect a Cloudflare account with environment variables.
 
 ## Upload from the browser
 

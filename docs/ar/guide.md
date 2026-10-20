@@ -7,7 +7,7 @@ Marsa (مَرسى) بيحوّل فولدر ملفات ثابتة لرابط عا
 
 - **لو بتستخدم نسخة Marsa شغالة**: مش محتاج أي حاجة. ارفع من المتصفح أو استخدم الـ API.
 - **لو هتشغّل نسختك**: محتاج Marsa بس، بأمر واحد: `docker compose up -d --build`. مفيش قاعدة بيانات ولا خدمات تانية، وكل مميزات النشر شغالة.
-- **الـ backend الاختياري للبيانات والملفات** هو الحاجة الوحيدة اللي بتستخدم Appwrite، وهو مقفول افتراضيًا. تقدر تستخدم Appwrite Cloud (من غير ما تنزّل حاجة) أو Appwrite على سيرفرك، وتربطه بمتغيرات البيئة.
+- **الـ backend الاختياري للبيانات والملفات** هو الحاجة الوحيدة اللي بتستخدم خدمة بره، وهي Cloudflare (Workers KV للبيانات وR2 للملفات)، وهو مقفول افتراضيًا. مش محتاج تنزّل حاجة، بتربط حساب Cloudflare بمتغيرات البيئة.
 
 ## الرفع من المتصفح
 
@@ -94,12 +94,12 @@ docker compose up -d --build     # http://localhost:8080
 
 التفاصيل الكاملة في [دليل الاستضافة](/docs/self-hosting).
 
-## الـ backend الاختياري (Appwrite)
+## الـ backend الاختياري (Cloudflare)
 
-لو صفحة أو agent محتاجين يخزّنوا بيانات صغيرة (KV) أو ملفات، Marsa يقدر يوصّلهم بـ Appwrite. كل البيانات مربوطة بالموقع وبتتمسح معاه.
+لو صفحة أو agent محتاجين يخزّنوا بيانات صغيرة (KV) أو ملفات، Marsa يقدر يوصّلهم بـ Cloudflare: البيانات في Workers KV والملفات في R2، من غير Worker ولا تنزيل. كل البيانات مربوطة بالموقع وبتتمسح معاه.
 - الكتابة محتاجة مفتاح التعديل دايمًا، والقراءة عامة طول ما الموقع شغال (`BACKEND_PUBLIC_READ=true`).
-- مفتاح Appwrite بيفضل على السيرفر، والمتصفح عمره ما بيشوفه.
-- الإعداد: حط `APPWRITE_ENDPOINT` و`APPWRITE_PROJECT_ID` و`APPWRITE_API_KEY` و`APPWRITE_DATABASE_ID`، وبعدين شغّل `node --env-file=.env scripts/appwrite-setup.mjs`.
+- الـ API token ومفاتيح R2 بيفضلوا على السيرفر، والمتصفح عمره ما بيشوفهم.
+- الإعداد: اعمل API token في Cloudflare بصلاحيتين `Workers KV Storage: Edit` و`Workers R2 Storage: Edit`، وشغّل `CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… node scripts/cloudflare-setup.mjs --write-env .env`. السكريبت بيعمل الـ KV namespace والـ R2 bucket (أو بيستخدمهم لو موجودين)، وبيكتب `CLOUDFLARE_KV_NAMESPACE_ID` و`R2_BUCKET` و`R2_ACCESS_KEY_ID` و`R2_SECRET_ACCESS_KEY` في الملف. ومحتاج كمان `CLOUDFLARE_ACCOUNT_ID` و`CLOUDFLARE_API_TOKEN` في نفس الملف.
 - من غيرهم، الـ routes دي بترد `503 BACKEND_NOT_CONFIGURED` والنشر شغال عادي.
 - في الصفحة: `<script src="/sdk.js"></script>` وبعدين `marsa.kv.get("key")`.
 
@@ -112,7 +112,7 @@ docker compose up -d --build     # http://localhost:8080
 - تحدد لكل فريق إذا كان ليه **وصول للباك إند** ولا لأ، وإذا كان **يظهر في الدليل العام** على الصفحة الرئيسية (شغال افتراضيًا).
 - تعمل مفتاح جديد (القديم بيبطل على طول) أو تمسح الفريق.
 
-الفريق بيرفع بالهيدر `X-Team-Key: <key>`. الرفع من غير مفتاح بيفضل زي ما هو (ضيف). مواقع الضيوف والفرق اللي من غير باك إند بترد `403 BACKEND_NOT_ALLOWED` على الـ KV والملفات، والفرق المسموح لها بترد `503 BACKEND_NOT_CONFIGURED` لحد ما Appwrite يتظبط.
+الفريق بيرفع بالهيدر `X-Team-Key: <key>`. الرفع من غير مفتاح بيفضل زي ما هو (ضيف). مواقع الضيوف والفرق اللي من غير باك إند بترد `403 BACKEND_NOT_ALLOWED` على الـ KV والملفات، والفرق المسموح لها بترد `503 BACKEND_NOT_CONFIGURED` لحد ما الـ backend يتظبط (متغيرات Cloudflare).
 
 الصفحة الرئيسية فيها قسم **منشورات الفرق**: لكل فريق عنوان، وتحته كروت الصفحات الشغالة بالعنوان والرابط ووقت الانتهاء. نفس البيانات على `GET /api/directory`. مفيش أي مفاتيح أو مواقع ضيوف بتظهر فيه.
 

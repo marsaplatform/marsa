@@ -1,6 +1,6 @@
 import type { BackendFile, SiteBackend } from "../src/backend/types.js";
 
-/** In-memory SiteBackend for tests (stands in for Appwrite). */
+/** In-memory SiteBackend for tests (stands in for Cloudflare). */
 export class MemoryBackend implements SiteBackend {
   readonly kind = "memory";
   kv = new Map<string, Map<string, string>>();

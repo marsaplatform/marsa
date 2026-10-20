@@ -23,19 +23,25 @@ export interface Config {
   adminToken: string;
   /** How often the expiry sweeper runs, in seconds. */
   sweepIntervalSeconds: number;
-  /** Optional Appwrite-backed data/files backend. null = off (the default). */
-  appwrite: AppwriteConfig | null;
+  /** Optional Cloudflare-backed data/files backend (Workers KV + R2). null = off (the default). */
+  cloudflare: CloudflareConfig | null;
   backend: BackendLimits;
 }
 
-export interface AppwriteConfig {
-  endpoint: string;
-  projectId: string;
-  /** Server-side only. Never sent to browsers. */
-  apiKey: string;
-  databaseId: string;
-  kvTableId: string;
-  bucketId: string;
+export interface CloudflareConfig {
+  accountId: string;
+  /** Server-side only. Never sent to browsers. Needs Workers KV Storage: Edit. */
+  apiToken: string;
+  kvNamespaceId: string;
+  /** R2 bucket for files (default "marsa-files"). */
+  r2Bucket: string;
+  /** R2 S3 credentials. Server-side only. */
+  r2AccessKeyId: string;
+  r2SecretAccessKey: string;
+  /** S3 endpoint, default https://<account>.r2.cloudflarestorage.com (override for EU/FedRAMP buckets). */
+  r2Endpoint: string;
+  /** Cloudflare REST API base, default https://api.cloudflare.com/client/v4. */
+  apiBase: string;
 }
 
 export interface BackendLimits {
@@ -89,7 +95,7 @@ export function loadConfig(env: Env = process.env): Config {
     trustProxy: bool(env, "TRUST_PROXY", false),
     adminToken: env.ADMIN_TOKEN?.trim() ?? "",
     sweepIntervalSeconds: int(env, "SWEEP_INTERVAL_SECONDS", 60, 5),
-    appwrite: appwriteConfig(env),
+    cloudflare: cloudflareConfig(env),
     backend: {
       guestAccess: bool(env, "BACKEND_GUEST_ACCESS", false),
       publicRead: bool(env, "BACKEND_PUBLIC_READ", true),
@@ -109,38 +115,51 @@ export function loadConfig(env: Env = process.env): Config {
   return cfg;
 }
 
-const APPWRITE_REQUIRED = [
-  "APPWRITE_ENDPOINT",
-  "APPWRITE_PROJECT_ID",
-  "APPWRITE_API_KEY",
-  "APPWRITE_DATABASE_ID",
+const CLOUDFLARE_REQUIRED = [
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_KV_NAMESPACE_ID",
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
 ] as const;
 
+const url = (env: Env, key: string, fallback: string): string => {
+  const raw = (env[key]?.trim() || fallback).replace(/\/+$/, "");
+  if (!/^https?:\/\//.test(raw)) throw new Error(`${key} must be an http(s) URL, got "${raw}"`);
+  return raw;
+};
+
 /**
- * The backend is enabled only when every required APPWRITE_* variable is set.
- * None set = off (normal). Some but not all set = a startup error, so a typo
- * doesn't silently disable it.
+ * The backend is enabled only when every required CLOUDFLARE_* / R2_* variable
+ * is set. None set = off (normal). Some but not all set = a startup error, so a
+ * typo doesn't silently disable it.
  */
-function appwriteConfig(env: Env): AppwriteConfig | null {
+function cloudflareConfig(env: Env): CloudflareConfig | null {
   const v = (k: string) => env[k]?.trim() ?? "";
-  const set = APPWRITE_REQUIRED.filter((k) => v(k));
+  const set = CLOUDFLARE_REQUIRED.filter((k) => v(k));
   if (set.length === 0) return null;
-  if (set.length < APPWRITE_REQUIRED.length) {
-    const missing = APPWRITE_REQUIRED.filter((k) => !v(k));
+  if (set.length < CLOUDFLARE_REQUIRED.length) {
+    const missing = CLOUDFLARE_REQUIRED.filter((k) => !v(k));
     throw new Error(
-      `Appwrite backend is partly configured. Missing: ${missing.join(", ")}. Set them all, or none to keep the backend off.`,
+      `Cloudflare backend is partly configured. Missing: ${missing.join(", ")}. Set them all, or none to keep the backend off.`,
     );
   }
-  const endpoint = v("APPWRITE_ENDPOINT").replace(/\/+$/, "");
-  if (!/^https?:\/\//.test(endpoint)) {
-    throw new Error("APPWRITE_ENDPOINT must be an http(s) URL, e.g. https://cloud.appwrite.io/v1");
+  const accountId = v("CLOUDFLARE_ACCOUNT_ID");
+  if (!/^[A-Za-z0-9]{1,64}$/.test(accountId)) {
+    throw new Error("CLOUDFLARE_ACCOUNT_ID must be the 32-character account id");
+  }
+  const r2Bucket = v("R2_BUCKET") || "marsa-files";
+  if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(r2Bucket)) {
+    throw new Error(`R2_BUCKET is not a valid bucket name: "${r2Bucket}"`);
   }
   return {
-    endpoint,
-    projectId: v("APPWRITE_PROJECT_ID"),
-    apiKey: v("APPWRITE_API_KEY"),
-    databaseId: v("APPWRITE_DATABASE_ID"),
-    kvTableId: v("APPWRITE_KV_TABLE_ID") || "marsa_kv",
-    bucketId: v("APPWRITE_BUCKET_ID") || "marsa_files",
+    accountId,
+    apiToken: v("CLOUDFLARE_API_TOKEN"),
+    kvNamespaceId: v("CLOUDFLARE_KV_NAMESPACE_ID"),
+    r2Bucket,
+    r2AccessKeyId: v("R2_ACCESS_KEY_ID"),
+    r2SecretAccessKey: v("R2_SECRET_ACCESS_KEY"),
+    r2Endpoint: url(env, "R2_ENDPOINT", `https://${accountId}.r2.cloudflarestorage.com`),
+    apiBase: url(env, "CLOUDFLARE_API_BASE", "https://api.cloudflare.com/client/v4"),
   };
 }

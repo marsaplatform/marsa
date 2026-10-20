@@ -1,27 +1,15 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
-import {
-  AppwriteBackend,
-  kvRowId,
-  type StorageApi,
-  type TablesApi,
-} from "../src/backend/appwrite.js";
-import { type AppwriteConfig, loadConfig } from "../src/config.js";
+import { loadConfig } from "../src/config.js";
 import { SiteStore } from "../src/store.js";
 import { sweepExpired } from "../src/sweep.js";
 import { TeamStore } from "../src/teams.js";
 import { MemoryBackend } from "./fake-backend.js";
 
-// Placeholder values only; nothing here talks to a real Appwrite.
-const FAKE_APPWRITE = {
-  APPWRITE_ENDPOINT: "https://appwrite.example.com/v1",
-  APPWRITE_PROJECT_ID: "example-project",
-  APPWRITE_API_KEY: "example-api-key-not-real",
-  APPWRITE_DATABASE_ID: "example-db",
-};
+import { FAKE_CLOUDFLARE } from "./fake-cloudflare.js";
 
 let dir: string;
 let clock: number;
@@ -63,21 +51,25 @@ async function setup(
 }
 
 describe("config", () => {
-  it("leaves the backend off when no APPWRITE_* is set", () => {
-    expect(loadConfig({}).appwrite).toBeNull();
+  it("leaves the backend off when no CLOUDFLARE_* / R2_* is set", () => {
+    expect(loadConfig({}).cloudflare).toBeNull();
   });
-  it("refuses a partial Appwrite config with a clear message", () => {
-    expect(() => loadConfig({ APPWRITE_ENDPOINT: "https://appwrite.example.com/v1" })).toThrow(
-      /Missing: APPWRITE_PROJECT_ID, APPWRITE_API_KEY, APPWRITE_DATABASE_ID/,
+  it("refuses a partial Cloudflare config with a clear message", () => {
+    expect(() => loadConfig({ CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef" })).toThrow(
+      /Missing: CLOUDFLARE_API_TOKEN, CLOUDFLARE_KV_NAMESPACE_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY/,
     );
   });
-  it("reads a full Appwrite config with default table and bucket ids", () => {
-    const cfg = loadConfig(FAKE_APPWRITE).appwrite;
+  it("reads a full Cloudflare config with the default bucket and endpoints", () => {
+    const cfg = loadConfig(FAKE_CLOUDFLARE).cloudflare;
     expect(cfg).toMatchObject({
-      kvTableId: "marsa_kv",
-      bucketId: "marsa_files",
-      projectId: "example-project",
+      r2Bucket: "marsa-files",
+      kvNamespaceId: "example-namespace",
+      r2Endpoint: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+      apiBase: "https://api.cloudflare.com/client/v4",
     });
+  });
+  it("rejects an invalid bucket name", () => {
+    expect(() => loadConfig({ ...FAKE_CLOUDFLARE, R2_BUCKET: "Bad_Bucket" })).toThrow(/R2_BUCKET/);
   });
 });
 
@@ -112,8 +104,8 @@ describe("without a backend (default)", () => {
     }
   });
 
-  it("never sends the Appwrite key anywhere", async () => {
-    const { app } = await setup(FAKE_APPWRITE);
+  it("never sends the Cloudflare secrets anywhere", async () => {
+    const { app } = await setup(FAKE_CLOUDFLARE);
     for (const path of [
       "/",
       "/api/config",
@@ -122,7 +114,9 @@ describe("without a backend (default)", () => {
       "/sdk.js",
       "/docs/backend",
     ]) {
-      expect(await (await app.request(path)).text()).not.toContain(FAKE_APPWRITE.APPWRITE_API_KEY);
+      const text = await (await app.request(path)).text();
+      expect(text).not.toContain(FAKE_CLOUDFLARE.CLOUDFLARE_API_TOKEN);
+      expect(text).not.toContain(FAKE_CLOUDFLARE.R2_SECRET_ACCESS_KEY);
     }
   });
 });
@@ -132,8 +126,8 @@ describe("llms.txt backend section", () => {
     const { app } = await setup({}, null);
     expect(await (await app.request("/llms.txt")).text()).toContain("BACKEND_NOT_CONFIGURED");
   });
-  it("describes the KV and files routes when Appwrite is configured", async () => {
-    const { app } = await setup(FAKE_APPWRITE);
+  it("describes the KV and files routes when Cloudflare is configured", async () => {
+    const { app } = await setup(FAKE_CLOUDFLARE);
     const txt = await (await app.request("/llms.txt")).text();
     expect(txt).toContain("Enabled on this instance");
     expect(txt).toContain("/kv/<key>");
@@ -283,95 +277,5 @@ describe("sdk.js", () => {
     expect(js).toContain("window.marsa");
     expect(js).toContain("kv:");
     expect(js).toContain("files:");
-  });
-});
-
-describe("AppwriteBackend (mocked node-appwrite)", () => {
-  const cfg = loadConfig(FAKE_APPWRITE).appwrite as AppwriteConfig;
-  const notFound = Object.assign(new Error("not found"), { code: 404 });
-
-  function mocks() {
-    const tables = {
-      getRow: vi.fn(),
-      upsertRow: vi.fn(async () => ({})),
-      deleteRow: vi.fn(async () => ({})),
-      listRows: vi.fn(async () => ({ total: 0, rows: [] })),
-      deleteRows: vi.fn(async () => ({ total: 0, rows: [] })),
-    };
-    const storage = {
-      createFile: vi.fn(async (p: { fileId: string }) => ({
-        $id: p.fileId,
-        name: "site1/a.png",
-        sizeOriginal: 3,
-        $createdAt: "2026-01-01T00:00:00.000Z",
-      })),
-      getFile: vi.fn(),
-      getFileDownload: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
-      deleteFile: vi.fn(async () => ({})),
-      listFiles: vi.fn(async () => ({ total: 0, files: [] })),
-    };
-    const backend = new AppwriteBackend(cfg, {
-      tables: tables as unknown as TablesApi,
-      storage: storage as unknown as StorageApi,
-    });
-    return { tables, storage, backend };
-  }
-
-  it("uses a deterministic 36-char row id per site+key", () => {
-    expect(kvRowId("site1", "a")).toHaveLength(36);
-    expect(kvRowId("site1", "a")).toBe(kvRowId("site1", "a"));
-    expect(kvRowId("site1", "a")).not.toBe(kvRowId("site2", "a"));
-  });
-
-  it("upserts rows with siteId, key and JSON value", async () => {
-    const { tables, backend } = mocks();
-    await backend.kvSet("site1", "a", '{"n":1}');
-    expect(tables.upsertRow).toHaveBeenCalledWith({
-      databaseId: "example-db",
-      tableId: "marsa_kv",
-      rowId: kvRowId("site1", "a"),
-      data: { siteId: "site1", key: "a", value: '{"n":1}' },
-    });
-  });
-
-  it("maps Appwrite 404s to 'missing'", async () => {
-    const { tables, storage, backend } = mocks();
-    tables.getRow.mockRejectedValueOnce(notFound);
-    expect(await backend.kvGet("site1", "a")).toBeUndefined();
-    tables.deleteRow.mockRejectedValueOnce(notFound);
-    expect(await backend.kvDelete("site1", "a")).toBe(false);
-    storage.getFile.mockRejectedValueOnce(notFound);
-    expect(await backend.fileGet("site1", "f1")).toBeNull();
-  });
-
-  it("names files <siteId>/<name> and refuses other sites' files", async () => {
-    const { storage, backend } = mocks();
-    const f = await backend.fileUpload("site1", "a.png", new Uint8Array([1, 2, 3]), "image/png");
-    expect(f).toMatchObject({ name: "a.png", mime: "image/png", size: 3 });
-    storage.getFile.mockResolvedValueOnce({
-      $id: "f1",
-      name: "site2/x.txt",
-      sizeOriginal: 1,
-      $createdAt: "",
-    });
-    expect(await backend.fileGet("site1", "f1")).toBeNull();
-    expect(storage.getFileDownload).not.toHaveBeenCalled();
-  });
-
-  it("purges a site's rows and files", async () => {
-    const { tables, storage, backend } = mocks();
-    storage.listFiles.mockResolvedValueOnce({
-      total: 2,
-      files: [
-        { $id: "f1", name: "site1/a.txt", sizeOriginal: 1, $createdAt: "" },
-        { $id: "f2", name: "site1/b.txt", sizeOriginal: 1, $createdAt: "" },
-      ],
-    } as never);
-    await backend.purgeSite("site1");
-    expect(tables.deleteRows).toHaveBeenCalledTimes(1);
-    const q = (tables.deleteRows.mock.calls[0] as unknown as [{ queries: string[] }])[0].queries[0];
-    expect(q).toContain("siteId");
-    expect(q).toContain("site1");
-    expect(storage.deleteFile).toHaveBeenCalledTimes(2);
   });
 });

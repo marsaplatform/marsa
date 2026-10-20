@@ -66,7 +66,7 @@ export interface AppDeps {
   store: SiteStore;
   /** Rendered guide pages; loaded from docs/ when omitted. */
   docs?: DocPage[];
-  /** Optional data/files backend (Appwrite). null/omitted = off. */
+  /** Optional data/files backend (Cloudflare KV + R2). null/omitted = off. */
   backend?: SiteBackend | null;
   /** Teams (admin-managed). Loaded from <dataDir>/teams.json when omitted. */
   teams?: TeamStore;

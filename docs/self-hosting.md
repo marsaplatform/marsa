@@ -43,7 +43,7 @@ Every setting is an environment variable with a safe default. Copy
 
 Generate an admin token with `openssl rand -hex 32`.
 
-Nothing else is required. The optional [data & files backend](backend.md) adds `APPWRITE_*` and
+Nothing else is required. The optional [data & files backend](backend.md) adds `CLOUDFLARE_*`, `R2_*` and
 `BACKEND_*` variables; leave them empty and Marsa runs as a pure static host
 (the backend routes answer `503 BACKEND_NOT_CONFIGURED`).
 

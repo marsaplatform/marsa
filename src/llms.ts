@@ -51,7 +51,7 @@ ${
 }
 
 ${
-  config.appwrite
+  config.cloudflare
     ? `Enabled on this instance. Per site, deleted with it. Writes need the edit token; reads are ${config.backend.publicRead ? "public while the site is live" : "token-only"}.
 
 - PUT ${base}/api/sites/<id>/kv/<key> with {"value": <any JSON>} (max ${Math.round(config.backend.maxValueBytes / 1024)} KB, ${config.backend.maxKeys} keys); GET/DELETE the same URL; GET ${base}/api/sites/<id>/kv lists keys

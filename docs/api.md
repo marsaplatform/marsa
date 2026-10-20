@@ -123,5 +123,5 @@ see [Teams](teams.md).
 | `UNAUTHORIZED` | 401 | Wrong admin token |
 | `INVALID_TEAM_KEY` | 401 | Unknown or rotated team key on upload |
 | `BACKEND_NOT_ALLOWED` | 403 | The site isn't in a team with backend access |
-| `BACKEND_NOT_CONFIGURED` | 503 | Allowed, but the instance has no Appwrite backend |
+| `BACKEND_NOT_CONFIGURED` | 503 | Allowed, but the instance has no data/files backend configured |
 | `RATE_LIMITED` | 429 | Slow down; see the `Retry-After` header |
