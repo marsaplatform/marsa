@@ -11,6 +11,22 @@ function fail(msg) {
 const health = await fetch(`${base}/healthz`);
 if (!health.ok) fail(`/healthz returned ${health.status}`);
 
+// 0) Public pages answer.
+for (const path of [
+  "/",
+  "/ar",
+  "/new",
+  "/docs",
+  "/docs/api",
+  "/ar/docs/guide",
+  "/llms.txt",
+  "/openapi.json",
+]) {
+  const r = await fetch(`${base}${path}`);
+  if (r.status !== 200) fail(`${path} returned ${r.status}`);
+}
+console.log("pages OK: /, /ar, /new, /docs, /llms.txt, /openapi.json");
+
 // 1) Guest multipart upload (what the drag-and-drop UI sends).
 const fd = new FormData();
 fd.append(

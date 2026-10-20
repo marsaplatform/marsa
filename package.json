@@ -1,6 +1,6 @@
 {
   "name": "marsa",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Marsa: a lightweight, self-hostable drop-in for static sites. Upload files or a ZIP, get a shareable link that expires on its own. No accounts.",
   "license": "MIT",
@@ -22,6 +22,7 @@
   "dependencies": {
     "@hono/node-server": "^2.1.5",
     "hono": "^4.13.13",
+    "marked": "^18.1.1",
     "yauzl": "^3.4.0"
   },
   "devDependencies": {

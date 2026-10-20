@@ -25,7 +25,7 @@ npm run build && (npm start &) && npm run smoke   # optional end-to-end check
   sandbox CSP on uploaded content, token hashing. If you change one, explain why.
 - Never commit secrets, `.env` files, the `data/` folder, real screenshots or
   user content. CI runs gitleaks on every push.
-- Keep the UI strings in both English and Arabic (`src/ui.ts`).
+- Keep the UI strings in both English and Arabic (`src/i18n.ts`).
 
 ## Commit / PR style
 

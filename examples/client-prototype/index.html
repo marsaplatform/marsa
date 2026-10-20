@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lumen Coffee · order app prototype</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="banner">Prototype for review · Lumen Coffee is a fictional brand · v3</div>
+<div class="phone">
+  <header><h1>Lumen Coffee</h1><button id="cartBtn" type="button" aria-live="polite">Cart (0)</button></header>
+  <p class="hello">Good morning! What can we get you?</p>
+  <ul class="menu" id="menu"></ul>
+  <footer>
+    <button id="checkout" type="button" disabled>Checkout</button>
+  </footer>
+  <dialog id="done">
+    <h2>Order placed</h2>
+    <p>Pick it up at the counter in about <strong>6 minutes</strong>.</p>
+    <form method="dialog"><button type="submit">OK</button></form>
+  </dialog>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+body{margin:0;font:17px/1.6 system-ui,sans-serif;color:#1d1b2e;background:#fbfaff}
+.hero{background:linear-gradient(135deg,#3a2c8f,#7a3fb8);color:#fff;padding:72px 24px;text-align:center}
+.kicker{opacity:.8;margin:0}
+h1{font-size:clamp(2.2rem,6vw,3.6rem);margin:.2em 0}
+.when{font-size:1.1rem}
+.rsvp{display:inline-block;margin-top:12px;background:#ffd24d;color:#1d1b2e;font-weight:700;padding:12px 28px;border-radius:999px;text-decoration:none}
+main{max-width:720px;margin:0 auto;padding:40px 24px}
+.schedule{list-style:none;padding:0}
+.schedule li{padding:10px 0;border-bottom:1px solid #e4e0f5}
+time{display:inline-block;width:64px;font-weight:700;color:#5a3fb0}
+footer{text-align:center;color:#6b6880;padding:24px}

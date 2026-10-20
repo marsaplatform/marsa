@@ -1,0 +1,96 @@
+# دليل Marsa بالعربي
+
+Marsa (مَرسى) بيحوّل فولدر ملفات ثابتة لرابط عام بينتهي لوحده. مفيش حسابات: اللي معاه **مفتاح التعديل** هو اللي يقدر يدير الموقع.
+الأمثلة بتستخدم `https://marsa.example.com` كعنوان للخدمة، ولما تقرأ الدليل جوه نسخة شغالة بيتبدّل بالعنوان الحقيقي.
+
+## الرفع من المتصفح
+
+1. افتح الصفحة الرئيسية وانزل لـ **جرّب دلوقتي** (أو افتح `/ar/new`).
+2. اسحب فولدر أو ملفات أو ملف `.zip`، أو استخدم **اختار ملفات** أو **اختار فولدر**.
+3. اختار مدة الرابط (من ساعة لحد الحد الأقصى، 7 أيام افتراضيًا).
+4. انسخ الرابط وابعته لأي حد.
+
+المتصفح بيفتكر المواقع اللي رفعتها ومفاتيحها تحت **اللي رفعته من المتصفح ده**، فتقدر تمسحها بعدين من نفس المتصفح.
+
+### شروط الموقع
+
+- حط `index.html` في أول مستوى. لو كل الملفات جوه فولدر واحد، Marsa بيشيله لوحده.
+- استخدم روابط نسبية (`css/style.css` مش `/css/style.css`)، لأن المواقع بتتعرض تحت `/s/<id>/`.
+- ملف `404.html` في أول مستوى بيظهر للصفحات اللي مش موجودة.
+- الملفات المخفية (`.env` و`.git/`) بتتشال، وسكريبتات السيرفر والبرامج (`.php` و`.py` و`.sh` و`.exe`...) بتترفض.
+
+## الـ API
+
+```bash
+# ارفع ملف zip
+(cd my-site && zip -qr ../site.zip .)
+curl -s -X POST "https://marsa.example.com/api/sites?ttlHours=24" \
+  -H "Content-Type: application/zip" --data-binary @site.zip
+
+# أو ابعت الملفات كـ JSON
+curl -s -X POST https://marsa.example.com/api/sites -H "Content-Type: application/json" \
+  -d '{"ttlHours": 6, "files": [{"path": "index.html", "content": "<h1>أهلًا</h1>"}]}'
+```
+
+الرد فيه `url` و`expiresAt` و`id` و`editToken`. المفتاح بيظهر **مرة واحدة بس**، وMarsa بيخزّن الـ hash بتاعه بس، فلو ضاع مايترجعش.
+المرجع الكامل بالإنجليزي في [API](/docs/api) وفي [`/openapi.json`](https://marsa.example.com/openapi.json).
+
+## الإدارة بالمفتاح
+
+```bash
+TOKEN="marsa_…"; ID="k3v9x2mq7a"; BASE=https://marsa.example.com
+curl -s -X PUT    "$BASE/api/sites/$ID" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/zip" --data-binary @site.zip   # تبديل كل الملفات
+curl -s -X PATCH  "$BASE/api/sites/$ID" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"ttlHours": 48}'  # تغيير المدة
+curl -s -X DELETE "$BASE/api/sites/$ID" -H "Authorization: Bearer $TOKEN"   # مسح فوري
+```
+
+الرابط عمره ما يعيش أكتر من وقت إنشاؤه + `MAX_TTL_HOURS`، مهما مدّيته. ولو انتهى، ارفعه تاني وخد رابط جديد.
+
+## الـ AI agents
+
+الخدمة بتقدّم تعليمات للـ agents على [`/llms.txt`](https://marsa.example.com/llms.txt). ودي رسالة تقدر تديها للـ agent:
+
+```text
+لما تعمل صفحة أو تقرير أو نموذج أولي محتاج أشوفه، انشره على Marsa بدل ما تبعتلي الـ HTML:
+1. حط الملفات في فولدر فيه index.html، وبروابط نسبية بس. ماتحطش أسرار أو مفاتيح أو بيانات شخصية، لأن الرابط عام.
+2. اضغط محتوى الفولدر:  (cd OUT_DIR && zip -qr ../site.zip .)
+3. ارفعه:  curl -s -X POST "https://marsa.example.com/api/sites?ttlHours=24" -H "Content-Type: application/zip" --data-binary @site.zip
+4. ابعتلي "url" و"expiresAt" من الرد، واحتفظ بـ "id" و"editToken" علشان التحديث أو المسح.
+5. لو حصل خطأ، اقرأ error.code وصلّح الملفات وجرّب تاني.
+```
+
+أمثلة جاهزة بـ Shell وNode وPython في [دليل الـ agents](/docs/agents).
+
+## استخدامات حقيقية
+
+- **agent بيشارك تقرير HTML**: بدل ما يلزق كود، بيرجع رابط. المثال: `examples/agent-report`.
+- **نموذج أولي لعميل**: ديمو للمراجعة من غير استضافة ولا حساب. المثال: `examples/client-prototype`.
+- **صفحة إيفنت مؤقتة**: لمدة أسبوع بـ `ttlHours=168`. المثال: `examples/event-page`.
+- **واجب دراسي**: الطلبة يسلّموا رابط. المثال: `examples/class-assignment`.
+- **معاينة من الـ CI**: كل Pull Request ياخد رابط معاينة كتعليق. المثال: `examples/ci-preview`.
+
+## تشغيل نسختك
+
+```bash
+docker compose up -d --build     # http://localhost:8080
+```
+
+أهم الإعدادات (متغيرات بيئة، والقيم الافتراضية في `.env.example`):
+
+| المتغير | الافتراضي | المعنى |
+| --- | --- | --- |
+| `PUBLIC_URL` | `http://localhost:8080` | العنوان اللي بيتبني بيه الرابط |
+| `DEFAULT_TTL_HOURS` / `MAX_TTL_HOURS` | `24` / `168` | مدة الرابط |
+| `MAX_FILE_MB` / `MAX_SITE_MB` / `MAX_FILES` | `10` / `25` / `500` | حدود الحجم والعدد |
+| `UPLOADS_PER_HOUR` | `20` | عدد الرفعات لكل IP في الساعة |
+| `TRUST_PROXY` | `false` | خليه `true` لو ورا reverse proxy انت متحكم فيه |
+| `ADMIN_TOKEN` | فاضي | لو اتحط، بيفتح `/api/admin/*` لإدارة كل المواقع |
+
+التفاصيل الكاملة في [دليل الاستضافة](/docs/self-hosting).
+
+## الخصوصية
+
+- أي حد معاه الرابط يقدر يشوف الموقع.
+- مفيش حسابات ولا cookies للتتبع ولا تحليلات.
+- الـ IP بيستخدم في الذاكرة بس لحدود الاستخدام، ومش بيتسجّل.
+- الصفحات المرفوعة بتشتغل جوه sandbox ومتقدرش توصل للتطبيق.

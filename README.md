@@ -1,146 +1,138 @@
 # Marsa
 
-**Drop a static site, get a link. No account needed.**
+**A harbor for your work. Land it, share it, let it go.**
 
-*Marsa* (مَرسى) is Arabic for "harbor": the place where your (or your agent's) work lands.
+*Marsa* (مَرسى) is Arabic for "harbor": the place where your (or your AI agent's) work lands.
+Drop a folder, some files or a `.zip` (from the browser, a script, an AI agent or CI) and get a
+shareable link in seconds. **No account.** Links **expire on their own** (1 hour to 7 days by
+default), and an **edit token** lets you update, extend or delete before then.
 
-Marsa is a small, self-hostable service for trying out static hosting with zero
-friction. Drag in a folder, some files or a `.zip` (or call the API from a script
-or an AI agent) and you get a shareable link. The link **expires on its own**
-(1 hour to 7 days by default), and you get an **edit/delete token** to update or
-remove it before then.
-
-It is the lightweight, open-source little sibling of a full canvas-hosting
-platform: no accounts, no teams, no database. It's one Node process and a data folder.
+One Node.js process, one data folder, no database. MIT licensed.
 
 > [العربية ↓](#بالعربي)
 
-## Features
-
-- **Guest upload**: drag-and-drop files, folders or a ZIP in the browser. No sign-up.
-- **Deploy API**: `POST /api/sites` with a ZIP, multipart files or JSON `files[]`.
-- **Expiring links**: configurable TTL (default 24h, max 7d); a background sweeper deletes expired sites.
-- **Edit/delete token**: replace content (`PUT`), change expiry (`PATCH`, never past created + max TTL), or delete (`DELETE`).
-- **Abuse limits**: per-file / per-site / file-count caps, per-IP upload and API rate limits,
-  blocked server-side and executable file types, zip-slip and zip-bomb guards, dotfiles stripped.
-- **Safe serving**: uploaded pages get a `sandbox` CSP (opaque origin, so they can't touch the app),
-  `frame-ancestors 'none'`, `nosniff`, `noindex`.
-- **Optional admin**: set `ADMIN_TOKEN` to list or delete sites over the API.
-- **Bilingual UI**: English and Arabic (RTL).
-
 ## Quick start
 
-Requires Node.js 20+ (22 LTS recommended).
+```bash
+docker compose up -d --build        # http://localhost:8080
+```
+
+or with Node.js 20+:
 
 ```bash
 npm install
-cp .env.example .env      # optional, every value has a default
-npm run dev               # http://localhost:8080
+npm run dev                         # http://localhost:8080 (reloads on change)
 ```
 
-Production build:
+Publish something:
 
 ```bash
-npm run build && npm start
+(cd examples/event-page && zip -qr ../../site.zip .)
+curl -s -X POST "http://localhost:8080/api/sites?ttlHours=24" \
+  -H "Content-Type: application/zip" --data-binary @site.zip
+# => {"url":"http://localhost:8080/s/k3v9x2mq7a/","expiresAt":"…","editToken":"marsa_…", …}
 ```
 
-Docker:
+## What's inside
 
-```bash
-docker compose up -d --build   # http://localhost:8080, data in the "marsa-data" volume
-```
+| Route | What it is |
+| --- | --- |
+| `/` · `/ar` | Landing page in English / Arabic with a live uploader |
+| `/new` · `/ar/new` | Just the uploader |
+| `/docs` · `/ar/docs` | The guide, rendered from [`docs/`](docs) |
+| `/llms.txt` | Instructions for AI agents, with this instance's URL and limits |
+| `/openapi.json` | OpenAPI 3.1 spec of the API |
+| `/api/sites` … | The API: create, read, replace, extend, delete ([reference](docs/api.md)) |
+| `/api/admin/*` | Optional admin API, enabled by `ADMIN_TOKEN` |
+| `/s/<id>/` | Published sites, served in a browser sandbox |
 
-Behind a reverse proxy (Caddy, nginx, Traefik), set `PUBLIC_URL=https://your.domain` and
-`TRUST_PROXY=true` so links and rate limits use the right host and client IP.
+## Guides
 
-## API
+- [Getting started](docs/getting-started.md): browser upload and what makes a valid site
+- [API reference](docs/api.md): every endpoint with curl examples and error codes
+- [AI agents](docs/agents.md): a prompt to paste, plus shell / Node.js / Python snippets
+- [Managing a site](docs/managing.md): update, extend or delete with the edit token
+- [Use cases](docs/use-cases.md): agent reports, client prototypes, event pages, class assignments, CI previews
+- [Self-hosting](docs/self-hosting.md): Docker, configuration, reverse proxy, admin
+- [دليل بالعربي](docs/ar/guide.md)
 
-| Method & path | Auth | What it does |
-| --- | --- | --- |
-| `POST /api/sites` | none | Create a site. Body: `application/zip`, `multipart/form-data` (`files`, optional `paths`, `ttlHours`) or JSON `{ ttlHours?, files: [{ path, content, encoding?: "utf8"\|"base64" }] }`. `?ttlHours=` also works. Returns `{ id, url, expiresAt, editToken, ... }`. |
-| `GET /api/sites/:id` | edit token | Site metadata. |
-| `PUT /api/sites/:id` | edit token | Replace all files (same body formats). |
-| `PATCH /api/sites/:id` | edit token | `{ ttlHours }` to change the expiry (capped at created + `MAX_TTL_HOURS`). |
-| `DELETE /api/sites/:id` | edit token | Delete now. |
-| `GET /api/config` | none | Public limits, used by the UI. |
-| `GET /api/admin/sites` | admin token | List all sites (only when `ADMIN_TOKEN` is set). |
-| `DELETE /api/admin/sites/:id` | admin token | Delete any site. |
-| `POST /api/admin/sweep` | admin token | Run the expiry sweeper now. |
-| `GET /s/:id/...` | none | The published site. |
-| `GET /healthz` | none | Liveness. |
-
-Tokens are sent as `Authorization: Bearer <token>`. Edit tokens are stored only as SHA-256 hashes.
-
-```bash
-# Deploy a folder from a script or AI agent
-(cd my-site && zip -r ../site.zip .)
-curl -s -X POST -H "Content-Type: application/zip" --data-binary @site.zip \
-  "http://localhost:8080/api/sites?ttlHours=24"
-```
-
-Errors look like `{ "error": { "code": "BLOCKED_FILE_TYPE", "message": "...", "path": "x.php" } }`.
+Sample sites for every use case, a GitHub Actions workflow for PR previews and agent deploy
+scripts are in [`examples/`](examples).
 
 ## Configuration
 
-All settings are environment variables; see [`.env.example`](.env.example).
+Environment variables, all optional; see [`.env.example`](.env.example) and
+[self-hosting](docs/self-hosting.md#configuration).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PORT` / `HOST` | `8080` / `0.0.0.0` | Listen address |
-| `PUBLIC_URL` | `http://localhost:$PORT` | Base for share links |
-| `DATA_DIR` | `./data` | Storage folder |
+| `PUBLIC_URL` | `http://localhost:$PORT` | Base for share links, docs and `/llms.txt` |
 | `DEFAULT_TTL_HOURS` / `MIN_TTL_HOURS` / `MAX_TTL_HOURS` | `24` / `1` / `168` | Link lifetime |
-| `SWEEP_INTERVAL_SECONDS` | `60` | How often expired sites are deleted |
 | `MAX_FILE_MB` / `MAX_SITE_MB` / `MAX_FILES` | `10` / `25` / `500` | Size and count caps |
-| `UPLOADS_PER_HOUR` | `20` | Uploads + updates per IP per hour |
-| `API_REQUESTS_PER_MINUTE` | `120` | Any `/api` call per IP per minute |
-| `TRUST_PROXY` | `false` | Trust `X-Real-IP` / last `X-Forwarded-For` hop |
-| `ADMIN_TOKEN` | *(empty: admin off)* | Admin bearer token, at least 24 chars |
+| `UPLOADS_PER_HOUR` / `API_REQUESTS_PER_MINUTE` | `20` / `120` | Per-IP rate limits |
+| `TRUST_PROXY` | `false` | Read the client IP from proxy headers |
+| `ADMIN_TOKEN` | empty (off) | Enables `/api/admin/*` |
+| `PORT` / `HOST` / `DATA_DIR` | `8080` / `0.0.0.0` / `./data` | Server and storage |
 
-### Security notes
-
-- Every uploaded site is **public to anyone with the link**. The id is random, but it is not a password.
-- Sites are served from the same host under `/s/<id>/` with a `sandbox` CSP, which isolates them
-  from the app. For extra isolation you can put Marsa on its own domain.
-- Rate limits are in-memory and per-process; run a single instance or add limits at your proxy.
-
-## Project layout
+## Architecture
 
 ```
-src/
-  index.ts        server entry: config, store, sweeper, HTTP listener
-  app.ts          routes: API, admin, UI, site serving
-  brand.ts        project name (one place to rename)
-  config.ts       env parsing and validation
-  ingest.ts       ZIP / multipart / JSON ingestion + limits
-  paths.ts        path normalization, zip-slip guard
-  mime.ts         MIME map and blocked file types
-  store.ts        filesystem store (data/sites/<id>/{meta.json,files/})
-  rate-limit.ts   in-process fixed-window limiter
-  security.ts     CSP and security headers
-  tokens.ts       ids, edit tokens, constant-time compare
-  ui.ts           upload page, CSS and client JS
-test/             vitest suites
-scripts/          smoke.mjs (e2e against a running server), rename.mjs
+            browser / script / AI agent / CI
+                         │  HTTP
+┌────────────────────────▼───────────────────────────────┐
+│ Hono app (src/app.ts)                                  │
+│  pages: /, /ar, /new, /docs  ← ui.ts, i18n.ts, docs.ts │
+│  /llms.txt, /openapi.json    ← llms.ts, openapi.ts     │
+│  /api/*  ── rate-limit.ts ── tokens.ts (hash, compare) │
+│     └─ ingest.ts: zip / multipart / JSON → paths.ts,   │
+│        mime.ts checks → size & count caps              │
+│  /s/<id>/*  → sandbox CSP + nosniff (security.ts)      │
+└────────────────────────┬───────────────────────────────┘
+                         │ store.ts (staged writes, atomic rename)
+              DATA_DIR/sites/<id>/meta.json
+              DATA_DIR/sites/<id>/files/…
+                         ▲
+        index.ts: sweeper deletes expired sites every minute
 ```
 
-## Roadmap / future work
+- **No database.** Each site is a folder with a `meta.json` (expiry, file list, SHA-256 of the
+  edit token). Writes are staged in `DATA_DIR/tmp` and swapped in with `rename()`.
+- **Isolation.** Sites are served with `Content-Security-Policy: sandbox …`, so each page gets an
+  opaque origin and can't read the app's storage or call its API as the visitor. App pages use a
+  strict CSP with no inline code.
+- **Abuse limits** are checked before anything is written: declared ZIP sizes before inflating,
+  path traversal, dotfiles, blocked types, per-file / per-site / count caps, per-IP rate limits.
+- **i18n.** All UI strings are in `src/i18n.ts` (English and Arabic); pages are server-rendered per
+  language, so there's no flash of untranslated text.
 
-- Optional per-site backend (key-value storage and file uploads), as in the full platform.
-- Pluggable storage (S3-compatible).
-- Optional captcha / proof-of-work for public instances.
-- Custom slugs and password-protected links.
-- "Upgrade to a full account" hand-off to a full hosting platform.
+```
+src/        app.ts index.ts config.ts brand.ts ui.ts assets.ts i18n.ts docs.ts llms.ts openapi.ts
+            ingest.ts paths.ts mime.ts store.ts tokens.ts rate-limit.ts security.ts client-ip.ts errors.ts
+docs/       guides (served at /docs)          examples/  sample sites, CI workflow, agent scripts
+test/       vitest suites                     scripts/   smoke.mjs (e2e), rename.mjs
+```
 
-## Contributing
+## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). In short: `npm install`, make your change with a test,
-then `npm run lint && npm run typecheck && npm test` before opening a PR.
+```bash
+npm run lint && npm run typecheck && npm test
+npm run build && npm start &  npm run smoke     # end-to-end check against a running server
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [CHANGELOG](CHANGELOG.md). Security reports:
+[SECURITY.md](SECURITY.md). To rename the project, run `node scripts/rename.mjs "New Name"`.
+
+## Roadmap
+
+- Optional per-site backend (key-value and files) for pages and agents
+- Pluggable storage (S3-compatible)
+- Optional captcha / proof-of-work for busy public instances
+- Custom slugs and password-protected links
 
 ## License
 
-[MIT](LICENSE). Marsa is derived from [canvas-drop](https://github.com/markpasternak/canvas-drop) (MIT);
-see [NOTICE](NOTICE) for attribution.
+[MIT](LICENSE). Derived from [canvas-drop](https://github.com/markpasternak/canvas-drop) (MIT);
+see [NOTICE](NOTICE).
 
 ---
 
@@ -149,44 +141,34 @@ see [NOTICE](NOTICE) for attribution.
 ## بالعربي
 
 ### Marsa إيه؟
-**Marsa** (مَرسى، يعني المكان اللي الشغل بيرسى فيه) خدمة صغيرة مفتوحة المصدر تقدر تشغّلها على سيرفرك، وبتخلّي أي حد يجرّب استضافة المواقع الثابتة من غير حساب ومن غير ما يدفع. تسحب فولدر أو ملفات أو ملف `zip` في المتصفح، أو تبعتهم من سكريبت أو AI agent عن طريق الـ API، وتاخد **رابط تشاركه**.
-الرابط **بيتمسح لوحده** لما مدته تخلص (من ساعة لحد 7 أيام)، ومعاه **مفتاح تعديل ومسح** تقدر تحدّث بيه الموقع أو تمسحه قبل كده.
-
-### المميزات
-- رفع من غير تسجيل، بالسحب والإفلات لملفات أو فولدر أو ZIP.
-- API للنشر: `POST /api/sites`.
-- روابط بتنتهي تلقائيًا، ومدتها تتظبط من الإعدادات.
-- حماية من الإساءة: حد أقصى لحجم الملف والموقع وعدد الملفات، وحد لعدد الرفعات لكل IP، ومنع أنواع الملفات الخطرة زي php وexe، وحماية من zip-slip وzip bomb.
-- عرض آمن: كل موقع مرفوع بيتعرض جوه `sandbox`، فمايقدرش يوصل للتطبيق نفسه.
-- لوحة أدمن اختيارية عن طريق `ADMIN_TOKEN`.
-- الواجهة بالعربي والإنجليزي.
+**Marsa** (مَرسى، يعني المكان اللي الشغل بيرسى فيه) خدمة صغيرة مفتوحة المصدر. انت أو الـ AI agent بتاعك ترفعوا فولدر أو ملفات أو ملف `zip`، من المتصفح أو سكريبت أو الـ CI، وتاخدوا **رابط تشاركوه** في ثواني. **من غير حساب**، والرابط **بيتمسح لوحده** لما مدته تخلص (من ساعة لحد 7 أيام)، ومعاه **مفتاح تعديل** تحدّث بيه الموقع أو تمدّه أو تمسحه.
 
 ### التشغيل السريع
-محتاج Node.js 20 أو أحدث.
 
 </div>
 
 ```bash
-npm install
-cp .env.example .env
-npm run dev        # http://localhost:8080
-# أو بـ Docker:
-docker compose up -d --build
+docker compose up -d --build     # http://localhost:8080
+# أو بـ Node.js 20+
+npm install && npm run dev
 ```
 
 <div dir="rtl">
 
+### فيه إيه؟
+- الصفحة الرئيسية بالعربي على `/ar` وبالإنجليزي على `/`، وفيها رفع مباشر.
+- الدليل على `/ar/docs` و`/docs`، والدليل العربي الكامل في [`docs/ar/guide.md`](docs/ar/guide.md).
+- تعليمات للـ AI agents على `/llms.txt`، ومواصفات الـ API على `/openapi.json`.
+- أمثلة جاهزة في [`examples/`](examples): تقرير من agent، ونموذج أولي لعميل، وصفحة إيفنت، وواجب دراسي، ومعاينة من الـ CI. وكل الأسماء والبيانات فيها وهمية.
+
 ### الإعدادات
-كل الإعدادات متغيرات بيئة، وكلها موجودة في `.env.example` بقيم افتراضية آمنة. أهمها:
-`PUBLIC_URL` (رابط الموقع العام)، و`DEFAULT_TTL_HOURS` و`MAX_TTL_HOURS` (مدة الرابط)، و`MAX_SITE_MB` (أقصى حجم)، و`UPLOADS_PER_HOUR` (عدد الرفعات لكل IP)، و`ADMIN_TOKEN` (لو سبته فاضي، لوحة الأدمن بتبقى مقفولة).
-لو شغّال ورا reverse proxy، خلي `TRUST_PROXY=true`.
+كل الإعدادات متغيرات بيئة، وقيمها الافتراضية في `.env.example`. أهمها `PUBLIC_URL` و`MAX_TTL_HOURS` و`MAX_SITE_MB` و`UPLOADS_PER_HOUR` و`ADMIN_TOKEN`.
 
 ### إزاي تساهم
-1. اعمل fork وفرع جديد.
-2. `npm install`
-3. اعمل التعديل وضيف له اختبار في `test/`.
-4. شغّل `npm run lint && npm run typecheck && npm test`.
-5. افتح Pull Request واشرح فيه التعديل. التفاصيل في [CONTRIBUTING.md](CONTRIBUTING.md).
+1. اعمل fork وفرع جديد، وبعدين `npm install`.
+2. اعمل التعديل وضيف له اختبار في `test/`، وخلي نصوص الواجهة بالعربي والإنجليزي في `src/i18n.ts`.
+3. شغّل `npm run lint && npm run typecheck && npm test`.
+4. افتح Pull Request. التفاصيل في [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### الترخيص
 MIT، والمشروع مبني على canvas-drop (MIT)، والتفاصيل في ملف NOTICE.

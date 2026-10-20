@@ -1,263 +1,352 @@
-import { APP_NAME, APP_TAGLINE } from "./brand.js";
+import { APP_NAME } from "./brand.js";
+import type { Config } from "./config.js";
+import type { DocPage } from "./docs.js";
+import { hoursLabel, type Lang, type LimitValues, STRINGS } from "./i18n.js";
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+export const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
-function shell(title: string, body: string): string {
+/** `/docs` <-> `/ar/docs`, `/` <-> `/ar`. */
+export function localePath(lang: Lang, path: string): string {
+  const bare = path.replace(/^\/ar(?=\/|$)/, "") || "/";
+  if (lang === "en") return bare;
+  return bare === "/" ? "/ar" : `/ar${bare}`;
+}
+
+const MB = 1024 * 1024;
+
+export function limitValues(lang: Lang, c: Config): LimitValues {
+  return {
+    maxFileMb: Math.round(c.maxFileBytes / MB),
+    maxSiteMb: Math.round(c.maxSiteBytes / MB),
+    maxFiles: c.maxFiles,
+    defaultTtl: hoursLabel(lang, c.defaultTtlHours),
+    maxTtl: hoursLabel(lang, c.maxTtlHours),
+    uploadsPerHour: c.uploadsPerHour,
+  };
+}
+
+interface LayoutOpts {
+  lang: Lang;
+  title: string;
+  description: string;
+  path: string;
+  body: string;
+  config: Config;
+  active?: "home" | "try" | "docs";
+}
+
+const ANCHOR_SVG = `<svg class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><circle cx="16" cy="7" r="3.2" class="stroke"/><path d="M16 10.5V27M9 15h14M5.5 19.5C6.5 24 11 27 16 27s9.5-3 10.5-7.5" class="stroke"/><path d="M3.5 21.5l2-2.5 2.5 2M28.5 21.5l-2-2.5-2.5 2" class="stroke"/></svg>`;
+
+function layout(o: LayoutOpts): string {
+  const t = STRINGS[o.lang];
+  const other: Lang = o.lang === "en" ? "ar" : "en";
+  const href = (p: string) => localePath(o.lang, p);
+  const canonical = `${o.config.publicUrl}${localePath(o.lang, o.path)}`;
+  const cur = (k: LayoutOpts["active"]) => (o.active === k ? ' aria-current="page"' : "");
   return `<!doctype html>
-<html lang="en" dir="ltr">
+<html lang="${o.lang}" dir="${t.dir}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)}</title>
+<title>${esc(o.title)}</title>
+<meta name="description" content="${esc(o.description)}">
+<meta name="color-scheme" content="light dark">
+<meta property="og:title" content="${esc(o.title)}">
+<meta property="og:description" content="${esc(o.description)}">
+<meta property="og:type" content="website">
+<link rel="canonical" href="${esc(canonical)}">
+<link rel="alternate" hreflang="en" href="${esc(o.config.publicUrl + localePath("en", o.path))}">
+<link rel="alternate" hreflang="ar" href="${esc(o.config.publicUrl + localePath("ar", o.path))}">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
-${body}
+<a class="skip" href="#main">${esc(t.skip)}</a>
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href="${href("/")}">${ANCHOR_SVG}<span>${esc(APP_NAME)}</span></a>
+    <nav aria-label="Main">
+      <a href="${href("/")}"${cur("home")}>${esc(t.nav.home)}</a>
+      <a href="${href("/new")}"${cur("try")}>${esc(t.nav.try)}</a>
+      <a href="${href("/docs")}"${cur("docs")}>${esc(t.nav.docs)}</a>
+      <a href="/docs/api" class="hide-sm">${esc(t.nav.api)}</a>
+      <a class="lang" href="${localePath(other, o.path)}" hreflang="${other}" lang="${other}">${esc(t.switchLabel)}</a>
+    </nav>
+  </div>
+</header>
+<main id="main" tabindex="-1">
+${o.body}
+</main>
+<footer class="site-footer">
+  <div class="wrap foot">
+    <p>${esc(t.footer)}</p>
+    <p class="links"><a href="${href("/docs")}">${esc(t.nav.docs)}</a> · <a href="/docs/api">API</a> · <a href="/openapi.json">OpenAPI</a> · <a href="/llms.txt">llms.txt</a> · <a href="/docs/self-hosting">Self-host</a></p>
+  </div>
+</footer>
+<script src="/assets/app.js" type="module"></script>
 </body>
 </html>`;
 }
 
-export function indexHtml(): string {
-  return shell(
-    `${APP_NAME}: drop a site, get a link`,
-    `<header class="top">
-  <strong class="logo">${esc(APP_NAME)}</strong>
-  <button id="lang" class="ghost" type="button">عربي</button>
-</header>
-<main>
-  <h1 data-i18n="title">${esc(APP_TAGLINE)}</h1>
-  <p class="sub" data-i18n="sub">Drag in a folder, some files, or a .zip. You get a public link that deletes itself when it expires.</p>
+function ttlOptions(lang: Lang, c: Config): string {
+  const set = new Set([1, 6, 24, 72, 168, c.defaultTtlHours]);
+  return [...set]
+    .filter((h) => h >= c.minTtlHours && h <= c.maxTtlHours)
+    .sort((a, b) => a - b)
+    .map(
+      (h) =>
+        `<option value="${h}"${h === c.defaultTtlHours ? " selected" : ""}>${esc(hoursLabel(lang, h))}</option>`,
+    )
+    .join("");
+}
 
-  <section id="drop" class="drop" tabindex="0">
-    <p data-i18n="drop">Drop files, a folder, or a .zip here</p>
-    <div class="row">
-      <label class="btn"><input id="pickFiles" type="file" multiple hidden><span data-i18n="pickFiles">Choose files</span></label>
-      <label class="btn"><input id="pickDir" type="file" webkitdirectory hidden><span data-i18n="pickDir">Choose folder</span></label>
+function uploader(lang: Lang, c: Config, headingLevel: "h1" | "h2"): string {
+  const t = STRINGS[lang];
+  const l = limitValues(lang, c);
+  return `<section id="try" class="try" aria-labelledby="try-title">
+  <div class="wrap narrow">
+    <${headingLevel} id="try-title">${esc(t.try.title)}</${headingLevel}>
+    <p class="muted">${esc(t.try.sub)}</p>
+    <div id="drop" class="drop" tabindex="0" role="group" aria-label="${esc(t.try.drop)}">
+      <svg class="drop-icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path class="stroke" d="M24 30V10M15 19l9-9 9 9M8 30v6a4 4 0 0 0 4 4h24a4 4 0 0 0 4-4v-6"/></svg>
+      <p class="drop-title">${esc(t.try.drop)}</p>
+      <div class="row">
+        <label class="btn primary"><input id="pickFiles" type="file" multiple class="sr-only"><span>${esc(t.try.pickFiles)}</span></label>
+        <label class="btn"><input id="pickDir" type="file" webkitdirectory class="sr-only"><span>${esc(t.try.pickDir)}</span></label>
+      </div>
+      <label class="ttl"><span>${esc(t.try.expires)}</span> <select id="ttl">${ttlOptions(lang, c)}</select></label>
+      <p class="muted small">${esc(t.limits.limitItems(l)[0] ?? "")}</p>
     </div>
-    <label class="ttl"><span data-i18n="expires">Expires after</span>
-      <select id="ttl"></select>
-    </label>
-    <p id="limits" class="muted"></p>
-  </section>
-
-  <p id="status" role="status" aria-live="polite"></p>
-
-  <section id="result" hidden>
-    <h2 data-i18n="ready">Your link is ready</h2>
-    <p><a id="link" target="_blank" rel="noopener"></a> <button id="copy" type="button" class="ghost" data-i18n="copy">Copy</button></p>
-    <p class="muted"><span data-i18n="tokenNote">Edit/delete token (saved in this browser; keep a copy to manage it elsewhere):</span></p>
-    <code id="token"></code>
-  </section>
-
-  <section>
-    <h2 data-i18n="mine">Your drops in this browser</h2>
-    <ul id="mine" class="list"></ul>
-  </section>
-
-  <details>
-    <summary data-i18n="api">Deploy from a script or AI agent</summary>
-<pre><code>curl -X POST -H "Content-Type: application/zip" \\
-  --data-binary @site.zip "$ORIGIN/api/sites?ttlHours=24"
-
-curl -X POST -H "Content-Type: application/json" "$ORIGIN/api/sites" \\
-  -d '{"ttlHours":24,"files":[{"path":"index.html","content":"&lt;h1&gt;Hi&lt;/h1&gt;"}]}'
-
-curl -X DELETE -H "Authorization: Bearer $EDIT_TOKEN" "$ORIGIN/api/sites/$ID"</code></pre>
-  </details>
-</main>
-<footer class="muted" data-i18n="footer">${esc(APP_NAME)} is open source. Uploaded content is public to anyone with the link. Don't upload secrets.</footer>
-<script src="/assets/app.js" type="module"></script>`,
-  );
+    <p id="status" role="status" aria-live="polite"></p>
+    <div id="result" class="result" hidden>
+      <h3>${esc(t.try.ready)}</h3>
+      <p class="link-row"><a id="link" target="_blank" rel="noopener"></a> <button id="copy" type="button" class="btn small">${esc(t.try.copy)}</button></p>
+      <p class="muted small">${esc(t.try.tokenNote)}</p>
+      <code id="token" class="token"></code>
+    </div>
+    <h3 class="mine-title">${esc(t.try.mine)}</h3>
+    <ul id="mine" class="mine" data-empty="${esc(t.try.none)}"></ul>
+  </div>
+</section>`;
 }
 
-export function notFoundHtml(): string {
-  return shell(
-    `Not found · ${APP_NAME}`,
-    `<main class="center"><h1>404</h1><p>This link doesn't exist. هذا الرابط غير موجود.</p><p><a href="/">${esc(APP_NAME)}</a></p></main>`,
-  );
+function agentSnippet(c: Config): string {
+  return `<pre class="code" dir="ltr"><code>(cd out &amp;&amp; zip -qr ../site.zip .)
+curl -s -X POST "${esc(c.publicUrl)}/api/sites?ttlHours=24" \\
+  -H "Content-Type: application/zip" --data-binary @site.zip
+# =&gt; { "url": "${esc(c.publicUrl)}/s/k3v9x2mq7a/", "expiresAt": "…", "editToken": "…" }</code></pre>`;
 }
 
-export function goneHtml(): string {
-  return shell(
-    `Expired · ${APP_NAME}`,
-    `<main class="center"><h1>410</h1><p>This link has expired. انتهت صلاحية هذا الرابط.</p><p><a href="/">${esc(APP_NAME)}</a></p></main>`,
-  );
-}
+const HERO_ART = `<svg class="hero-art" viewBox="0 0 420 300" role="img" aria-label="Files sailing into a harbor and becoming a link">
+  <rect x="40" y="36" width="250" height="160" rx="14" class="card"/>
+  <rect x="40" y="36" width="250" height="30" rx="14" class="card-top"/>
+  <circle cx="60" cy="51" r="5" class="dot"/><circle cx="76" cy="51" r="5" class="dot"/><circle cx="92" cy="51" r="5" class="dot"/>
+  <rect x="62" y="86" width="130" height="12" rx="6" class="line strong"/>
+  <rect x="62" y="110" width="200" height="9" rx="4.5" class="line"/>
+  <rect x="62" y="128" width="170" height="9" rx="4.5" class="line"/>
+  <rect x="62" y="152" width="80" height="26" rx="13" class="pill"/>
+  <rect x="170" y="120" width="210" height="58" rx="29" class="link-card"/>
+  <circle cx="200" cy="149" r="14" class="link-icon"/>
+  <path d="M195 149h10M200 144l5 5-5 5" class="link-arrow"/>
+  <rect x="226" y="140" width="128" height="9" rx="4.5" class="line on-dark"/>
+  <rect x="226" y="155" width="80" height="7" rx="3.5" class="line on-dark faint"/>
+  <path d="M0 236c35 0 35-14 70-14s35 14 70 14 35-14 70-14 35 14 70 14 35-14 70-14 35 14 70 14" class="wave"/>
+  <path d="M0 262c35 0 35-14 70-14s35 14 70 14 35-14 70-14 35 14 70 14 35-14 70-14 35 14 70 14" class="wave faint"/>
+  <g class="clock"><circle cx="352" cy="74" r="26" class="clock-face"/><path d="M352 60v14l10 7" class="clock-hand"/></g>
+</svg>`;
 
-export const APP_CSS = `
-:root{--bg:#0f1115;--fg:#e9edf3;--muted:#98a2b3;--accent:#5cc8ff;--card:#171a21;--line:#2a2f3a}
-*{box-sizing:border-box}
-body{margin:0;font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Arabic",sans-serif;background:var(--bg);color:var(--fg)}
-.top{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-bottom:1px solid var(--line)}
-.logo{font-size:20px;letter-spacing:.5px}
-main{max-width:760px;margin:0 auto;padding:32px 24px}
-main.center{text-align:center;padding-top:15vh}
-h1{font-size:clamp(26px,4vw,38px);line-height:1.2;margin:0 0 8px}
-.sub,.muted{color:var(--muted)}
-.drop{margin:28px 0;padding:36px 24px;border:2px dashed var(--line);border-radius:14px;background:var(--card);text-align:center;transition:border-color .15s,background .15s}
-.drop.over{border-color:var(--accent);background:#1b2230}
-.row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
-.btn,button{cursor:pointer;border-radius:10px;padding:10px 16px;border:1px solid var(--accent);background:var(--accent);color:#04121b;font:inherit;font-weight:600}
-.ghost{background:transparent;color:var(--fg);border-color:var(--line)}
-.ttl{display:inline-flex;gap:8px;align-items:center}
-select{font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
-a{color:var(--accent)}
-code,pre{background:var(--card);border:1px solid var(--line);border-radius:8px}
-code{padding:2px 6px;word-break:break-all;direction:ltr;unicode-bidi:isolate;display:inline-block}
-#link,.list a{direction:ltr;unicode-bidi:isolate}
-pre{padding:12px;overflow:auto;direction:ltr;text-align:left}
-pre code{border:0;padding:0}
-.list{list-style:none;padding:0}
-.list li{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
-footer{text-align:center;padding:24px;font-size:14px}
-#status.err{color:#ff8a8a}
-`;
+export function landingHtml(lang: Lang, c: Config): string {
+  const t = STRINGS[lang];
+  const href = (p: string) => localePath(lang, p);
+  const l = limitValues(lang, c);
+  const icons = ["M8 12h16M8 18h10", "M10 22l6-12 6 12M12 18h8", "M16 8v8l5 3"];
+  const body = `
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <p class="eyebrow">${esc(t.hero.eyebrow)}</p>
+      <h1>${esc(t.hero.title)}</h1>
+      <p class="lead">${esc(t.hero.sub)}</p>
+      <p class="cta"><a class="btn primary lg" href="#try">${esc(t.hero.ctaTry)}</a> <a class="btn lg" href="${href("/docs")}">${esc(t.hero.ctaDocs)}</a></p>
+    </div>
+    ${HERO_ART}
+  </div>
+</section>
 
-export const APP_JS = `
-const T = {
-  en: {
-    title: ${JSON.stringify(APP_TAGLINE)},
-    sub: "Drag in a folder, some files, or a .zip. You get a public link that deletes itself when it expires.",
-    drop: "Drop files, a folder, or a .zip here", pickFiles: "Choose files", pickDir: "Choose folder",
-    expires: "Expires after", ready: "Your link is ready", copy: "Copy", copied: "Copied",
-    tokenNote: "Edit/delete token (saved in this browser; keep a copy to manage it elsewhere):",
-    mine: "Your drops in this browser", api: "Deploy from a script or AI agent",
-    footer: ${JSON.stringify(`${APP_NAME} is open source. Uploaded content is public to anyone with the link. Don't upload secrets.`)},
-    uploading: "Uploading…", del: "Delete", expiresAt: "expires", none: "Nothing yet.",
-    limits: (c) => "Up to " + c.maxFiles + " files, " + mb(c.maxFileBytes) + " per file, " + mb(c.maxSiteBytes) + " total.",
-    hours: (h) => h < 24 ? h + (h === 1 ? " hour" : " hours") : (h / 24) + (h === 24 ? " day" : " days"),
-  },
-  ar: {
-    title: "ارفع موقعك الثابت وخد رابط. من غير حساب.",
-    sub: "اسحب فولدر أو ملفات أو ملف zip. هتاخد رابط عام بيتمسح لوحده لما مدته تخلص.",
-    drop: "اسحب الملفات أو الفولدر أو ملف zip هنا", pickFiles: "اختار ملفات", pickDir: "اختار فولدر",
-    expires: "ينتهي بعد", ready: "الرابط جاهز", copy: "نسخ", copied: "اتنسخ",
-    tokenNote: "مفتاح التعديل والمسح (محفوظ في المتصفح ده، احتفظ بنسخة لو هتديره من مكان تاني):",
-    mine: "اللي رفعته من المتصفح ده", api: "النشر من سكريبت أو AI agent",
-    footer: ${JSON.stringify(`${APP_NAME} مفتوح المصدر. أي حد معاه الرابط يقدر يشوف المحتوى، فماترفعش أي بيانات سرية.`)},
-    uploading: "جاري الرفع…", del: "مسح", expiresAt: "ينتهي", none: "لسه مفيش.",
-    limits: (c) => "لحد " + c.maxFiles + " ملف، " + mb(c.maxFileBytes) + " للملف، " + mb(c.maxSiteBytes) + " إجمالي.",
-    hours: (h) => h < 24 ? h + " ساعة" : (h / 24) + " يوم",
-  },
-};
-const mb = (b) => "\u2066" + Math.round(b / 1048576) + " MB\u2069";
-const $ = (id) => document.getElementById(id);
-let lang = localStorage.getItem("lang") || "en";
-let cfg = null;
-const KEY = "drops";
-const drops = () => JSON.parse(localStorage.getItem(KEY) || "[]");
-const saveDrops = (d) => localStorage.setItem(KEY, JSON.stringify(d));
+<section class="band" aria-labelledby="why-title">
+  <div class="wrap">
+    <h2 id="why-title">${esc(t.why.title)}</h2>
+    <div class="grid three">
+      ${t.why.items
+        .map(
+          ([h, p], i) =>
+            `<article class="card-box"><svg class="icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><circle cx="16" cy="16" r="13" class="stroke"/><path d="${icons[i]}" class="stroke"/></svg><h3>${esc(h)}</h3><p>${esc(p)}</p></article>`,
+        )
+        .join("")}
+    </div>
+  </div>
+</section>
 
-function applyLang() {
-  const t = T[lang];
-  document.documentElement.lang = lang;
-  document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
-  document.querySelectorAll("[data-i18n]").forEach((el) => {
-    const v = t[el.dataset.i18n];
-    if (typeof v === "string") el.textContent = v;
-  });
-  $("lang").textContent = lang === "ar" ? "English" : "عربي";
-  if (cfg) {
-    $("limits").textContent = t.limits(cfg);
-    const sel = $("ttl");
-    const cur = sel.value;
-    sel.innerHTML = "";
-    const opts = [1, 6, 24, 72, 168].filter((h) => h >= cfg.ttlHours.min && h <= cfg.ttlHours.max);
-    if (!opts.includes(cfg.ttlHours.default)) opts.push(cfg.ttlHours.default);
-    opts.sort((a, b) => a - b).forEach((h) => {
-      const o = document.createElement("option");
-      o.value = String(h);
-      o.textContent = t.hours(h);
-      sel.appendChild(o);
-    });
-    sel.value = cur || String(cfg.ttlHours.default);
-  }
-  renderMine();
-}
+<section aria-labelledby="how-title">
+  <div class="wrap">
+    <h2 id="how-title">${esc(t.how.title)}</h2>
+    <ol class="steps">
+      ${t.how.steps.map(([h, p]) => `<li><h3>${esc(h)}</h3><p>${esc(p)}</p></li>`).join("")}
+    </ol>
+  </div>
+</section>
 
-function renderMine() {
-  const t = T[lang];
-  const ul = $("mine");
-  ul.innerHTML = "";
-  const now = Date.now();
-  const list = drops().filter((d) => Date.parse(d.expiresAt) > now);
-  saveDrops(list);
-  if (!list.length) {
-    const li = document.createElement("li");
-    li.className = "muted";
-    li.textContent = t.none;
-    ul.appendChild(li);
-    return;
-  }
-  for (const d of list) {
-    const li = document.createElement("li");
-    const a = document.createElement("a");
-    a.href = d.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = d.url;
-    const meta = document.createElement("span");
-    meta.className = "muted";
-    meta.textContent = t.expiresAt + " " + new Date(d.expiresAt).toLocaleString(lang);
-    const del = document.createElement("button");
-    del.className = "ghost"; del.type = "button"; del.textContent = t.del;
-    del.onclick = async () => {
-      const r = await fetch("/api/sites/" + d.id, { method: "DELETE", headers: { Authorization: "Bearer " + d.editToken } });
-      if (r.ok || r.status === 404 || r.status === 410) { saveDrops(drops().filter((x) => x.id !== d.id)); renderMine(); }
-    };
-    const left = document.createElement("div");
-    left.append(a, document.createElement("br"), meta);
-    li.append(left, del);
-    ul.appendChild(li);
-  }
-}
+<section class="band" aria-labelledby="uses-title">
+  <div class="wrap">
+    <h2 id="uses-title">${esc(t.uses.title)}</h2>
+    <p class="muted">${esc(t.uses.sub)}</p>
+    <div class="grid uses">
+      ${t.uses.items.map(([h, p]) => `<article class="card-box"><h3>${esc(h)}</h3><p>${esc(p)}</p></article>`).join("")}
+    </div>
+    <p><a class="more" href="/docs/use-cases">${esc(t.uses.more)}</a></p>
+  </div>
+</section>
 
-function status(msg, err) { const s = $("status"); s.textContent = msg || ""; s.className = err ? "err" : ""; }
+<section aria-labelledby="agents-title">
+  <div class="wrap two-col">
+    <div>
+      <h2 id="agents-title">${esc(t.agents.title)}</h2>
+      <p>${esc(t.agents.sub)}</p>
+      <p class="cta"><a class="btn" href="/llms.txt">${esc(t.agents.llms)}</a> <a class="btn" href="/openapi.json">${esc(t.agents.openapi)}</a> <a class="btn" href="/docs/agents">${esc(t.nav.docs)}</a></p>
+    </div>
+    ${agentSnippet(c)}
+  </div>
+</section>
 
-async function upload(items) {
-  if (!items.length) return;
-  status(T[lang].uploading);
-  const fd = new FormData();
-  for (const { file, path } of items) { fd.append("files", file, file.name); fd.append("paths", path); }
-  fd.append("ttlHours", $("ttl").value);
-  try {
-    const r = await fetch("/api/sites", { method: "POST", body: fd });
-    const j = await r.json();
-    if (!r.ok) { status((j.error && j.error.message) || ("HTTP " + r.status), true); return; }
-    status("");
-    $("result").hidden = false;
-    $("link").href = j.url; $("link").textContent = j.url;
-    $("token").textContent = j.editToken;
-    saveDrops([{ id: j.id, url: j.url, expiresAt: j.expiresAt, editToken: j.editToken }, ...drops()]);
-    renderMine();
-  } catch (e) { status(String(e), true); }
-}
+${uploader(lang, c, "h2")}
 
-function walk(entry, prefix) {
-  return new Promise((resolve) => {
-    if (entry.isFile) { entry.file((f) => resolve([{ file: f, path: prefix + f.name }]), () => resolve([])); return; }
-    if (!entry.isDirectory) { resolve([]); return; }
-    const reader = entry.createReader();
-    const all = [];
-    const next = () => reader.readEntries(async (batch) => {
-      if (!batch.length) { const nested = await Promise.all(all.map((e) => walk(e, prefix + entry.name + "/"))); resolve(nested.flat()); return; }
-      all.push(...batch); next();
-    }, () => resolve([]));
-    next();
+<section class="band" aria-labelledby="limits-title">
+  <div class="wrap two-col">
+    <div>
+      <h2 id="limits-title">${esc(t.limits.title)}</h2>
+      <p class="muted">${esc(t.limits.sub)}</p>
+      <ul class="checks">${t.limits
+        .limitItems(l)
+        .map((x) => `<li>${esc(x)}</li>`)
+        .join("")}</ul>
+    </div>
+    <div>
+      <h3>${esc(t.limits.privacyTitle)}</h3>
+      <ul class="checks">${t.limits.privacy.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="self-title">
+  <div class="wrap two-col">
+    <div>
+      <h2 id="self-title">${esc(t.selfhost.title)}</h2>
+      <p>${esc(t.selfhost.sub)}</p>
+      <p><a class="btn" href="/docs/self-hosting">${esc(t.selfhost.cta)}</a></p>
+    </div>
+    <pre class="code" dir="ltr"><code>docker compose up -d --build
+# =&gt; http://localhost:8080</code></pre>
+  </div>
+</section>`;
+  return layout({
+    lang,
+    title: `${APP_NAME}: ${t.hero.title}`,
+    description: t.hero.sub,
+    path: "/",
+    body,
+    config: c,
+    active: "home",
   });
 }
 
-const drop = $("drop");
-["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
-["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove("over")));
-drop.addEventListener("drop", async (e) => {
-  e.preventDefault();
-  const entries = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
-  if (entries.length) { upload((await Promise.all(entries.map((en) => walk(en, "")))).flat()); return; }
-  upload([...e.dataTransfer.files].map((f) => ({ file: f, path: f.name })));
-});
-$("pickFiles").addEventListener("change", (e) => upload([...e.target.files].map((f) => ({ file: f, path: f.name }))));
-$("pickDir").addEventListener("change", (e) => upload([...e.target.files].map((f) => ({ file: f, path: f.webkitRelativePath || f.name }))));
-$("copy").addEventListener("click", async () => { await navigator.clipboard.writeText($("link").href); $("copy").textContent = T[lang].copied; });
-$("lang").addEventListener("click", () => { lang = lang === "ar" ? "en" : "ar"; localStorage.setItem("lang", lang); applyLang(); });
+export function newHtml(lang: Lang, c: Config): string {
+  const t = STRINGS[lang];
+  return layout({
+    lang,
+    title: `${t.try.title} · ${APP_NAME}`,
+    description: t.hero.sub,
+    path: "/new",
+    body: uploader(lang, c, "h1"),
+    config: c,
+    active: "try",
+  });
+}
 
-fetch("/api/config").then((r) => r.json()).then((c) => { cfg = c; applyLang(); });
-applyLang();
-`;
+function docsNav(lang: Lang, docs: DocPage[], current?: string): string {
+  const t = STRINGS[lang];
+  const list = [...docs].sort((a, b) => (a.lang === lang ? -1 : 0) - (b.lang === lang ? -1 : 0));
+  return `<nav class="docs-nav" aria-label="${esc(t.docs.title)}"><ul>${list
+    .map((d) => {
+      const url = d.lang === "ar" ? `/ar/docs/${d.slug}` : `/docs/${d.slug}`;
+      const note =
+        d.lang !== lang && lang === "ar"
+          ? ` <span class="muted small">${esc(t.docs.englishOnly)}</span>`
+          : "";
+      return `<li><a href="${url}" lang="${d.lang}"${d.slug === current ? ' aria-current="page"' : ""}>${esc(d.title)}</a>${note}</li>`;
+    })
+    .join("")}</ul></nav>`;
+}
+
+export function docsIndexHtml(lang: Lang, c: Config, docs: DocPage[]): string {
+  const t = STRINGS[lang];
+  const list = [...docs].sort((a, b) => (a.lang === lang ? -1 : 0) - (b.lang === lang ? -1 : 0));
+  const body = `<div class="wrap docs-head"><h1>${esc(t.docs.title)}</h1><p class="lead">${esc(t.docs.sub)}</p></div>
+<div class="wrap grid docs-grid">${list
+    .map((d) => {
+      const url = d.lang === "ar" ? `/ar/docs/${d.slug}` : `/docs/${d.slug}`;
+      const note =
+        d.lang !== lang && lang === "ar"
+          ? ` <span class="muted small">${esc(t.docs.englishOnly)}</span>`
+          : "";
+      return `<a class="card-box doc-card" href="${url}" lang="${d.lang}" dir="${d.lang === "ar" ? "rtl" : "ltr"}"><h2>${esc(d.title)}</h2><p>${esc(d.summary)}</p></a>${note}`;
+    })
+    .join("")}
+  <a class="card-box doc-card" href="/llms.txt" lang="en" dir="ltr"><h2>llms.txt</h2><p>Plain-text instructions for AI agents.</p></a>
+  <a class="card-box doc-card" href="/openapi.json" lang="en" dir="ltr"><h2>OpenAPI</h2><p>Machine-readable API spec (OpenAPI 3.1).</p></a>
+</div>`;
+  return layout({
+    lang,
+    title: `${t.docs.title} · ${APP_NAME}`,
+    description: t.docs.sub,
+    path: "/docs",
+    body,
+    config: c,
+    active: "docs",
+  });
+}
+
+export function docPageHtml(lang: Lang, c: Config, doc: DocPage, docs: DocPage[]): string {
+  const t = STRINGS[lang];
+  const docDir = doc.lang === "ar" ? "rtl" : "ltr";
+  const body = `<div class="wrap docs-layout">
+  <aside>${docsNav(lang, docs, doc.slug)}<p><a href="${localePath(lang, "/docs")}">${esc(t.docs.back)}</a></p></aside>
+  <article class="prose" lang="${doc.lang}" dir="${docDir}"><h1>${esc(doc.title)}</h1>${doc.html}</article>
+</div>`;
+  return layout({
+    lang,
+    title: `${doc.title} · ${APP_NAME}`,
+    description: doc.summary,
+    path: doc.lang === "ar" ? `/docs/${doc.slug}` : `/docs/${doc.slug}`,
+    body,
+    config: c,
+    active: "docs",
+  });
+}
+
+function message(lang: Lang, c: Config, code: string, text: string): string {
+  const t = STRINGS[lang];
+  return layout({
+    lang,
+    title: `${code} · ${APP_NAME}`,
+    description: text,
+    path: "/",
+    body: `<div class="wrap narrow center"><p class="big-code">${code}</p><h1>${esc(text)}</h1><p><a class="btn primary" href="${localePath(lang, "/")}">${esc(t.home)}</a></p></div>`,
+    config: c,
+  });
+}
+
+export const notFoundHtml = (lang: Lang, c: Config) =>
+  message(lang, c, "404", STRINGS[lang].notFound);
+export const goneHtml = (lang: Lang, c: Config) => message(lang, c, "410", STRINGS[lang].gone);
+
+export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#0b3b5c"/><g fill="none" stroke="#7fe0d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="8" r="2.6"/><path d="M16 11v15M10 15h12M6.5 19.5C7.5 23.5 11.5 26 16 26s8.5-2.5 9.5-6.5"/></g></svg>`;

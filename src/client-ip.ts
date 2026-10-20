@@ -1,9 +1,15 @@
 import type { Context } from "hono";
 
+interface NodeBindings {
+  incoming?: { socket?: { remoteAddress?: string } };
+  server?: { incoming?: { socket?: { remoteAddress?: string } } };
+}
+
 /**
  * Best-effort client IP. Behind a reverse proxy (TRUST_PROXY=true) uses
  * X-Real-IP, else the LAST X-Forwarded-For hop (the one your proxy appended;
  * earlier hops are client-controlled). Otherwise the socket address.
+ * The IP is only used as an in-memory rate-limit key; it is never stored or logged.
  */
 export function clientIp(c: Context, trustProxy: boolean): string {
   if (trustProxy) {
@@ -19,7 +25,7 @@ export function clientIp(c: Context, trustProxy: boolean): string {
       if (last) return last;
     }
   }
-  const incoming = (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)
-    ?.incoming;
+  const env = c.env as NodeBindings | undefined;
+  const incoming = env?.server?.incoming ?? env?.incoming;
   return incoming?.socket?.remoteAddress ?? "unknown";
 }

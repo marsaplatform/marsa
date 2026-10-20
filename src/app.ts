@@ -2,10 +2,13 @@ import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { APP_CSS, APP_JS } from "./assets.js";
 import { APP_NAME } from "./brand.js";
 import { clientIp } from "./client-ip.js";
 import type { Config } from "./config.js";
+import { type DocPage, loadDocs } from "./docs.js";
 import { UploadError } from "./errors.js";
+import type { Lang } from "./i18n.js";
 import {
   type FileInput,
   fromFilesArray,
@@ -14,17 +17,29 @@ import {
   prepareSite,
   type UploadEntry,
 } from "./ingest.js";
+import { llmsTxt } from "./llms.js";
+import { openapi } from "./openapi.js";
 import { RateLimiter } from "./rate-limit.js";
 import { APP_CSP, baseHeaders, SITE_CSP } from "./security.js";
 import { publicMeta, type SiteMeta, type SiteStore } from "./store.js";
 import { bearer, hashToken, newEditToken, newSiteId, safeEqual } from "./tokens.js";
-import { APP_CSS, APP_JS, goneHtml, indexHtml, notFoundHtml } from "./ui.js";
+import {
+  docPageHtml,
+  docsIndexHtml,
+  FAVICON_SVG,
+  goneHtml,
+  landingHtml,
+  newHtml,
+  notFoundHtml,
+} from "./ui.js";
 
 const HOUR = 60 * 60 * 1000;
 
 export interface AppDeps {
   config: Config;
   store: SiteStore;
+  /** Rendered guide pages; loaded from docs/ when omitted. */
+  docs?: DocPage[];
   limiter?: RateLimiter;
   now?: () => number;
 }
@@ -33,8 +48,19 @@ function apiError(c: Context, status: number, code: string, message: string) {
   return c.json({ error: { code, message } }, status as 400);
 }
 
-export function createApp({ config, store, limiter = new RateLimiter(), now = Date.now }: AppDeps) {
+export function createApp({
+  config,
+  store,
+  limiter = new RateLimiter(),
+  now = Date.now,
+  docs = loadDocs(config.publicUrl),
+}: AppDeps) {
   const app = new Hono();
+  /** Language for pages outside the /ar tree: Arabic if the browser prefers it. */
+  const langOf = (c: Context): Lang => {
+    if (/^\/ar(\/|$)/.test(c.req.path)) return "ar";
+    return /^\s*ar\b/i.test(c.req.header("accept-language") ?? "") ? "ar" : "en";
+  };
   const limits: Limits = {
     maxFileBytes: config.maxFileBytes,
     maxSiteBytes: config.maxSiteBytes,
@@ -261,35 +287,62 @@ export function createApp({ config, store, limiter = new RateLimiter(), now = Da
   const appPage = (c: Context, html: string, status = 200) => {
     c.header("Content-Security-Policy", APP_CSP);
     c.header("X-Frame-Options", "DENY");
+    c.header("Cache-Control", "no-cache");
     return c.html(html, status as 200);
   };
-  app.get("/", (c) => appPage(c, indexHtml()));
-  app.get("/favicon.ico", (c) => c.body(null, 204));
-  app.get("/assets/app.js", (c) => {
-    c.header("Content-Type", "text/javascript; charset=utf-8");
-    c.header("Cache-Control", "no-cache");
-    return c.body(APP_JS);
-  });
-  app.get("/assets/app.css", (c) => {
-    c.header("Content-Type", "text/css; charset=utf-8");
-    c.header("Cache-Control", "no-cache");
-    return c.body(APP_CSS);
-  });
+  const asset = (type: string, body: string) => (c: Context) => {
+    c.header("Content-Type", type);
+    c.header("Cache-Control", "public, max-age=300");
+    return c.body(body);
+  };
+  const publicText = (c: Context, type: string, body: string) => {
+    c.header("Content-Type", type);
+    c.header("Access-Control-Allow-Origin", "*");
+    c.header("Cache-Control", "public, max-age=300");
+    return c.body(body);
+  };
+
+  app.get("/", (c) => appPage(c, landingHtml("en", config)));
+  app.get("/ar", (c) => appPage(c, landingHtml("ar", config)));
+  app.get("/ar/", (c) => c.redirect("/ar", 301));
+  app.get("/new", (c) => appPage(c, newHtml("en", config)));
+  app.get("/ar/new", (c) => appPage(c, newHtml("ar", config)));
+  app.get("/docs", (c) => appPage(c, docsIndexHtml("en", config, docs)));
+  app.get("/ar/docs", (c) => appPage(c, docsIndexHtml("ar", config, docs)));
+  for (const prefix of ["", "/ar"] as const) {
+    const lang: Lang = prefix ? "ar" : "en";
+    app.get(`${prefix}/docs/:slug`, (c) => {
+      const doc = docs.find((d) => d.slug === c.req.param("slug"));
+      if (!doc) return appPage(c, notFoundHtml(lang, config), 404);
+      return appPage(c, docPageHtml(lang, config, doc, docs));
+    });
+  }
+  app.get("/llms.txt", (c) => publicText(c, "text/plain; charset=utf-8", llmsTxt(config)));
+  app.get("/openapi.json", (c) =>
+    publicText(c, "application/json; charset=utf-8", JSON.stringify(openapi(config), null, 2)),
+  );
+  app.get("/robots.txt", (c) =>
+    publicText(c, "text/plain; charset=utf-8", "User-agent: *\nDisallow: /s/\nDisallow: /api/\n"),
+  );
+  app.get("/favicon.svg", asset("image/svg+xml", FAVICON_SVG));
+  app.get("/favicon.ico", (c) => c.redirect("/favicon.svg", 302));
+  app.get("/assets/app.js", asset("text/javascript; charset=utf-8", APP_JS));
+  app.get("/assets/app.css", asset("text/css; charset=utf-8", APP_CSS));
 
   // ---- serving uploaded sites --------------------------------------------
   app.get("/s/:id", (c) => c.redirect(`/s/${c.req.param("id")}/`, 301));
   app.get("/s/:id/*", async (c) => {
     const id = c.req.param("id");
     const meta = await store.get(id);
-    if (!meta) return appPage(c, notFoundHtml(), 404);
-    if (Date.parse(meta.expiresAt) <= now()) return appPage(c, goneHtml(), 410);
+    if (!meta) return appPage(c, notFoundHtml(langOf(c), config), 404);
+    if (Date.parse(meta.expiresAt) <= now()) return appPage(c, goneHtml(langOf(c), config), 410);
 
     const prefix = `/s/${id}/`;
     let rel: string;
     try {
       rel = decodeURIComponent(new URL(c.req.url).pathname.slice(prefix.length));
     } catch {
-      return appPage(c, notFoundHtml(), 400);
+      return appPage(c, notFoundHtml(langOf(c), config), 400);
     }
     const candidates =
       rel === "" || rel.endsWith("/")
@@ -307,7 +360,7 @@ export function createApp({ config, store, limiter = new RateLimiter(), now = Da
     let status = 200;
     if (!path || !found) {
       path = store.filePath(meta, "404.html");
-      if (!path) return appPage(c, notFoundHtml(), 404);
+      if (!path) return appPage(c, notFoundHtml(langOf(c), config), 404);
       found = "404.html";
       status = 404;
     }
@@ -329,7 +382,7 @@ export function createApp({ config, store, limiter = new RateLimiter(), now = Da
   app.notFound((c) =>
     c.req.path.startsWith("/api/")
       ? apiError(c, 404, "NOT_FOUND", "no such route")
-      : appPage(c, notFoundHtml(), 404),
+      : appPage(c, notFoundHtml(langOf(c), config), 404),
   );
 
   return app;
