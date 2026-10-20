@@ -1,0 +1,24 @@
+Marsa
+Copyright (c) the Marsa contributors
+
+This product is licensed under the MIT License (see LICENSE).
+
+--------------------------------------------------------------------------------
+Attribution
+--------------------------------------------------------------------------------
+
+Marsa is derived from canvas-drop (https://github.com/markpasternak/canvas-drop),
+Copyright (c) 2026 canvas-drop contributors, licensed under the MIT License.
+The upstream copyright and permission notice are retained in LICENSE.
+
+Adapted pieces (modified for Marsa): upload path normalization and zip-slip
+guard (src/paths.ts), ZIP ingestion with zip-bomb guards (src/ingest.ts),
+the MIME map (src/mime.ts) and the in-process rate-limiter design
+(src/rate-limit.ts).
+
+--------------------------------------------------------------------------------
+Third-party dependencies
+--------------------------------------------------------------------------------
+
+Runtime dependencies: hono (MIT), @hono/node-server (MIT), yauzl (MIT).
+They are fetched from npm under their own licenses.

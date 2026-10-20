@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token; this workflow uses no repository secrets.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Smoke test
+        run: |
+          DATA_DIR=$RUNNER_TEMP/data PORT=8080 node dist/index.js &
+          for i in $(seq 1 30); do curl -fs http://localhost:8080/healthz && break; sleep 1; done
+          BASE_URL=http://localhost:8080 npm run smoke
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Uses the gitleaks CLI directly (the gitleaks GitHub Action needs a license secret for orgs).
+      - name: gitleaks
+        run: |
+          VERSION=8.30.1
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" | tar xz gitleaks
+          ./gitleaks git --redact --no-banner --exit-code 1 .

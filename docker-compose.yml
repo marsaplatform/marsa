@@ -1,0 +1,17 @@
+services:
+  marsa:
+    build: .
+    image: marsa:local
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATA_DIR: /data
+    volumes:
+      - marsa-data:/data
+
+volumes:
+  marsa-data:
