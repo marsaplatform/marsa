@@ -21,6 +21,10 @@ for (const path of [
   "/ar/docs/guide",
   "/llms.txt",
   "/openapi.json",
+  "/admin",
+  "/ar/admin",
+  "/docs/teams",
+  "/api/directory",
 ]) {
   const r = await fetch(`${base}${path}`);
   if (r.status !== 200) fail(`${path} returned ${r.status}`);

@@ -58,6 +58,12 @@ const PAGES: { slug: string; lang: Lang; file: string; summary: string }[] = [
     summary: "Optional KV and files for pages and agents, backed by Appwrite.",
   },
   {
+    slug: "teams",
+    lang: "en",
+    file: "teams.md",
+    summary: "Admin console: teams, team keys, backend access and the public directory.",
+  },
+  {
     slug: "guide",
     lang: "ar",
     file: "ar/guide.md",

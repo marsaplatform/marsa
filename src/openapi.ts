@@ -46,11 +46,11 @@ const site = (description: string) => ({
 
 /** OpenAPI 3.1 description of the public API, served at /openapi.json. */
 export function openapi(config: Config) {
-  return {
+  const spec = {
     openapi: "3.1.0",
     info: {
       title: `${APP_NAME} API`,
-      version: "0.3.0",
+      version: "0.4.0",
       description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site.`,
       license: { name: "MIT", identifier: "MIT" },
     },
@@ -59,6 +59,13 @@ export function openapi(config: Config) {
       securitySchemes: {
         editToken: { type: "http", scheme: "bearer", description: "The site's edit token." },
         adminToken: { type: "http", scheme: "bearer", description: "The instance ADMIN_TOKEN." },
+        teamKey: {
+          type: "apiKey",
+          in: "header",
+          name: "X-Team-Key",
+          description:
+            "Optional team key (from the admin). Attaches a new site to its team. Authorization: Bearer <team key> also works.",
+        },
       },
       schemas: {
         FileInput: {
@@ -88,6 +95,16 @@ export function openapi(config: Config) {
             expiresAt: { type: "string", format: "date-time" },
             fileCount: { type: "integer" },
             totalBytes: { type: "integer" },
+            title: { type: "string", description: "<title> of index.html, if any" },
+            team: {
+              type: ["object", "null"],
+              description: "The team the site was uploaded under; null for guest uploads.",
+              properties: {
+                id: { type: "string" },
+                name: { type: "string" },
+                backend: { type: "boolean" },
+              },
+            },
             files: {
               type: "object",
               additionalProperties: {
@@ -111,6 +128,63 @@ export function openapi(config: Config) {
             },
           ],
         },
+        Team: {
+          type: "object",
+          properties: {
+            id: { type: "string", example: "t_k3v9x2mq" },
+            name: { type: "string" },
+            backend: { type: "boolean", description: "May its sites use KV/files?" },
+            directory: { type: "boolean", description: "Listed in /api/directory?" },
+            keyPrefix: { type: "string", description: "First characters of the key" },
+            liveSites: { type: "integer" },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        TeamInput: {
+          type: "object",
+          properties: {
+            name: { type: "string", maxLength: 80 },
+            backend: { type: "boolean", default: false },
+            directory: { type: "boolean", default: true },
+          },
+        },
+        TeamWithKey: {
+          type: "object",
+          properties: {
+            team: { $ref: "#/components/schemas/Team" },
+            key: { type: "string", description: "The team key. Shown only in this response." },
+          },
+        },
+        Directory: {
+          type: "object",
+          properties: {
+            generatedAt: { type: "string", format: "date-time" },
+            teams: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  sites: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "string" },
+                        title: { type: "string" },
+                        url: { type: "string", format: "uri" },
+                        createdAt: { type: "string", format: "date-time" },
+                        expiresAt: { type: "string", format: "date-time" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         Error: {
           type: "object",
           properties: {
@@ -131,6 +205,9 @@ export function openapi(config: Config) {
         post: {
           summary: "Create a site",
           operationId: "createSite",
+          description:
+            "No auth needed (guest upload). Send X-Team-Key to attach the site to a team.",
+          security: [{}, { teamKey: [] }],
           parameters: [{ name: "ttlHours", in: "query", schema: { type: "number" } }],
           requestBody: uploadBody,
           responses: {
@@ -139,6 +216,7 @@ export function openapi(config: Config) {
               content: json({ $ref: "#/components/schemas/CreatedSite" }),
             },
             "400": err("Invalid upload"),
+            "401": err("INVALID_TEAM_KEY"),
             "413": err("Too large / too many files"),
             "415": err("Blocked file type"),
             "429": err("Rate limited"),
@@ -348,6 +426,100 @@ export function openapi(config: Config) {
           },
         },
       },
+      "/api/directory": {
+        get: {
+          summary: "Public directory of live team sites, grouped by team",
+          operationId: "getDirectory",
+          description:
+            "Only teams with directory=true and their unexpired sites. Never guest uploads, tokens or keys. Cached 30 s.",
+          responses: {
+            "200": { description: "OK", content: json({ $ref: "#/components/schemas/Directory" }) },
+          },
+        },
+      },
+      "/api/admin/teams": {
+        get: {
+          summary: "List teams (admin)",
+          operationId: "adminListTeams",
+          security: [{ adminToken: [] }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: json({
+                type: "object",
+                properties: {
+                  teams: { type: "array", items: { $ref: "#/components/schemas/Team" } },
+                },
+              }),
+            },
+            "401": err("Bad token"),
+            "404": err("Admin disabled"),
+          },
+        },
+        post: {
+          summary: "Create a team (admin)",
+          operationId: "adminCreateTeam",
+          security: [{ adminToken: [] }],
+          requestBody: {
+            required: true,
+            content: json({ $ref: "#/components/schemas/TeamInput" }),
+          },
+          responses: {
+            "201": {
+              description: "Created",
+              content: json({ $ref: "#/components/schemas/TeamWithKey" }),
+            },
+            "400": err("Invalid name or flags"),
+            "401": err("Bad token"),
+          },
+        },
+      },
+      "/api/admin/teams/{teamId}": {
+        parameters: [{ name: "teamId", in: "path", required: true, schema: { type: "string" } }],
+        patch: {
+          summary: "Rename a team or toggle backend / directory (admin)",
+          operationId: "adminUpdateTeam",
+          security: [{ adminToken: [] }],
+          requestBody: {
+            required: true,
+            content: json({ $ref: "#/components/schemas/TeamInput" }),
+          },
+          responses: {
+            "200": { description: "Updated" },
+            "400": err("Invalid name or flags"),
+            "404": err("No such team"),
+          },
+        },
+        delete: {
+          summary: "Delete a team (admin)",
+          operationId: "adminDeleteTeam",
+          security: [{ adminToken: [] }],
+          parameters: [
+            {
+              name: "sites",
+              in: "query",
+              schema: { type: "string", enum: ["delete"] },
+              description: "Also delete the team's sites",
+            },
+          ],
+          responses: { "200": { description: "Deleted" }, "404": err("No such team") },
+        },
+      },
+      "/api/admin/teams/{teamId}/rotate": {
+        parameters: [{ name: "teamId", in: "path", required: true, schema: { type: "string" } }],
+        post: {
+          summary: "Replace a team's key (admin)",
+          operationId: "adminRotateTeamKey",
+          security: [{ adminToken: [] }],
+          responses: {
+            "200": {
+              description: "New key",
+              content: json({ $ref: "#/components/schemas/TeamWithKey" }),
+            },
+            "404": err("No such team"),
+          },
+        },
+      },
       "/api/admin/sweep": {
         post: {
           summary: "Delete expired sites now (admin)",
@@ -358,4 +530,16 @@ export function openapi(config: Config) {
       },
     },
   };
+  // Every backend route can also answer 403 when the site's team has no backend access.
+  for (const [path, item] of Object.entries(spec.paths)) {
+    if (!/\/(kv|files)/.test(path)) continue;
+    for (const op of Object.values(item as Record<string, { responses?: object }>)) {
+      if (op && typeof op === "object" && "responses" in op && op.responses) {
+        Object.assign(op.responses, {
+          "403": err("BACKEND_NOT_ALLOWED: the site isn't in a team with backend access"),
+        });
+      }
+    }
+  }
+  return spec;
 }

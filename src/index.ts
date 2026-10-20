@@ -5,6 +5,7 @@ import { APP_NAME } from "./brand.js";
 import { loadConfig } from "./config.js";
 import { SiteStore } from "./store.js";
 import { sweepExpired } from "./sweep.js";
+import { TeamStore } from "./teams.js";
 
 let config: ReturnType<typeof loadConfig>;
 try {
@@ -16,8 +17,11 @@ try {
 const store = new SiteStore(config.dataDir);
 await store.init();
 
+const teams = new TeamStore(config.dataDir);
+await teams.init();
+
 const backend = config.appwrite ? new AppwriteBackend(config.appwrite) : null;
-const app = createApp({ config, store, backend });
+const app = createApp({ config, store, backend, teams });
 
 const sweep = async () => {
   try {
@@ -35,7 +39,9 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
   console.log(
     `${APP_NAME} listening on http://${info.address}:${info.port} (public: ${config.publicUrl})`,
   );
-  console.log(`admin API: ${config.adminToken ? "enabled" : "disabled"}`);
+  console.log(
+    `admin API: ${config.adminToken ? `enabled (${teams.list().length} team(s); console at /admin)` : "disabled"}`,
+  );
   console.log(
     `data/files backend: ${config.appwrite ? `appwrite (${new URL(config.appwrite.endpoint).host})` : "off (static publishing only)"}`,
   );

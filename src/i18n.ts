@@ -33,6 +33,35 @@ export interface Strings {
     limitItems: (l: LimitValues) => string[];
   };
   selfhost: { title: string; sub: string; cta: string };
+  directory: {
+    title: string;
+    sub: string;
+    empty: string;
+    expires: string;
+    pages: (n: number) => string;
+  };
+  admin: {
+    title: string;
+    sub: string;
+    tokenLabel: string;
+    connect: string;
+    signOut: string;
+    teams: string;
+    create: string;
+    name: string;
+    backend: string;
+    directory: string;
+    liveSites: string;
+    key: string;
+    actions: string;
+    rotate: string;
+    del: string;
+    none: string;
+    newKey: string;
+    newKeyNote: string;
+    howTitle: string;
+    how: string[];
+  };
   footer: string;
   docs: { title: string; sub: string; englishOnly: string; back: string };
   notFound: string;
@@ -168,6 +197,41 @@ const en: Strings = {
     sub: "One container, one data folder, no database. MIT licensed.",
     cta: "Self-hosting guide",
   },
+  directory: {
+    title: "Published by teams",
+    sub: "Live pages that teams on this instance chose to share. Each link expires on its own.",
+    empty: "No team pages are live right now. Check back soon.",
+    expires: "Expires",
+    pages: (n) => (n === 1 ? "1 page" : `${n} pages`),
+  },
+  admin: {
+    title: "Admin: teams",
+    sub: "Create teams, give each one a team key, and decide which teams may use the data/files backend and which appear in the public directory.",
+    tokenLabel: "Admin token",
+    connect: "Open",
+    signOut: "Sign out",
+    teams: "Teams",
+    create: "Create team",
+    name: "Team name",
+    backend: "Backend access",
+    directory: "Show in public directory",
+    liveSites: "Live sites",
+    key: "Key",
+    actions: "Actions",
+    rotate: "New key",
+    del: "Delete",
+    none: "No teams yet.",
+    newKey: "Team key (shown only once)",
+    newKeyNote:
+      "Copy it now and give it to the team. Uploads sent with this key belong to the team. Marsa stores only a hash.",
+    howTitle: "How teams upload",
+    how: [
+      "Send the team key with the upload: header X-Team-Key: <key> (or Authorization: Bearer <key>).",
+      "Uploads without a key stay guest uploads: no backend, never listed.",
+      "Turning backend access off blocks that team's sites from KV/files immediately (403 BACKEND_NOT_ALLOWED).",
+      "Deleting a team leaves its sites up as ordinary links until they expire, unless you also delete them.",
+    ],
+  },
   footer: `${APP_NAME} is open source (MIT). Uploaded content is public to anyone with the link.`,
   docs: {
     title: "Guide",
@@ -274,6 +338,41 @@ const ar: Strings = {
     title: "شغّل نسختك",
     sub: "container واحد، وفولدر بيانات واحد، ومن غير قاعدة بيانات. ترخيص MIT.",
     cta: "دليل الاستضافة الذاتية",
+  },
+  directory: {
+    title: "منشورات الفرق",
+    sub: "صفحات شغالة دلوقتي اختارت الفرق على النسخة دي إنها تشاركها. كل رابط بينتهي لوحده.",
+    empty: "مفيش صفحات فرق شغالة دلوقتي. ارجع تاني قريب.",
+    expires: "ينتهي",
+    pages: (n) =>
+      n === 1 ? "صفحة واحدة" : n === 2 ? "صفحتين" : n <= 10 ? `${iso(n)} صفحات` : `${iso(n)} صفحة`,
+  },
+  admin: {
+    title: "الإدارة: الفرق",
+    sub: "اعمل فرق، وادّي كل فريق مفتاح خاص بيه، وحدد مين يقدر يستخدم الباك إند (البيانات والملفات) ومين يظهر في الدليل العام.",
+    tokenLabel: "مفتاح الأدمن",
+    connect: "ادخل",
+    signOut: "اخرج",
+    teams: "الفرق",
+    create: "اعمل فريق",
+    name: "اسم الفريق",
+    backend: "وصول للباك إند",
+    directory: "يظهر في الدليل العام",
+    liveSites: "مواقع شغالة",
+    key: "المفتاح",
+    actions: "إجراءات",
+    rotate: "مفتاح جديد",
+    del: "امسح",
+    none: "مفيش فرق لسه.",
+    newKey: "مفتاح الفريق (بيظهر مرة واحدة بس)",
+    newKeyNote: `انسخه دلوقتي وادّيه للفريق. أي رفع بالمفتاح ده بيتحسب على الفريق. ${iso(APP_NAME)} بيحفظ الـ hash بتاعه بس.`,
+    howTitle: "الفرق بترفع إزاي",
+    how: [
+      `ابعت مفتاح الفريق مع الرفع في الهيدر ${iso("X-Team-Key: <key>")} (أو ${iso("Authorization: Bearer <key>")}).`,
+      "الرفع من غير مفتاح بيفضل رفع ضيف: من غير باك إند، ومش بيظهر في الدليل.",
+      `لما تقفل الباك إند لفريق، مواقعه بتتمنع من الـ KV والملفات على طول (${iso("403 BACKEND_NOT_ALLOWED")}).`,
+      "لو مسحت فريق، مواقعه بتفضل شغالة كروابط عادية لحد ما تنتهي، إلا لو مسحتها هي كمان.",
+    ],
   },
   footer: `${iso(APP_NAME)} مفتوح المصدر (MIT). أي حد معاه الرابط يقدر يشوف المحتوى المرفوع.`,
   docs: {

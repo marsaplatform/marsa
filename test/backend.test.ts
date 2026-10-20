@@ -12,6 +12,7 @@ import {
 import { type AppwriteConfig, loadConfig } from "../src/config.js";
 import { SiteStore } from "../src/store.js";
 import { sweepExpired } from "../src/sweep.js";
+import { TeamStore } from "../src/teams.js";
 import { MemoryBackend } from "./fake-backend.js";
 
 // Placeholder values only; nothing here talks to a real Appwrite.
@@ -33,6 +34,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+/** By default the test site belongs to a team with backend access (the only kind allowed). */
 async function setup(
   env: Record<string, string> = {},
   backend: MemoryBackend | null = new MemoryBackend(),
@@ -40,10 +42,13 @@ async function setup(
   const config = loadConfig({ DATA_DIR: dir, PUBLIC_URL: "http://marsa.test", ...env });
   const store = new SiteStore(config.dataDir);
   await store.init();
-  const app = createApp({ config, store, backend, now: () => clock });
+  const teams = new TeamStore(config.dataDir);
+  await teams.init();
+  const { key: teamKey } = await teams.create("Backend team", true, clock);
+  const app = createApp({ config, store, backend, teams, now: () => clock });
   const res = await app.request("/api/sites", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-team-key": teamKey },
     body: JSON.stringify({ files: [{ path: "index.html", content: "<h1>x</h1>" }], ttlHours: 1 }),
   });
   const site = (await res.json()) as { id: string; editToken: string };
@@ -54,7 +59,7 @@ async function setup(
       headers: { ...headers, "content-type": "application/json" },
       body: JSON.stringify({ value }),
     });
-  return { app, store, backend, site, auth, put, config };
+  return { app, store, backend, site, auth, put, config, teams };
 }
 
 describe("config", () => {

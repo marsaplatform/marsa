@@ -25,6 +25,53 @@ export function limitValues(lang: Lang, c: Config): LimitValues {
   };
 }
 
+/** The public directory: live sites of teams that are listed, grouped by team. */
+export interface Directory {
+  generatedAt: string;
+  teams: {
+    id: string;
+    name: string;
+    sites: { id: string; title: string; url: string; createdAt: string; expiresAt: string }[];
+  }[];
+}
+
+/** A server-rendered UTC time; the page script swaps in the visitor's local time. */
+function timeTag(lang: Lang, iso: string): string {
+  const d = new Date(iso);
+  const text = new Intl.DateTimeFormat(lang === "ar" ? "ar-EG" : "en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(d);
+  return `<time datetime="${esc(d.toISOString())}" data-local>${esc(text)} UTC</time>`;
+}
+
+function directorySection(lang: Lang, dir: Directory): string {
+  const t = STRINGS[lang].directory;
+  const groups = dir.teams.length
+    ? dir.teams
+        .map(
+          (team) => `<div class="dir-team" role="group" aria-labelledby="dir-${esc(team.id)}">
+      <h3 id="dir-${esc(team.id)}"><bdi>${esc(team.name)}</bdi> <span class="muted small">· ${esc(t.pages(team.sites.length))}</span></h3>
+      <ul class="grid dir-grid">${team.sites
+        .map(
+          (x) =>
+            `<li class="card-box dir-card"><a class="dir-title" href="${esc(x.url)}" target="_blank" rel="noopener"><bdi>${esc(x.title)}</bdi></a><p class="dir-url"><span dir="ltr">${esc(x.url.replace(/^https?:\/\//, ""))}</span></p><p class="muted small">${esc(t.expires)} ${timeTag(lang, x.expiresAt)}</p></li>`,
+        )
+        .join("")}</ul>
+    </div>`,
+        )
+        .join("\n")
+    : `<p class="dir-empty card-box">${esc(t.empty)}</p>`;
+  return `<section id="directory" class="directory" aria-labelledby="directory-title">
+  <div class="wrap">
+    <h2 id="directory-title">${esc(t.title)}</h2>
+    <p class="muted">${esc(t.sub)}</p>
+    ${groups}
+  </div>
+</section>`;
+}
+
 interface LayoutOpts {
   lang: Lang;
   title: string;
@@ -33,6 +80,8 @@ interface LayoutOpts {
   body: string;
   config: Config;
   active?: "home" | "try" | "docs";
+  noindex?: boolean;
+  script?: string;
 }
 
 const ANCHOR_SVG = `<svg class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><circle cx="16" cy="7" r="3.2" class="stroke"/><path d="M16 10.5V27M9 15h14M5.5 19.5C6.5 24 11 27 16 27s9.5-3 10.5-7.5" class="stroke"/><path d="M3.5 21.5l2-2.5 2.5 2M28.5 21.5l-2-2.5-2.5 2" class="stroke"/></svg>`;
@@ -50,7 +99,7 @@ function layout(o: LayoutOpts): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(o.title)}</title>
 <meta name="description" content="${esc(o.description)}">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light dark">${o.noindex ? '\n<meta name="robots" content="noindex, nofollow">' : ""}
 <meta property="og:title" content="${esc(o.title)}">
 <meta property="og:description" content="${esc(o.description)}">
 <meta property="og:type" content="website">
@@ -83,7 +132,7 @@ ${o.body}
     <p class="links"><a href="${href("/docs")}">${esc(t.nav.docs)}</a> · <a href="/docs/api">API</a> · <a href="/openapi.json">OpenAPI</a> · <a href="/llms.txt">llms.txt</a> · <a href="/docs/self-hosting">Self-host</a></p>
   </div>
 </footer>
-<script src="/assets/app.js" type="module"></script>
+<script src="${o.script ?? "/assets/app.js"}" type="module"></script>
 </body>
 </html>`;
 }
@@ -155,7 +204,11 @@ const HERO_ART = `<svg class="hero-art" viewBox="0 0 420 300" role="img" aria-la
   <g class="clock"><circle cx="352" cy="74" r="26" class="clock-face"/><path d="M352 60v14l10 7" class="clock-hand"/></g>
 </svg>`;
 
-export function landingHtml(lang: Lang, c: Config): string {
+export function landingHtml(
+  lang: Lang,
+  c: Config,
+  dir: Directory = { generatedAt: "", teams: [] },
+): string {
   const t = STRINGS[lang];
   const href = (p: string) => localePath(lang, p);
   const l = limitValues(lang, c);
@@ -172,6 +225,8 @@ export function landingHtml(lang: Lang, c: Config): string {
     ${HERO_ART}
   </div>
 </section>
+
+${directorySection(lang, dir)}
 
 <section class="band" aria-labelledby="why-title">
   <div class="wrap">
@@ -256,6 +311,54 @@ ${uploader(lang, c, "h2")}
     body,
     config: c,
     active: "home",
+  });
+}
+
+export function adminHtml(lang: Lang, c: Config): string {
+  const t = STRINGS[lang].admin;
+  const body = `<div class="wrap admin" id="admin" data-rotate="${esc(t.rotate)}" data-del="${esc(t.del)}">
+  <h1>${esc(t.title)}</h1>
+  <p class="lead">${esc(t.sub)}</p>
+  <form id="login" class="card-box admin-login" autocomplete="off">
+    <label for="adminToken">${esc(t.tokenLabel)}</label>
+    <div class="row start"><input id="adminToken" type="password" dir="ltr" required minlength="24" autocomplete="off" spellcheck="false"><button class="btn primary" type="submit">${esc(t.connect)}</button></div>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+  <div id="panel" hidden>
+    <div class="row between"><h2>${esc(t.teams)}</h2><button id="signOut" class="btn small" type="button">${esc(t.signOut)}</button></div>
+    <div id="newKey" class="result" hidden>
+      <h3>${esc(t.newKey)}</h3>
+      <p class="muted small">${esc(t.newKeyNote)}</p>
+      <code id="newKeyValue" class="token"></code>
+    </div>
+    <div class="table-wrap"><table class="teams">
+      <thead><tr><th scope="col">${esc(t.name)}</th><th scope="col">${esc(t.backend)}</th><th scope="col">${esc(t.directory)}</th><th scope="col">${esc(t.liveSites)}</th><th scope="col">${esc(t.key)}</th><th scope="col">${esc(t.actions)}</th></tr></thead>
+      <tbody id="teamRows"><tr><td colspan="6" class="muted">${esc(t.none)}</td></tr></tbody>
+    </table></div>
+    <form id="createTeam" class="card-box admin-create">
+      <h3>${esc(t.create)}</h3>
+      <label for="teamName">${esc(t.name)}</label>
+      <input id="teamName" type="text" required maxlength="80" dir="auto">
+      <label class="check"><input id="teamBackend" type="checkbox"> ${esc(t.backend)}</label>
+      <label class="check"><input id="teamDirectory" type="checkbox" checked> ${esc(t.directory)}</label>
+      <p><button class="btn primary" type="submit">${esc(t.create)}</button></p>
+    </form>
+    <h3>${esc(t.howTitle)}</h3>
+    <ul class="checks">${t.how.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+    <pre class="code" dir="ltr"><code>curl -s -X POST "${esc(c.publicUrl)}/api/sites" \\
+  -H "X-Team-Key: $TEAM_KEY" \\
+  -H "Content-Type: application/zip" --data-binary @site.zip</code></pre>
+  </div>
+</div>`;
+  return layout({
+    lang,
+    title: `${t.title} · ${APP_NAME}`,
+    description: t.sub,
+    path: "/admin",
+    body,
+    config: c,
+    noindex: true,
+    script: "/assets/admin.js",
   });
 }
 

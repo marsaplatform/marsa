@@ -23,6 +23,13 @@ HTTP 503
   "message": "This Marsa instance has no data/files backend. Static publishing works; set the APPWRITE_* variables to enable KV and files." } }
 ```
 
+## Who may use it
+
+Only sites uploaded with the key of a **team** that the admin gave **backend access** (see
+[Teams](teams.md)). Guest uploads and sites of other teams get `403 BACKEND_NOT_ALLOWED`. Allowed
+sites on an instance without Appwrite get the `503` above. Set `BACKEND_GUEST_ACCESS=true` to let
+every site use the backend, as in 0.3.
+
 ## What it adds
 
 Per site, scoped to its id and deleted together with it:

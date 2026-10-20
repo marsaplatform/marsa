@@ -30,7 +30,8 @@ database, and it's MIT licensed.
 | Give pages and agents data/file storage | The **optional** backend: an [Appwrite](https://appwrite.io) project, either **Appwrite Cloud** (nothing to install) or **self-hosted Appwrite**, connected with env vars. Off by default. |
 
 Without any `APPWRITE_*` variables, Marsa starts normally and the backend routes answer
-`503 BACKEND_NOT_CONFIGURED`.
+`503 BACKEND_NOT_CONFIGURED`. Even with Appwrite configured, only sites of a **team** the admin gave
+backend access can use it (see [Teams](docs/teams.md)).
 
 ## Features
 
@@ -48,6 +49,9 @@ Without any `APPWRITE_*` variables, Marsa starts normally and the backend routes
   and `frame-ancestors 'none'`.
 - **Bilingual UI and docs**: English and Arabic (RTL), server-rendered. The guide is at `/docs` and `/ar/docs`.
 - **Optional admin API** behind `ADMIN_TOKEN`: list and delete any site, and run the sweeper.
+- **Teams and an admin console** at `/admin`: create teams with a team key, choose per team whether
+  its sites get the data/files backend, and whether they appear in the **public directory** on the
+  homepage (`GET /api/directory`). Guests keep uploading as before. See [docs/teams.md](docs/teams.md).
 - **Optional data/files backend** (Appwrite): per-site KV and files, a browser SDK at `/sdk.js`, and
   automatic cleanup when a site goes away.
 
@@ -140,6 +144,9 @@ storage to Appwrite. Here's what it adds:
 - `/sdk.js` for pages: `marsa.kv.get(key)`, `marsa.files.list()`, and writes after `marsa.auth(token)`
 - Writes always need the edit token. Reads are public while the site is live (`BACKEND_PUBLIC_READ=true`).
 - Data is purged from Appwrite when the site expires or is deleted. The Appwrite API key never reaches browsers.
+- **Only sites uploaded with the key of a team that has backend access** may use it. Others get
+  `403 BACKEND_NOT_ALLOWED` (set `BACKEND_GUEST_ACCESS=true` to allow every site). Allowed teams on an
+  instance without Appwrite get `503 BACKEND_NOT_CONFIGURED`.
 
 Setup (placeholders):
 
@@ -175,6 +182,7 @@ All settings are environment variables, and all are optional. See [`.env.example
 | `ADMIN_TOKEN` | empty (off) | Enables `/api/admin/*` (min. 24 chars) |
 | `APPWRITE_ENDPOINT` / `APPWRITE_PROJECT_ID` / `APPWRITE_API_KEY` / `APPWRITE_DATABASE_ID` | empty (off) | Optional backend; set all four or none |
 | `APPWRITE_KV_TABLE_ID` / `APPWRITE_BUCKET_ID` | `marsa_kv` / `marsa_files` | Backend table and bucket |
+| `BACKEND_GUEST_ACCESS` | `false` | `true` lets every site (guests too) use the backend; default is teams with backend access only |
 | `BACKEND_PUBLIC_READ` | `true` | Public reads of a live site's KV and files |
 | `BACKEND_MAX_VALUE_KB` / `BACKEND_MAX_KEYS` / `BACKEND_MAX_FILES` | `64` / `1000` / `100` | Backend caps per site |
 
@@ -271,7 +279,7 @@ Marsa is open source because a place to drop work should be one you control:
 - **الـ backend الاختياري للبيانات والملفات**: محتاج Appwrite، سواء Appwrite Cloud من غير تنزيل أو Appwrite على سيرفرك، وبيتربط بمتغيرات البيئة. ومقفول افتراضيًا، والـ routes بتاعته بترد `503 BACKEND_NOT_CONFIGURED`.
 
 ### المميزات
-رفع بالسحب والإفلات، وAPI للنشر (ZIP أو ملفات أو JSON)، وروابط بتنتهي لوحدها، ومفتاح للتعديل والمسح، و`/llms.txt` و`/openapi.json` للـ agents، وحدود ضد الإساءة، وعرض آمن جوه sandbox، وواجهة ودليل بالعربي والإنجليزي، ولوحة أدمن اختيارية، وbackend اختياري (KV وملفات) عن طريق Appwrite.
+رفع بالسحب والإفلات، وAPI للنشر (ZIP أو ملفات أو JSON)، وروابط بتنتهي لوحدها، ومفتاح للتعديل والمسح، و`/llms.txt` و`/openapi.json` للـ agents، وحدود ضد الإساءة، وعرض آمن جوه sandbox، وواجهة ودليل بالعربي والإنجليزي، ولوحة أدمن اختيارية على `/admin` فيها فرق بمفاتيح خاصة (تحدد لكل فريق إذا كان ليه باك إند وإذا كان يظهر في دليل الصفحات العام على الرئيسية)، وbackend اختياري (KV وملفات) عن طريق Appwrite.
 
 ### لمين؟
 اللي بيبنوا agents، والمطورين اللي بيعرضوا شغل على عملاء، ومعاينات الـ CI، والمدرّسين والطلبة، وصفحات الإيفنتات المؤقتة. وفي `examples/` أمثلة وهمية لكل حالة.

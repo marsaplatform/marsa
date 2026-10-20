@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-10-20
+
+### Added
+- **Teams**, managed by the operator: admin API `/api/admin/teams` (list, create, update, rotate key,
+  delete) and a bilingual admin console at `/admin` and `/ar/admin`. Team keys are shown once and
+  stored as SHA-256 in `DATA_DIR/teams.json`.
+- Uploads with `X-Team-Key` (or a `Bearer marsa_team_…`) belong to that team; a bad key is
+  `401 INVALID_TEAM_KEY`. Guest uploads are unchanged.
+- **Public directory** of live team sites, grouped by team: a section on the homepage (`/`, `/ar`)
+  and `GET /api/directory` (cached 30 s). Per-team "show in public directory" switch (default on).
+  The page `<title>` is stored as the card title.
+- Docs: `docs/teams.md`, API/OpenAPI/llms.txt updates, Arabic guide section.
+
+### Changed
+- The data/files backend is now **only for sites of teams with backend access**; other sites get
+  `403 BACKEND_NOT_ALLOWED`. `BACKEND_GUEST_ACCESS=true` restores the 0.3 behaviour.
+- Owner views of a site include `team` (`null` for guests).
+
 ## [0.3.0] - 2026-10-20
 
 ### Added

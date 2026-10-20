@@ -79,7 +79,10 @@ curl -s https://marsa.example.com/api/admin/sites -H "Authorization: Bearer $ADM
 curl -s -X DELETE https://marsa.example.com/api/admin/sites/k3v9x2mq7a -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
+- Open `/admin` with the same token to manage **teams**: team keys, backend access per team, and
+  which teams appear in the public directory on the homepage. See [Teams](teams.md).
+
 ## Backups and upgrades
 
-All state is in `DATA_DIR` (`sites/<id>/meta.json` plus `sites/<id>/files/`). Back it up as plain
+All state is in `DATA_DIR` (`sites/<id>/meta.json` plus `sites/<id>/files/`, and `teams.json`). Back it up as plain
 files. To upgrade, pull the new code and rebuild the container; the data format is versionless JSON.

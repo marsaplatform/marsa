@@ -5,6 +5,7 @@ import type { Config } from "../config.js";
 import { isBlocked, mimeFor } from "../mime.js";
 import { SITE_CSP } from "../security.js";
 import type { SiteMeta, SiteStore } from "../store.js";
+import type { TeamStore } from "../teams.js";
 import { bearer, hashToken, safeEqual } from "../tokens.js";
 import type { SiteBackend } from "./types.js";
 
@@ -15,6 +16,7 @@ export interface BackendRouteDeps {
   config: Config;
   store: SiteStore;
   backend: SiteBackend | null;
+  teams: TeamStore;
   now: () => number;
   /** Counts a write against the per-IP upload limit; returns a 429 response or null. */
   uploadRate: (c: Context) => Promise<Response | null>;
@@ -25,14 +27,15 @@ const err = (c: Context, status: number, code: string, message: string) =>
 
 /**
  * Optional per-site backend: KV values and files, proxied server-side to the
- * configured store (Appwrite). Reads are public when BACKEND_PUBLIC_READ=true
+ * configured store (Appwrite). Only sites of a team with backend access may
+ * use it (403 BACKEND_NOT_ALLOWED otherwise, unless BACKEND_GUEST_ACCESS=true). Reads are public when BACKEND_PUBLIC_READ=true
  * (the default; the data is as public as the site), writes always need the
- * site's edit token. With no backend configured every route answers 503
+ * site's edit token. With no backend configured, allowed sites get 503
  * BACKEND_NOT_CONFIGURED. CORS is open because uploaded pages run in a sandbox
  * (opaque origin) and auth is a bearer token, never a cookie.
  */
 export function mountBackendRoutes(app: Hono, deps: BackendRouteDeps): void {
-  const { config, store, backend, now, uploadRate } = deps;
+  const { config, store, backend, teams, now, uploadRate } = deps;
   const limits = config.backend;
 
   for (const p of [
@@ -47,6 +50,22 @@ export function mountBackendRoutes(app: Hono, deps: BackendRouteDeps): void {
       c.header("Access-Control-Allow-Headers", "Authorization, Content-Type");
       c.header("Access-Control-Max-Age", "600");
       if (c.req.method === "OPTIONS") return c.body(null, 204);
+      // Access is decided per site, before anything else: only sites of a team
+      // the admin marked "backend: on" (or every site, with BACKEND_GUEST_ACCESS).
+      // Checked on every request, so toggling a team off takes effect at once.
+      const meta = await store.get(c.req.param("id") ?? "");
+      if (!meta) return err(c, 404, "NOT_FOUND", "site not found or token invalid");
+      if (Date.parse(meta.expiresAt) <= now()) {
+        return err(c, 410, "EXPIRED", "this link has expired");
+      }
+      if (!limits.guestAccess && !teams.get(meta.teamId)?.backend) {
+        return err(
+          c,
+          403,
+          "BACKEND_NOT_ALLOWED",
+          "This site may not use the data/files backend. Only sites uploaded with the key of a team that the admin gave backend access can use it.",
+        );
+      }
       if (!backend) {
         return err(
           c,

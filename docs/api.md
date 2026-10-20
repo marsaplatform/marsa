@@ -92,7 +92,20 @@ A wrong token and a missing site both return `404` on purpose, so ids can't be p
 | `DELETE /api/admin/sites/:id` | Remove any site |
 | `POST /api/admin/sweep` | Delete expired sites now |
 
-If `ADMIN_TOKEN` is empty, these routes answer `404`.
+| `GET /api/admin/teams` | Teams with live site counts (no keys) |
+| `POST /api/admin/teams` | Create a team `{"name", "backend"?, "directory"?}`; the response has its key, once |
+| `PATCH /api/admin/teams/:id` | Change `name`, `backend` or `directory` |
+| `POST /api/admin/teams/:id/rotate` | New team key; the old one stops working |
+| `DELETE /api/admin/teams/:id` | Delete a team (`?sites=delete` also deletes its sites) |
+
+If `ADMIN_TOKEN` is empty, these routes answer `404`. The browser console for teams is at `/admin`;
+see [Teams](teams.md).
+
+## Teams and the directory
+
+- Upload with `X-Team-Key: <team key>` (or `Authorization: Bearer <team key>`) on `POST /api/sites`
+  to attach the site to a team. A wrong key answers `401 INVALID_TEAM_KEY`.
+- `GET /api/directory`: public JSON of live sites of listed teams, grouped by team (cached 30 s).
 
 ## Error codes
 
@@ -108,4 +121,7 @@ If `ADMIN_TOKEN` is empty, these routes answer `404`.
 | `NOT_FOUND` | 404 | Unknown site, wrong token, or admin disabled |
 | `EXPIRED` | 410 | The link has expired |
 | `UNAUTHORIZED` | 401 | Wrong admin token |
+| `INVALID_TEAM_KEY` | 401 | Unknown or rotated team key on upload |
+| `BACKEND_NOT_ALLOWED` | 403 | The site isn't in a team with backend access |
+| `BACKEND_NOT_CONFIGURED` | 503 | Allowed, but the instance has no Appwrite backend |
 | `RATE_LIMITED` | 429 | Slow down; see the `Retry-After` header |

@@ -142,6 +142,32 @@ select{font:inherit;background:var(--bg);color:var(--fg);border:1.5px solid var(
 .prose table{border-collapse:collapse;width:100%;font-size:.95rem}
 .prose th,.prose td{border:1px solid var(--line);padding:8px 10px;text-align:start;vertical-align:top}
 .prose th{background:var(--bg2)}
+.directory{scroll-margin-top:72px}
+.dir-team{margin-top:32px}
+.dir-url span{unicode-bidi:isolate}
+.dir-team h3{margin-bottom:0}
+.dir-grid{list-style:none;padding:0;margin-top:14px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.dir-card{display:flex;flex-direction:column;gap:6px}
+.dir-card p{margin:0}
+.dir-title{font-weight:700;font-size:1.05rem;word-break:break-word;text-decoration:none}
+.dir-title:hover{text-decoration:underline}
+.dir-url{font:13px/1.5 var(--mono);color:var(--muted);word-break:break-all}
+.dir-empty{margin-top:24px;text-align:center;color:var(--muted)}
+[hidden]{display:none!important}
+.admin{padding-block:48px 72px}
+.admin-login,.admin-create{margin:20px 0;display:flex;flex-direction:column;gap:10px;max-width:560px}
+.admin input[type=text],.admin input[type=password]{font:inherit;background:var(--bg);color:var(--fg);border:1.5px solid var(--line);border-radius:10px;padding:8px 12px;flex:1;min-width:0}
+.row.start{justify-content:flex-start;margin:0}
+.row.between{justify-content:space-between;align-items:center;margin:24px 0 12px}
+.check{display:flex;gap:8px;align-items:center}
+.check input,.teams input[type=checkbox]{width:20px;height:20px;accent-color:var(--foam)}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--card)}
+.teams{border-collapse:collapse;width:100%;font-size:.95rem}
+.teams th,.teams td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:start;vertical-align:middle}
+.teams th{background:var(--bg2);font-weight:650}
+.teams tr:last-child td{border-bottom:0}
+.teams .acts{display:flex;gap:8px;flex-wrap:wrap}
+.teams code{font:12px var(--mono)}
 `;
 
 export const APP_JS = `
@@ -245,4 +271,124 @@ if (drop) {
   });
   renderMine();
 }
+
+// Show directory expiry times in the visitor's own time zone.
+for (const el of document.querySelectorAll("time[data-local]")) {
+  const d = new Date(el.getAttribute("datetime"));
+  if (!isNaN(d)) el.textContent = d.toLocaleString(lang === "ar" ? "ar-EG" : undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+`;
+
+/** Admin console script (/admin). The token lives only in sessionStorage of this tab. */
+export const ADMIN_JS = `
+const lang = document.documentElement.lang === "ar" ? "ar" : "en";
+const T = {
+  en: { bad: "Wrong admin token.", off: "The admin API is disabled on this instance (ADMIN_TOKEN not set).", fail: "Request failed", confirmDel: "Delete this team? Its sites stay up until they expire.", confirmRotate: "Make a new key? The old key stops working right away.", on: "on", saved: "Saved.", created: "Team created.", rotated: "New key created.", deleted: "Team deleted.", none: "No teams yet." },
+  ar: { bad: "مفتاح الأدمن غلط.", off: "الـ admin API مقفول على النسخة دي (ADMIN_TOKEN مش متظبط).", fail: "الطلب فشل", confirmDel: "تمسح الفريق ده؟ مواقعه هتفضل شغالة لحد ما تنتهي.", confirmRotate: "تعمل مفتاح جديد؟ المفتاح القديم هيبطل على طول.", on: "شغال", saved: "اتحفظ.", created: "الفريق اتعمل.", rotated: "اتعمل مفتاح جديد.", deleted: "الفريق اتمسح.", none: "مفيش فرق لسه." },
+}[lang];
+const $ = (id) => document.getElementById(id);
+const SKEY = "marsa-admin-token";
+let token = sessionStorage.getItem(SKEY) || "";
+
+function status(msg, err) { const s = $("status"); s.textContent = msg || ""; s.className = err ? "err" : ""; }
+
+async function api(method, path, body) {
+  const r = await fetch("/api/admin" + path, {
+    method,
+    headers: Object.assign({ Authorization: "Bearer " + token }, body ? { "Content-Type": "application/json" } : {}),
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { signOut(); status(T.bad, true); throw new Error("401"); }
+  if (r.status === 404 && path === "/teams") { signOut(); status(T.off, true); throw new Error("404"); }
+  if (!r.ok) { status(((j.error && j.error.message) || T.fail) + " (HTTP " + r.status + ")", true); throw new Error(String(r.status)); }
+  return j;
+}
+
+function showKey(key) {
+  $("newKey").hidden = false;
+  $("newKeyValue").textContent = key;
+  $("newKey").scrollIntoView({ block: "nearest" });
+}
+
+function cell(child) { const td = document.createElement("td"); if (typeof child === "string") td.textContent = child; else if (child) td.appendChild(child); return td; }
+
+function toggle(team, field) {
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = !!team[field];
+  box.setAttribute("aria-label", team.name + ": " + field);
+  box.addEventListener("change", async () => {
+    box.disabled = true;
+    try { await api("PATCH", "/teams/" + encodeURIComponent(team.id), { [field]: box.checked }); status(T.saved); }
+    catch { box.checked = !box.checked; }
+    box.disabled = false;
+  });
+  return box;
+}
+
+function button(label, onClick) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "btn small"; b.textContent = label;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+async function load() {
+  const { teams } = await api("GET", "/teams");
+  const tbody = $("teamRows");
+  tbody.textContent = "";
+  if (!teams.length) {
+    const tr = document.createElement("tr");
+    const td = cell(T.none); td.colSpan = 6; td.className = "muted";
+    tr.appendChild(td); tbody.appendChild(tr);
+  }
+  for (const team of teams) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("span"); name.dir = "auto"; name.textContent = team.name;
+    const key = document.createElement("code"); key.textContent = team.keyPrefix + "…";
+    const acts = document.createElement("div"); acts.className = "acts";
+    acts.append(
+      button(document.querySelector("#admin").dataset.rotate || "Rotate", async () => {
+        if (!confirm(T.confirmRotate)) return;
+        const r = await api("POST", "/teams/" + encodeURIComponent(team.id) + "/rotate");
+        showKey(r.key); status(T.rotated); load();
+      }),
+      button(document.querySelector("#admin").dataset.del || "Delete", async () => {
+        if (!confirm(T.confirmDel)) return;
+        await api("DELETE", "/teams/" + encodeURIComponent(team.id));
+        status(T.deleted); load();
+      }),
+    );
+    tr.append(cell(name), cell(toggle(team, "backend")), cell(toggle(team, "directory")), cell(String(team.liveSites || 0)), cell(key), cell(acts));
+    tbody.appendChild(tr);
+  }
+}
+
+function signOut() {
+  token = ""; sessionStorage.removeItem(SKEY);
+  $("panel").hidden = true; $("login").hidden = false; $("newKey").hidden = true;
+}
+
+async function open() {
+  try { await load(); $("login").hidden = true; $("panel").hidden = false; status(""); } catch {}
+}
+
+$("login").addEventListener("submit", (e) => {
+  e.preventDefault();
+  token = $("adminToken").value.trim();
+  $("adminToken").value = "";
+  sessionStorage.setItem(SKEY, token);
+  open();
+});
+$("signOut").addEventListener("click", () => { signOut(); status(""); });
+$("createTeam").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const r = await api("POST", "/teams", { name: $("teamName").value, backend: $("teamBackend").checked, directory: $("teamDirectory").checked });
+    $("teamName").value = ""; $("teamBackend").checked = false; $("teamDirectory").checked = true;
+    showKey(r.key); status(T.created); load();
+  } catch {}
+});
+if (token) open();
 `;

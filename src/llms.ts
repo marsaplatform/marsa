@@ -30,6 +30,10 @@ Use it when you have produced a web page, HTML report, dashboard or prototype th
 - Change expiry: PATCH ${base}/api/sites/<id> with {"ttlHours": N}
 - Delete: DELETE ${base}/api/sites/<id>
 
+## Teams (optional)
+
+If the operator gave you a team key, add the header X-Team-Key: <team key> to POST ${base}/api/sites. The site then belongs to that team (it may get the data/files backend and be listed in the public directory at ${base}/api/directory). Never put the team key in a page. A wrong key answers 401 INVALID_TEAM_KEY; omit the header to upload as a guest.
+
 ## Limits on this instance
 
 - ttlHours: ${config.minTtlHours}-${config.maxTtlHours} (default ${config.defaultTtlHours}); a link never outlives created + ${config.maxTtlHours}h
@@ -39,6 +43,12 @@ Use it when you have produced a web page, HTML report, dashboard or prototype th
 - Pages run in a browser sandbox: no cookies or localStorage; fetch() to CORS-enabled public APIs works.
 
 ## Optional data/files backend
+
+${
+  config.backend.guestAccess
+    ? "Every site may use it."
+    : "Only sites uploaded with the key of a team that has backend access may use it; other sites get 403 BACKEND_NOT_ALLOWED."
+}
 
 ${
   config.appwrite
@@ -52,13 +62,14 @@ ${
 
 ## Errors
 
-JSON {"error": {"code", "message", "path"?}}. Codes: EMPTY_UPLOAD, INVALID_REQUEST, INVALID_PATH, ZIP_SLIP_REJECTED, INVALID_ZIP, FILE_TOO_LARGE, SITE_TOO_LARGE, TOO_MANY_FILES, BLOCKED_FILE_TYPE (415), RATE_LIMITED (429, see Retry-After), NOT_FOUND, EXPIRED (410). Fix the files and retry.
+JSON {"error": {"code", "message", "path"?}}. Codes: EMPTY_UPLOAD, INVALID_REQUEST, INVALID_PATH, ZIP_SLIP_REJECTED, INVALID_ZIP, FILE_TOO_LARGE, SITE_TOO_LARGE, TOO_MANY_FILES, BLOCKED_FILE_TYPE (415), RATE_LIMITED (429, see Retry-After), NOT_FOUND, EXPIRED (410), INVALID_TEAM_KEY (401), BACKEND_NOT_ALLOWED (403), BACKEND_NOT_CONFIGURED (503). Fix the files and retry.
 
 ## Docs
 
 - [API reference](${base}/docs/api)
 - [Guide for AI agents](${base}/docs/agents)
 - [Data & files backend](${base}/docs/backend)
+- [Teams and the public directory](${base}/docs/teams)
 - [OpenAPI spec](${base}/openapi.json)
 `;
 }

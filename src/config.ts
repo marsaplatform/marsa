@@ -39,6 +39,11 @@ export interface AppwriteConfig {
 }
 
 export interface BackendLimits {
+  /**
+   * Who may use the backend. false (default): only sites uploaded with the key
+   * of a team the admin marked "backend: on". true: every site, guests too.
+   */
+  guestAccess: boolean;
   /** Anyone may read a live site's KV values and files (writes always need the edit token). */
   publicRead: boolean;
   maxValueBytes: number;
@@ -86,6 +91,7 @@ export function loadConfig(env: Env = process.env): Config {
     sweepIntervalSeconds: int(env, "SWEEP_INTERVAL_SECONDS", 60, 5),
     appwrite: appwriteConfig(env),
     backend: {
+      guestAccess: bool(env, "BACKEND_GUEST_ACCESS", false),
       publicRead: bool(env, "BACKEND_PUBLIC_READ", true),
       maxValueBytes: int(env, "BACKEND_MAX_VALUE_KB", 64, 1) * 1024,
       maxKeys: int(env, "BACKEND_MAX_KEYS", 1000, 1),

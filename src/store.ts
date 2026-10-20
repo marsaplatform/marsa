@@ -14,6 +14,10 @@ export interface SiteMeta {
   updatedAt: string;
   expiresAt: string;
   tokenHash: string;
+  /** Set when the site was uploaded with a team key. Guest uploads have none. */
+  teamId?: string;
+  /** <title> of index.html, if any (shown in the public directory). */
+  title?: string;
   fileCount: number;
   totalBytes: number;
   files: Record<string, SiteFile>;
