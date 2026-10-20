@@ -21,13 +21,19 @@ for (const path of [
   "/ar/docs/guide",
   "/llms.txt",
   "/openapi.json",
-  "/admin",
-  "/ar/admin",
+  "/login",
+  "/ar/login",
+  "/assets/fonts/zad/Zad-Regular.woff2",
   "/docs/teams",
   "/api/directory",
 ]) {
   const r = await fetch(`${base}${path}`);
   if (r.status !== 200) fail(`${path} returned ${r.status}`);
+}
+// The admin sign-in exists (200) or is disabled without ADMIN_TOKEN (404).
+for (const path of ["/admin/login", "/ar/admin/login"]) {
+  const r = await fetch(`${base}${path}`);
+  if (r.status !== 200 && r.status !== 404) fail(`${path} returned ${r.status}`);
 }
 console.log("pages OK: /, /ar, /new, /docs, /llms.txt, /openapi.json");
 
