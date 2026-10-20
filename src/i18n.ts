@@ -48,6 +48,8 @@ export interface Strings {
     publish: string;
     docs: string;
     signIn: string;
+    dashboard: string;
+    adminConsole: string;
     platform: string;
   };
   hero: { eyebrow: string; title: string; sub: string; ctaTry: string; ctaTeam: string };
@@ -220,6 +222,8 @@ export interface Strings {
     what: string;
     actions: Record<string, string>;
     actorKinds: Record<"member" | "key" | "admin" | "api" | "mcp", string>;
+    /** Stored non-member actor labels ("team key", "edit token", "admin") in this language. */
+    actorLabels: Record<string, string>;
     count: (n: number) => string;
   };
   visits: {
@@ -399,6 +403,8 @@ const en: Strings = {
     publish: "Publish",
     docs: "Guide",
     signIn: "Team sign-in",
+    dashboard: "Team dashboard",
+    adminConsole: "Admin console",
     platform: "Marsa platform",
   },
   hero: {
@@ -689,6 +695,7 @@ const en: Strings = {
       password: "Changed their password",
     },
     actorKinds: { member: "member", key: "team key", admin: "admin", api: "API", mcp: "MCP" },
+    actorLabels: { "team key": "team key", "edit token": "edit token", admin: "admin" },
     count: (n) => `${n} member${n === 1 ? "" : "s"}`,
   },
   visits: {
@@ -878,6 +885,8 @@ const ar: Strings = {
     publish: "انشر",
     docs: "الدليل",
     signIn: "دخول الفرق",
+    dashboard: "لوحة الفريق",
+    adminConsole: "لوحة المسؤول",
     platform: "منصة مرسى",
   },
   hero: {
@@ -1152,6 +1161,7 @@ const ar: Strings = {
       password: "غيّر كلمة مروره",
     },
     actorKinds: { member: "عضو", key: "مفتاح الفريق", admin: "المسؤول", api: "API", mcp: "MCP" },
+    actorLabels: { "team key": "مفتاح الفريق", "edit token": "مفتاح التعديل", admin: "المسؤول" },
     count: (n) => (n === 1 ? "عضو واحد" : `${n} أعضاء`),
   },
   visits: {

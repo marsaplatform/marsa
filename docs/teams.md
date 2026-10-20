@@ -245,7 +245,9 @@ from the team dashboard (same link) or re-upload; the card updates within 30 sec
 
 Covers are served from `GET /covers/<id>` only for listed, live sites, with
 `Content-Security-Policy: default-src 'none'; sandbox`, `nosniff` and a check that the file really is
-the image type it claims to be.
+the image type it claims to be. A listed site without a usable image gets the same drawn placeholder
+as a self-contained SVG (`image/svg+xml`, no external references), so the URL never breaks; sites
+that aren't listed, or don't exist, answer `404`.
 
 ### The featured page
 

@@ -182,10 +182,19 @@ describe("directory covers and the home page", () => {
     });
     expect(again.status).toBe(304);
 
-    // Not a real PNG, not listed (guest), no cover, unknown: all 404.
-    expect((await app.request(`/covers/${fake.id}`)).status).toBe(404);
+    // Listed but not a real PNG, or no cover: the drawn placeholder as a self-contained SVG.
+    for (const id of [fake.id, plain.id]) {
+      const ph = await app.request(`/covers/${id}`);
+      expect(ph.status).toBe(200);
+      expect(ph.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
+      expect(ph.headers.get("content-security-policy")).toContain("sandbox");
+      const svg = await ph.text();
+      expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+      expect(svg).toContain('class="ph-glyph"');
+      expect(svg).not.toMatch(/href=|url\(|@import/);
+    }
+    // Not listed (guest) or unknown: 404.
     expect((await app.request(`/covers/${guest.id}`)).status).toBe(404);
-    expect((await app.request(`/covers/${plain.id}`)).status).toBe(404);
     expect((await app.request("/covers/nosuchsite1")).status).toBe(404);
 
     const home = await (await app.request("/ar")).text();

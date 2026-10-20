@@ -50,7 +50,7 @@ export function openapi(config: Config) {
     openapi: "3.1.0",
     info: {
       title: `${APP_NAME} API`,
-      version: "0.11.1",
+      version: "0.11.2",
       description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site. Teams can also sign in in a browser at /login (team key) to manage their sites; the admin signs in at /admin/login. Those browser routes use session cookies and are not part of this API. Each site also has an MCP server (Streamable HTTP, JSON-RPC) at /mcp/s/{siteId} with per-site bearer tokens; see /docs/mcp.`,
       license: { name: "MIT", identifier: "MIT" },
     },
@@ -513,10 +513,10 @@ export function openapi(config: Config) {
           summary: "Cover image of a site in the public directory",
           operationId: "getCover",
           description:
-            "A raster image (PNG, JPEG, WebP, AVIF, GIF, max 2 MB) that is already part of the site: cover.* at its root, else a local og:image, else the first local <img>. 404 when the site has none or is not listed.",
+            "A raster image (PNG, JPEG, WebP, AVIF, GIF, max 2 MB) that is already part of the site: cover.* at its root, else a local og:image, else the first local <img>. A listed site without one gets the drawn placeholder as a self-contained SVG. 404 when the site is not listed.",
           parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
           responses: {
-            "200": { description: "The image" },
+            "200": { description: "The image, or the SVG placeholder" },
             "304": { description: "Not modified (ETag)" },
             "404": { description: "No cover" },
           },

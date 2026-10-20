@@ -5,6 +5,7 @@ import { hashIndex, initialOf } from "./cover.js";
 import type { DocPage } from "./docs.js";
 import { bytesLabel, hoursLabel, type Lang, type LimitValues, STRINGS } from "./i18n.js";
 import type { MemberRole } from "./members.js";
+import { currentNavAccount } from "./nav-state.js";
 import { isPermanentIso } from "./store.js";
 import type { VisitSummary } from "./visits.js";
 
@@ -137,6 +138,12 @@ function layout(o: LayoutOpts): string {
       <a href="${href("/new")}"${cur("publish")}>${esc(t.nav.publish)}</a>
       <a href="${href("/docs")}"${cur("docs")}>${esc(t.nav.docs)}</a>`;
   const platform = o.lang === "ar" ? PLATFORM_URL : `${PLATFORM_URL}/en/`;
+  const account = currentNavAccount();
+  const accountHref = href(
+    account === "admin" ? "/admin" : account === "team" ? "/team" : "/login",
+  );
+  const accountLabel =
+    account === "admin" ? t.nav.adminConsole : account === "team" ? t.nav.dashboard : t.nav.signIn;
   return `<!doctype html>
 <html lang="${o.lang}" dir="${t.dir}">
 <head>
@@ -168,12 +175,12 @@ function layout(o: LayoutOpts): string {
     </nav>
     <div class="header-tools">
       <a class="locale-link" href="${localePath(other, o.path)}" hreflang="${other}" lang="${other}">${esc(t.switchLabel)}</a>
-      <a class="button small" href="${href("/login")}"${cur("team")}>${esc(t.nav.signIn)}</a>
+      <a class="button small" href="${accountHref}"${cur("team")}>${esc(accountLabel)}</a>
       <details class="mobile-menu">
         <summary><span class="sr-only">${esc(t.nav.label)}</span><span aria-hidden="true" class="burger"></span></summary>
         <nav aria-label="${esc(t.nav.label)}">
           ${links}
-          <a href="${href("/login")}">${esc(t.nav.signIn)}</a>
+          <a href="${accountHref}">${esc(accountLabel)}</a>
         </nav>
       </details>
     </div>
@@ -191,7 +198,7 @@ ${o.body}
     <div>
       <h2>${esc(t.footer.product)}</h2>
       <a href="${href("/new")}">${esc(t.nav.publish)}</a>
-      <a href="${href("/login")}">${esc(t.nav.signIn)}</a>
+      <a href="${accountHref}">${esc(accountLabel)}</a>
       <a href="${href("/docs")}">${esc(t.nav.docs)}</a>
     </div>
     <div>
@@ -273,6 +280,39 @@ function placeholderArt(title: string, key: string): string {
 <path class="ph-wave" d="M0 166c20 0 20-8 40-8s20 8 40 8 20-8 40-8 20 8 40 8 20-8 40-8 20 8 40 8 20-8 40-8 20 8 40 8"/>
 <text class="ph-glyph" x="258" y="112" text-anchor="middle">${esc(initialOf(title))}</text>
 </svg>`;
+}
+
+/** Light palettes for the standalone placeholder (same values as .ph-0 … .ph-5 in app.css). */
+const PH_COLORS: ReadonlyArray<{ pb: string; pw: string; pl: string; pa: string }> = [
+  { pb: "#dceccf", pw: "#fbfcfa", pl: "#c3d6bf", pa: "#145a49" },
+  { pb: "#d7ebe7", pw: "#fbfdfc", pl: "#b9d5cf", pa: "#0f5c5a" },
+  { pb: "#efe6d2", pw: "#fffdf8", pl: "#dccfb3", pa: "#7a5413" },
+  { pb: "#e3e8d1", pw: "#fcfdf8", pl: "#cdd5b4", pa: "#4f5d1c" },
+  { pb: "#dfe5ef", pw: "#fbfcfe", pl: "#c5cfdf", pa: "#284a7a" },
+  { pb: "#eedfdc", pw: "#fffbfa", pl: "#dcc6c1", pa: "#8a3a2b" },
+];
+
+/**
+ * The drawn placeholder as a self-contained SVG file (no CSS, no fonts, no external refs),
+ * served by /covers/<id> when a listed site has no usable cover image.
+ */
+export function placeholderSvg(title: string, key: string): string {
+  const p = PH_COLORS[paletteOf(key)] ?? {
+    pb: "#dceccf",
+    pw: "#fbfcfa",
+    pl: "#c3d6bf",
+    pa: "#145a49",
+  };
+  const style = `.ph-bg{fill:${p.pb}}.ph-orb{fill:${p.pa};opacity:.14}.ph-win{fill:${p.pw}}.ph-bar{fill:${p.pl};opacity:.55}.ph-dot{fill:${p.pa};opacity:.45}.ph-line{fill:${p.pl}}.ph-line.strong{fill:${p.pa};opacity:.55}.ph-pill{fill:${p.pa};opacity:.85}.ph-wave{fill:none;stroke:${p.pa};stroke-width:2.4;stroke-linecap:round;opacity:.4}.ph-glyph{fill:${p.pa};font:800 76px/1 system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif}`;
+  return placeholderArt(title, key)
+    .replace(
+      /^<svg class="thumb-art ph-\d" /,
+      `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" role="img" `,
+    )
+    .replace(
+      ' aria-hidden="true" focusable="false">',
+      `><title>${esc(title)}</title><style>${style}</style>`,
+    );
 }
 
 /** The 16:9 preview of a site: its cover image, or the drawn placeholder. */
@@ -400,7 +440,7 @@ function uploader(lang: Lang, c: Config, headingLevel: "h1" | "h2"): string {
       <p class="meta">${esc(t.try.tokenNote)}</p>
       <code id="token" class="token" dir="ltr"></code>
     </div>
-    <p class="meta team-hint"><a class="text-link" href="${localePath(lang, "/login")}">${esc(t.try.teamHint)}</a></p>
+    ${currentNavAccount() === "team" ? `<p class="meta team-hint"><a class="text-link" href="${localePath(lang, "/team")}">${esc(t.nav.dashboard)}</a></p>` : `<p class="meta team-hint"><a class="text-link" href="${localePath(lang, "/login")}">${esc(t.try.teamHint)}</a></p>`}
     <h3 class="mine-title">${esc(t.try.mine)}</h3>
     <ul id="mine" class="mine" data-empty="${esc(t.try.none)}"></ul>
   </div>
@@ -449,7 +489,14 @@ export function landingHtml(
     <p class="hero-description">${esc(t.hero.sub)}</p>
     <div class="actions">
       <a class="button" href="${href("/new")}">${esc(t.hero.ctaTry)}</a>
-      <a class="button ghost" href="${href("/login")}">${esc(t.hero.ctaTeam)}</a>
+      ${(() => {
+        const acct = currentNavAccount();
+        return acct === "admin"
+          ? `<a class="button ghost" href="${href("/admin")}">${esc(t.nav.adminConsole)}</a>`
+          : acct === "team"
+            ? `<a class="button ghost" href="${href("/team")}">${esc(t.nav.dashboard)}</a>`
+            : `<a class="button ghost" href="${href("/login")}">${esc(t.hero.ctaTeam)}</a>`;
+      })()}
       <a class="text-link" href="#directory">${esc(t.directory.title)} <span aria-hidden="true" class="arrow"></span></a>
     </div>
     ${heroStats(lang, c, dir)}
@@ -480,7 +527,7 @@ ${directorySection(lang, dir)}
       <p>${esc(t.teamsBand.sub)}</p>
     </div>
     <div class="actions">
-      <a class="button" href="${href("/login")}">${esc(t.teamsBand.cta)}</a>
+      ${currentNavAccount() === "team" ? `<a class="button" href="${href("/team")}">${esc(t.nav.dashboard)}</a>` : `<a class="button" href="${href("/login")}">${esc(t.teamsBand.cta)}</a>`}
       <a class="text-link" href="/docs/teams">${esc(t.teamsBand.docs)}</a>
     </div>
   </div>
@@ -720,7 +767,7 @@ function auditTable(lang: Lang, rows: AuditView[], withSite: boolean, labelId: s
           : withSite && e.site === null
             ? ""
             : "";
-      return `<tr><td data-label="${esc(t.members.when)}">${timeTag(lang, e.at)}</td>${td(t.members.who, `<bdi>${esc(e.who)}</bdi> <span class="badge muted">${esc(t.members.actorKinds[e.kind])}</span>`)}${td(t.members.what, `${esc(what)}${e.detail ? ` <span class="meta">${/^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(e.detail) ? timeTag(lang, e.detail) : `<bdi>${esc(e.detail)}</bdi>`}</span>` : ""}${site}`)}</tr>`;
+      return `<tr><td data-label="${esc(t.members.when)}">${timeTag(lang, e.at)}</td>${td(t.members.who, `<bdi>${esc(e.kind === "member" ? e.who : (t.members.actorLabels[e.who] ?? e.who))}</bdi> <span class="badge muted">${esc(t.members.actorKinds[e.kind])}</span>`)}${td(t.members.what, `${esc(what)}${e.detail ? ` <span class="meta">${/^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(e.detail) ? timeTag(lang, e.detail) : `<bdi>${esc(e.detail)}</bdi>`}</span>` : ""}${site}`)}</tr>`;
     })
     .join("");
   return `<div class="table-wrap"><table class="data stack audit-table" aria-labelledby="${labelId}"><thead><tr><th scope="col">${esc(t.members.when)}</th><th scope="col">${esc(t.members.who)}</th><th scope="col">${esc(t.members.what)}</th></tr></thead><tbody>${body}</tbody></table></div>`;

@@ -34,6 +34,7 @@ import {
   publicInvite,
   publicMember,
 } from "./members.js";
+import { type NavAccount, withNavAccount } from "./nav-state.js";
 import { openapi } from "./openapi.js";
 import { RateLimiter } from "./rate-limit.js";
 import { SDK_JS } from "./sdk.js";
@@ -59,6 +60,7 @@ import {
   landingHtml,
   newHtml,
   notFoundHtml,
+  placeholderSvg,
 } from "./ui.js";
 import { VisitCounter } from "./visits.js";
 import { mountWebRoutes } from "./web.js";
@@ -855,6 +857,28 @@ export function createApp({
     return c.body(body);
   };
 
+  // Header link: "Team dashboard" / "Admin console" instead of "Team sign-in" when a valid session exists.
+  app.use("*", async (c, next) => {
+    if ((c.req.method !== "GET" && c.req.method !== "HEAD") || !session.hasCookie(c)) return next();
+    const p = c.req.path;
+    if (
+      p.startsWith("/api/") ||
+      p.startsWith("/s/") ||
+      p.startsWith("/mcp/") ||
+      p.startsWith("/assets/") ||
+      p.startsWith("/covers/")
+    )
+      return next();
+    const s = session.read(c);
+    let account: NavAccount = null;
+    if (s?.role === "admin" && config.adminToken) account = "admin";
+    else if (s?.role === "team" && s.teamId && teams.get(s.teamId)) {
+      const m = s.memberId ? members.get(s.memberId) : null;
+      if (!s.memberId || m?.teamId === s.teamId) account = "team";
+    }
+    return withNavAccount(account, () => next());
+  });
+
   app.get("/", async (c) => appPage(c, landingHtml("en", config, await directory())));
   app.get("/ar", async (c) => appPage(c, landingHtml("ar", config, await directory())));
   app.get("/ar/", (c) => c.redirect("/ar", 301));
@@ -934,10 +958,19 @@ export function createApp({
     if (!meta) return notFound();
     const cover = await coverOf(meta);
     const path = cover ? store.filePath(meta, cover.path) : null;
-    if (!cover || !path) return notFound();
-    const body = await readFile(path).catch(() => null);
-    if (!body || body.byteLength > COVER_MAX_BYTES || !looksLike(cover.mime, body))
-      return notFound();
+    const body = cover && path ? await readFile(path).catch(() => null) : null;
+    if (!cover || !body || body.byteLength > COVER_MAX_BYTES || !looksLike(cover.mime, body)) {
+      // No usable image: serve the same drawn placeholder the directory shows.
+      const team = (await directory()).teams.find((t) => t.sites.some((x) => x.id === id));
+      const title = team?.sites.find((x) => x.id === id)?.title || meta.title || id;
+      const svg = placeholderSvg(title, team?.id ?? id);
+      c.header("Cache-Control", "public, max-age=300");
+      c.header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+      c.header("Cross-Origin-Resource-Policy", "same-origin");
+      c.header("Content-Type", "image/svg+xml; charset=utf-8");
+      c.header("Content-Disposition", "inline");
+      return c.body(svg);
+    }
     const etag = `"${createHash("sha256").update(`${meta.updatedAt}:${cover.path}`).digest("hex").slice(0, 16)}"`;
     c.header("ETag", etag);
     c.header("Cache-Control", "public, max-age=300");

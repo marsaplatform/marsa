@@ -229,3 +229,42 @@ describe("team members", () => {
     expect(raw).not.toContain("owner1");
   });
 });
+
+describe("0.11.2 fixes", () => {
+  it("shows the dashboard link in the header when signed in", async () => {
+    t = await makeApp();
+    const { key } = await t.createTeam("Crew");
+    const out = await (await t.app.request("/")).text();
+    expect(out).toContain(">Team sign-in</a>");
+    expect(out).not.toContain(">Team dashboard</a>");
+    const { b } = await t.signIn(key);
+    const home = await (await b.get("/")).text();
+    expect(home).toContain('href="/team">Team dashboard</a>');
+    expect(home).not.toContain(">Team sign-in</a>");
+    const ar = await (await b.get("/ar/docs")).text();
+    expect(ar).toContain('href="/ar/team">لوحة الفريق</a>');
+    const admin = await t.adminBrowser();
+    expect(await (await admin.get("/new")).text()).toContain('href="/admin">Admin console</a>');
+  });
+
+  it("translates team key / edit token in the Arabic activity log", async () => {
+    t = await makeApp();
+    const { key } = await t.createTeam("Crew");
+    const res = await t.publish(key);
+    const { id, editToken } = (await res.json()) as { id: string; editToken: string };
+    const patch = await t.app.request(`/api/sites/${id}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${editToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ ttlHours: 48 }),
+    });
+    expect(patch.status).toBe(200);
+    const { b } = await t.signIn(key);
+    const ar = await (await b.get("/ar/team/members")).text();
+    const log = ar.slice(ar.indexOf("audit-table"));
+    expect(log).toContain("<bdi>مفتاح التعديل</bdi>");
+    expect(log).toContain("<bdi>مفتاح الفريق</bdi>");
+    expect(log).not.toMatch(/<bdi>(team key|edit token)<\/bdi>/);
+    const en = await (await b.get("/team/members")).text();
+    expect(en).toContain("<bdi>edit token</bdi>");
+  });
+});

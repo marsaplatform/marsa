@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.11.2] - 2026-10-20
+
+### Fixed
+- The Arabic activity log translates "team key" and "edit token" (and "admin") instead of showing
+  the stored English labels.
+- When you are signed in, the header (desktop and mobile menu), the footer, the home hero and the
+  teams band link to **Team dashboard** (or **Admin console**) instead of "Team sign-in".
+- `GET /covers/<id>` no longer 404s for a listed site without a usable cover image: it serves the
+  same drawn placeholder the directory shows, as a self-contained SVG. Unlisted and unknown sites
+  still answer 404.
+
 ## [0.11.1] - 2026-10-20
 
 ### Fixed
