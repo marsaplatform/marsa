@@ -421,6 +421,50 @@ describe("team dashboard", () => {
   });
 });
 
+describe("single-site view layout", () => {
+  it("shows long KV values as a one-line preview that expands, and lists keys beyond the preview", async () => {
+    const backend = new MemoryBackend();
+    const { createTeam, signIn, api } = await setup({}, backend);
+    const { key } = await createTeam("B", true);
+    const res = await api(
+      "POST",
+      "/api/sites",
+      { files: [{ path: "index.html", content: "<title>Atlas</title>" }] },
+      { "x-team-key": key },
+    );
+    const { id } = (await res.json()) as { id: string };
+    const long = { title: "دليل الخدمات", body: "x".repeat(2000) };
+    for (let i = 0; i < 25; i++) {
+      await backend.kvSet(id, `record:${String(i).padStart(2, "0")}`, JSON.stringify(long));
+    }
+    const { b } = await signIn(key);
+    for (const path of [`/team/sites/${id}`, `/ar/team/sites/${id}`]) {
+      const html = await (await b.get(path)).text();
+      // one row per shown key, value collapsed into <details>, pretty-printed when opened
+      expect(html.match(/<details class="kv-value">/g)?.length).toBe(20);
+      expect(html).toContain("&#34;title&#34;: &#34;دليل الخدمات&#34;");
+      expect(html).toMatch(/<summary><code dir="ltr">[^<]{1,500}…<\/code><\/summary>/);
+      // the 5 keys without a preview are still listed by name
+      expect(html).toContain('<details class="more-keys">');
+      expect(html).toContain("record:24");
+      // shared components, no inline script, actions intact
+      for (const cls of [
+        "page-heading with-aside",
+        "site-summary panel",
+        "status-list compact",
+        "file-list",
+        "team-upload compact",
+        'class="data stack kv-table"',
+      ]) {
+        expect(html, cls).toContain(cls);
+      }
+      expect(html).not.toMatch(/<script(?![^>]*src=)[^>]*>[^<]/);
+      for (const a of ["/extend", "/listing", "/delete", "/replace", "/kv/delete"])
+        expect(html).toContain(`/team/sites/${id}${a}`);
+    }
+  });
+});
+
 describe("admin console", () => {
   const adminIn = async (s: Awaited<ReturnType<typeof setup>>) => {
     const b = new Browser(s.app);

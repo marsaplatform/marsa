@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] - 2026-10-20
+
+### Changed
+- **Single-site view (`/team/sites/<id>`) redesign.** The page heading now carries "Open site" and
+  "Copy link"; link, expiry, size and home-page listing sit in one "Link, expiry and visibility" panel
+  with Extend / Show-Hide on one side and Delete set apart. The replace-files drop zone is compact.
+  Published files and the data-and-files browser each get a full-width section (before, the KV table
+  was squeezed into half the page next to the file list).
+- **Backend browser.** Each KV value is a one-line preview that expands (`<details>`, no script) into
+  the pretty-printed JSON; each key shows its size; a summary shows the number of keys and uploaded
+  files; keys beyond the first 20 are listed by name under "more keys". On phones each key is a compact
+  card with Delete beside the key. Long JSON values no longer turn the page into a tall wall of
+  monospace text.
+- Team dashboard: the listing column is labelled "On home page" (was "Published by teams").
+
 ## [0.6.1] - 2026-10-20
 
 ### Changed

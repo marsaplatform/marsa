@@ -533,10 +533,11 @@ function teamUploader(
   sub: string,
   submit: string,
   withTtl: boolean,
+  compact = false,
 ): string {
   const t = STRINGS[lang];
   const l = limitValues(lang, c);
-  return `<form method="post" action="${esc(action)}" enctype="multipart/form-data" class="panel team-upload" data-upload data-uploading="${esc(t.team.uploading)}" data-failed="${esc(t.team.failed)}">
+  return `<form method="post" action="${esc(action)}" enctype="multipart/form-data" class="panel team-upload${compact ? " compact" : ""}" data-upload data-uploading="${esc(t.team.uploading)}" data-failed="${esc(t.team.failed)}">
     ${csrfField(csrf)}
     <h2 class="h3">${esc(title)}</h2>
     <p>${esc(sub)}</p>
@@ -571,7 +572,7 @@ export function teamHtml(lang: Lang, c: Config, o: TeamPageOpts): string {
         ${td(t.common.link, `<a href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a>`)}
         ${td(t.common.expires, timeTag(lang, s.expiresAt))}
         ${td(t.common.size, esc(bytesLabel(lang, s.totalBytes)))}
-        ${td(STRINGS[lang].directory.title, listing)}
+        ${td(t.admin.directory, listing)}
         <td class="cell-actions"><div class="acts"><a class="button small ghost" href="${href(`/team/sites/${s.id}`)}">${esc(t.team.manage)}</a>${postForm(
           href(`/team/sites/${s.id}/delete`),
           o.csrf,
@@ -584,7 +585,7 @@ export function teamHtml(lang: Lang, c: Config, o: TeamPageOpts): string {
   const table = o.sites.length
     ? `<div class="table-wrap"><table class="data stack">
       <caption class="sr-only">${esc(t.team.sites)}</caption>
-      <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.link)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(STRINGS[lang].directory.title)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
+      <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.link)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(t.admin.directory)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`
     : emptyState(t.team.empty, t.team.emptySub);
   const body = `<div class="wrap page-wide">
@@ -627,13 +628,23 @@ curl -s -X POST "${esc(c.publicUrl)}/api/sites?ttlHours=72" \\
   });
 }
 
+export interface KvRowView {
+  key: string;
+  bytes?: number;
+  preview?: string;
+  full?: string;
+  truncated?: boolean;
+}
+
 export interface TeamSitePageOpts extends TeamPageOpts {
   site: TeamSiteRow & { files: [string, number][]; ceiling: string };
   backendBrowser:
     | { state: "off"; reason?: string }
     | {
         state: "on";
-        kv: { key: string; value?: string }[];
+        kv: KvRowView[];
+        totalKeys: number;
+        otherKeys: string[];
         moreKeys: number;
         files: { id: string; name: string; size: number; createdAt: string; url: string }[];
         error?: string;
@@ -645,6 +656,7 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
   const href = (p: string) => localePath(lang, p);
   const s = o.site;
   const base = `/team/sites/${s.id}`;
+  const listed = o.team.directory && s.listed;
   const listingForm = o.team.directory
     ? postForm(
         href(`${base}/listing`),
@@ -655,29 +667,44 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
   const files = s.files
     .slice(0, 200)
     .map(
-      ([p, size]) => `<li>${ltr(p)} <span class="meta">${esc(bytesLabel(lang, size))}</span></li>`,
+      ([p, size]) =>
+        `<li><span class="file-path" dir="ltr">${esc(p)}</span><span class="file-size">${esc(bytesLabel(lang, size))}</span></li>`,
     )
     .join("");
-  let backendHtml = "";
+
   const bb = o.backendBrowser;
+  let backendHtml: string;
+  let backendStatus = "";
   if (bb.state === "off") {
     backendHtml = `<p class="notice">${esc(bb.reason ?? t.team.backendBrowserOff)}</p>`;
   } else {
+    backendStatus = `<ul class="status-list compact">
+      <li><span class="dot-status ${bb.totalKeys ? "on" : "off"}" aria-hidden="true"></span><strong>${esc(t.team.kvTitle)}:</strong> ${esc(t.team.kvCount(bb.totalKeys))}</li>
+      <li><span class="dot-status ${bb.files.length ? "on" : "off"}" aria-hidden="true"></span><strong>${esc(t.team.backendFilesTitle)}:</strong> ${esc(t.team.backendFilesCount(bb.files.length))}</li>
+    </ul>`;
     const kvRows = bb.kv
-      .map(
-        (k) =>
-          `<tr><th scope="row">${ltr(k.key)}</th>${td(t.team.value, `<code class="value" dir="ltr">${esc(k.value ?? "…")}</code>`)}<td class="cell-actions">${postForm(
-            href(`${base}/kv/delete`),
-            o.csrf,
-            `<input type="hidden" name="key" value="${esc(k.key)}"><button class="button small danger" type="submit" aria-label="${esc(`${t.common.del}: ${k.key}`)}">${esc(t.common.del)}</button>`,
-            { confirm: t.common.confirm },
-          )}</td></tr>`,
-      )
+      .map((k) => {
+        const value =
+          k.full === undefined
+            ? `<span class="meta">…</span>`
+            : `<details class="kv-value"><summary><code dir="ltr">${esc(k.preview ?? "")}</code></summary><pre dir="ltr">${esc(k.full)}</pre>${k.truncated ? `<p class="meta">${esc(t.team.valueTruncated)}</p>` : ""}</details>`;
+        return `<tr><th scope="row"><code class="kv-key" dir="ltr">${esc(k.key)}</code>${k.bytes !== undefined ? `<div class="meta">${esc(bytesLabel(lang, k.bytes))}</div>` : ""}</th>${td(t.team.value, value, "cell-value")}<td class="cell-actions">${postForm(
+          href(`${base}/kv/delete`),
+          o.csrf,
+          `<input type="hidden" name="key" value="${esc(k.key)}"><button class="button small danger" type="submit" aria-label="${esc(`${t.common.del}: ${k.key}`)}">${esc(t.common.del)}</button>`,
+          { confirm: t.common.confirm },
+        )}</td></tr>`;
+      })
       .join("");
+    const more = bb.otherKeys.length
+      ? `<details class="more-keys"><summary>${esc(t.team.moreKeys(bb.otherKeys.length))}</summary><ul class="key-chips">${bb.otherKeys.map((k) => `<li><code dir="ltr">${esc(k)}</code></li>`).join("")}</ul></details>`
+      : bb.moreKeys
+        ? `<p class="meta">${esc(t.team.moreKeys(bb.moreKeys))}</p>`
+        : "";
     const fileRows = bb.files
       .map(
         (f) =>
-          `<tr><th scope="row"><a href="${esc(f.url)}" target="_blank" rel="noopener"><bdi>${esc(f.name)}</bdi></a></th>${td(t.common.size, esc(bytesLabel(lang, f.size)))}${td(t.common.created, timeTag(lang, f.createdAt))}<td class="cell-actions">${postForm(
+          `<tr><th scope="row"><a href="${esc(f.url)}" target="_blank" rel="noopener" dir="ltr">${esc(f.name)}</a></th>${td(t.common.size, esc(bytesLabel(lang, f.size)))}${td(t.common.created, timeTag(lang, f.createdAt))}<td class="cell-actions">${postForm(
             href(`${base}/files/delete`),
             o.csrf,
             `<input type="hidden" name="fileId" value="${esc(f.id)}"><button class="button small danger" type="submit" aria-label="${esc(`${t.common.del}: ${f.name}`)}">${esc(t.common.del)}</button>`,
@@ -686,60 +713,63 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
       )
       .join("");
     backendHtml = `${bb.error ? `<p class="flash err" role="alert">${esc(bb.error)}</p>` : ""}
-    <h3>${esc(t.team.kvTitle)}</h3>
+    <h3 id="kv-title">${esc(t.team.kvTitle)}</h3>
     ${
       bb.kv.length
-        ? `<div class="table-wrap"><table class="data stack"><thead><tr><th scope="col">${esc(t.team.key)}</th><th scope="col">${esc(t.team.value)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${kvRows}</tbody></table></div>${bb.moreKeys ? `<p class="meta">${esc(t.team.moreKeys(bb.moreKeys))}</p>` : ""}`
+        ? `<div class="table-wrap"><table class="data stack kv-table" aria-labelledby="kv-title"><thead><tr><th scope="col">${esc(t.team.key)}</th><th scope="col">${esc(t.team.value)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${kvRows}</tbody></table></div>${more}`
         : `<p class="meta">${esc(t.team.kvEmpty)}</p>`
     }
-    <h3>${esc(t.team.backendFilesTitle)}</h3>
+    <h3 id="bfiles-title">${esc(t.team.backendFilesTitle)}</h3>
     ${
       bb.files.length
-        ? `<div class="table-wrap"><table class="data stack"><thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(t.common.created)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${fileRows}</tbody></table></div>`
+        ? `<div class="table-wrap"><table class="data stack" aria-labelledby="bfiles-title"><thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(t.common.created)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${fileRows}</tbody></table></div>`
         : `<p class="meta">${esc(t.team.backendFilesEmpty)}</p>`
     }`;
   }
+  const tools = `<div class="head-tools"><a class="button small" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(t.team.openSite)} <span class="arrow" aria-hidden="true"></span></a><button type="button" class="button small ghost" data-copy="#siteUrl" data-copied="${esc(t.common.copied)}">${esc(t.common.copy)}</button></div>`;
   const body = `<div class="wrap page-wide">
-  <p><a class="breadcrumb" href="${href("/team")}"><span class="arrow back" aria-hidden="true"></span> ${esc(t.team.back)} · <bdi>${esc(o.team.name)}</bdi></a></p>
-  ${pageHead(t.team.manage, `<bdi>${esc(s.title)}</bdi>`, "")}
+  <p><a class="breadcrumb" href="${href("/team")}"><span class="arrow back" aria-hidden="true"></span> ${esc(t.team.back)}</a></p>
+  ${pageHead(o.team.name, `<bdi>${esc(s.title)}</bdi>`, "", tools)}
   ${flashBox(lang, o.flash)}
-  <div class="site-summary panel">
-    <div class="copy-row"><a id="siteUrl" class="strong-link" href="${esc(s.url)}" target="_blank" rel="noopener" dir="ltr">${esc(hostless(s.url))}</a><button type="button" class="button small ghost" data-copy="#siteUrl" data-copied="${esc(t.common.copied)}">${esc(t.common.copy)}</button></div>
-    <dl class="facts">
-      <div><dt>${esc(t.common.expires)}</dt><dd>${timeTag(lang, s.expiresAt)}</dd></div>
-      <div><dt>${esc(t.common.created)}</dt><dd>${timeTag(lang, s.createdAt)}</dd></div>
-      <div><dt>${esc(t.common.size)}</dt><dd>${esc(bytesLabel(lang, s.totalBytes))} · ${esc(t.common.files(s.fileCount))}</dd></div>
-      <div><dt>${esc(STRINGS[lang].directory.title)}</dt><dd>${esc(o.team.directory && s.listed ? t.team.listed : t.team.hidden)}</dd></div>
-    </dl>
-    <div class="actions">
-      ${postForm(
-        href(`${base}/extend`),
-        o.csrf,
-        `<label class="ttl"><span>${esc(t.team.extendTo)}</span> <select name="ttlHours">${ttlOptions(lang, c)}</select></label> <button class="button small" type="submit">${esc(t.team.extend)}</button>`,
-        { cls: "inline-form extend-form" },
-      )}
-      ${listingForm}
-      ${postForm(
-        href(`${base}/delete`),
-        o.csrf,
-        `<button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
-        { confirm: t.team.confirmDelete },
-      )}
+  <section aria-labelledby="settings-title">
+    <div class="site-summary panel">
+      <h2 class="h3" id="settings-title">${esc(t.team.settingsTitle)}</h2>
+      <dl class="facts">
+        <div class="fact-wide"><dt>${esc(t.common.link)}</dt><dd><a id="siteUrl" class="strong-link" href="${esc(s.url)}" target="_blank" rel="noopener" dir="ltr">${esc(hostless(s.url))}</a></dd></div>
+        <div><dt>${esc(t.common.expires)}</dt><dd>${timeTag(lang, s.expiresAt)}</dd></div>
+        <div><dt>${esc(t.common.created)}</dt><dd>${timeTag(lang, s.createdAt)}</dd></div>
+        <div><dt>${esc(t.common.size)}</dt><dd>${esc(bytesLabel(lang, s.totalBytes))} · ${esc(t.common.files(s.fileCount))}</dd></div>
+        <div><dt>${esc(t.admin.directory)}</dt><dd><span class="badge ${listed ? "on" : "muted"}">${esc(listed ? t.team.listed : t.team.hidden)}</span></dd></div>
+      </dl>
+      <div class="actions site-actions">
+        ${postForm(
+          href(`${base}/extend`),
+          o.csrf,
+          `<label class="ttl"><span>${esc(t.team.extendTo)}</span> <select name="ttlHours">${ttlOptions(lang, c)}</select></label> <button class="button small" type="submit">${esc(t.team.extend)}</button>`,
+          { cls: "inline-form extend-form" },
+        )}
+        ${listingForm}
+        ${postForm(
+          href(`${base}/delete`),
+          o.csrf,
+          `<button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
+          { confirm: t.team.confirmDelete, cls: "inline-form push-end" },
+        )}
+      </div>
+      <p class="meta">${esc(t.team.capped)} (${timeTag(lang, s.ceiling)})</p>
     </div>
-    <p class="meta">${esc(t.team.capped)} (${timeTag(lang, s.ceiling)})</p>
-  </div>
-  <section class="block" aria-label="${esc(t.team.replace)}">
-    ${teamUploader(lang, c, o.csrf, href(`${base}/replace`), t.team.replace, t.team.replaceHelp, t.team.replace, false)}
   </section>
-  <section class="block two-col" aria-labelledby="backend-title">
-    <div>
-      <h2 id="backend-title">${esc(t.team.backend)}</h2>
-      ${backendHtml}
-    </div>
-    <div>
-      <h2>${esc(t.team.filesTitle)}</h2>
-      <ul class="file-list">${files}</ul>
-    </div>
+  <section class="block" aria-label="${esc(t.team.replace)}">
+    ${teamUploader(lang, c, o.csrf, href(`${base}/replace`), t.team.replace, t.team.replaceHelp, t.team.replace, false, true)}
+  </section>
+  <section class="block" aria-labelledby="files-title">
+    <h2 id="files-title">${esc(t.team.filesTitle)} <span class="count">${esc(t.common.files(s.fileCount))}</span></h2>
+    <ul class="file-list">${files}</ul>
+  </section>
+  <section class="block backend-block" aria-labelledby="backend-title">
+    <h2 id="backend-title">${esc(t.team.backend)}</h2>
+    ${backendStatus}
+    ${backendHtml}
   </section>
 </div>`;
   return layout({

@@ -52,7 +52,27 @@ export interface WebDeps {
 const LOGIN_WINDOW = 15 * 60_000;
 const FLASH_TTL = 5 * 60_000;
 const KV_PREVIEW = 20;
-const VALUE_PREVIEW = 400;
+const VALUE_PREVIEW = 160;
+const VALUE_FULL = 6000;
+
+/** One KV row for the dashboard: a one-line preview plus a pretty-printed (capped) full value. */
+function kvRow(key: string, v: string | undefined) {
+  if (v === undefined) return { key };
+  let pretty = v;
+  try {
+    pretty = JSON.stringify(JSON.parse(v), null, 2);
+  } catch {
+    // stored values are JSON; fall back to the raw text
+  }
+  const oneLine = v.replace(/\s+/g, " ");
+  return {
+    key,
+    bytes: Buffer.byteLength(v),
+    preview: oneLine.length > VALUE_PREVIEW ? `${oneLine.slice(0, VALUE_PREVIEW)}…` : oneLine,
+    full: pretty.length > VALUE_FULL ? `${pretty.slice(0, VALUE_FULL)}\n…` : pretty,
+    truncated: pretty.length > VALUE_FULL,
+  };
+}
 
 /**
  * Browser routes: team sign-in and dashboard (/login, /team) and the admin
@@ -315,24 +335,23 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           const values = await Promise.all(shown.map((k) => backend.kvGet(m.id, k)));
           backendBrowser = {
             state: "on",
-            kv: shown.map((key, i) => {
-              const v = values[i];
-              return {
-                key,
-                value:
-                  v === undefined
-                    ? undefined
-                    : v.length > VALUE_PREVIEW
-                      ? `${v.slice(0, VALUE_PREVIEW)}…`
-                      : v,
-              };
-            }),
+            kv: shown.map((key, i) => kvRow(key, values[i])),
+            totalKeys: keys.length,
+            otherKeys: keys.slice(shown.length),
             moreKeys: Math.max(0, keys.length - shown.length),
             files: files.map((f) => ({ ...f, url: `${base}/${f.id}` })),
           };
         } catch (err) {
           console.error(`[dashboard] backend read for ${m.id} failed`, err);
-          backendBrowser = { state: "on", kv: [], moreKeys: 0, files: [], error: t.team.failed };
+          backendBrowser = {
+            state: "on",
+            kv: [],
+            totalKeys: 0,
+            otherKeys: [],
+            moreKeys: 0,
+            files: [],
+            error: t.team.failed,
+          };
         }
       }
       const site = {

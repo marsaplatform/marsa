@@ -177,6 +177,12 @@ export interface Strings {
     agentsSub: string;
     uploading: string;
     failed: string;
+    openSite: string;
+    settingsTitle: string;
+    kvCount: (n: number) => string;
+    backendFilesCount: (n: number) => string;
+    valueTruncated: string;
+    signedInAs: string;
     pickZip: string;
   };
   admin: {
@@ -467,6 +473,12 @@ const en: Strings = {
       "Use your team key in the X-Team-Key header. Never paste the key into a public page or repository.",
     uploading: "Publishing…",
     failed: "Publishing failed",
+    openSite: "Open site",
+    settingsTitle: "Link, expiry and visibility",
+    kvCount: (n) => (n === 1 ? "1 key" : `${n} keys`),
+    backendFilesCount: (n) => (n === 1 ? "1 uploaded file" : `${n} uploaded files`),
+    valueTruncated: "Long value, shortened here.",
+    signedInAs: "Signed in as",
     pickZip: "Choose files or a .zip",
   },
   admin: {
@@ -748,6 +760,26 @@ const ar: Strings = {
     agentsSub: "استخدم مفتاح الفريق في الترويسة X-Team-Key. لا تضع المفتاح في صفحة عامة أو مستودع.",
     uploading: "جارٍ النشر…",
     failed: "تعذّر النشر",
+    openSite: "افتح الموقع",
+    settingsTitle: "الرابط والمدة والظهور",
+    kvCount: (n) =>
+      n === 1
+        ? "مفتاح واحد"
+        : n === 2
+          ? "مفتاحان"
+          : n <= 10
+            ? `${iso(n)} مفاتيح`
+            : `${iso(n)} مفتاحًا`,
+    backendFilesCount: (n) =>
+      n === 1
+        ? "ملف مرفوع واحد"
+        : n === 2
+          ? "ملفان مرفوعان"
+          : n <= 10
+            ? `${iso(n)} ملفات مرفوعة`
+            : `${iso(n)} ملفًا مرفوعًا`,
+    valueTruncated: "قيمة طويلة، مختصرة هنا.",
+    signedInAs: "دخلت باسم",
     pickZip: "اختر ملفات أو ملف zip",
   },
   admin: {
