@@ -74,6 +74,14 @@ describe("landing page", () => {
       "javascript",
     );
     expect((await app.request("/favicon.svg")).status).toBe(200);
+    // pages reference content-versioned asset URLs, so a CDN never serves stale CSS/JS after a deploy
+    const html = await (await app.request("/")).text();
+    const css = /href="(\/assets\/app\.css\?v=[0-9a-f]{10})"/.exec(html)?.[1];
+    const js = /src="(\/assets\/app\.js\?v=[0-9a-f]{10})"/.exec(html)?.[1];
+    expect(css).toBeTruthy();
+    expect(js).toBeTruthy();
+    expect((await app.request(css ?? "")).status).toBe(200);
+    expect((await app.request(js ?? "")).status).toBe(200);
   });
 
   it("localises 404 pages", async () => {

@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.3] - 2026-10-20
+
+### Fixed
+- Pages now load `/assets/app.css?v=<hash>` and `/assets/app.js?v=<hash>` (hash of their content).
+  The assets are cached for 4 hours, so behind a CDN (Cloudflare) a deploy could keep serving the old
+  CSS/JS for hours; the new URL changes whenever the content does.
+
 ## [0.6.2] - 2026-10-20
 
 ### Changed

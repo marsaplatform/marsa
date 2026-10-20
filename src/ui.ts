@@ -1,3 +1,4 @@
+import { ASSET_VERSION } from "./assets.js";
 import { PLATFORM_URL } from "./brand.js";
 import type { Config } from "./config.js";
 import type { DocPage } from "./docs.js";
@@ -120,7 +121,7 @@ function layout(o: LayoutOpts): string {
 <link rel="alternate" hreflang="ar" href="${esc(o.config.publicUrl + localePath("ar", o.path))}">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preload" href="/assets/fonts/zad/Zad-Regular.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/app.css">
+<link rel="stylesheet" href="/assets/app.css?v=${ASSET_VERSION}">
 </head>
 <body>
 <a class="skip" href="#main">${esc(t.skip)}</a>
@@ -172,7 +173,7 @@ ${o.body}
   </div>
   <div class="wrap footer-bottom"><p>${esc(t.footer.note)}</p></div>
 </footer>
-<script src="/assets/app.js" type="module"></script>
+<script src="/assets/app.js?v=${ASSET_VERSION}" type="module"></script>
 </body>
 </html>`;
 }

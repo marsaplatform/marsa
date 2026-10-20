@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -561,3 +562,10 @@ for (const d of document.querySelectorAll("details.mobile-menu")) {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && d.open) { d.open = false; d.querySelector("summary").focus(); } });
 }
 `;
+
+/** Content hash of the CSS + JS, appended to their URLs so a deploy is never served stale CSS from a CDN cache. */
+export const ASSET_VERSION = createHash("sha256")
+  .update(APP_CSS)
+  .update(APP_JS)
+  .digest("hex")
+  .slice(0, 10);
