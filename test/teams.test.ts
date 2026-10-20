@@ -261,7 +261,7 @@ describe("public directory", () => {
     expect(empty).toContain("No team pages are live right now");
     const emptyAr = await (await app.request("/ar")).text();
     expect(emptyAr).toContain('dir="rtl"');
-    expect(emptyAr).toContain("مفيش صفحات فرق شغالة دلوقتي");
+    expect(emptyAr).toContain("لا توجد صفحات فرق منشورة الآن");
 
     const t = await createTeam("فريق التوثيق", false);
     const s = await site({ "x-team-key": t.key }, "<b>Map</b> & data");
@@ -279,26 +279,26 @@ describe("public directory", () => {
 });
 
 describe("admin page", () => {
-  it("serves /admin and /ar/admin with no secrets, noindex and a strict CSP", async () => {
+  it("redirects /admin and /ar/admin to the sign-in page, which has no secrets, noindex and a strict CSP", async () => {
     const { app } = await setup();
     for (const [path, lang] of [
       ["/admin", "en"],
       ["/ar/admin", "ar"],
     ] as const) {
       const res = await app.request(path);
-      expect(res.status).toBe(200);
-      expect(res.headers.get("content-security-policy")).toContain("script-src 'self'");
-      expect(res.headers.get("x-robots-tag")).toContain("noindex");
-      const html = await res.text();
+      expect(res.status).toBe(303);
+      const login = res.headers.get("location") ?? "";
+      expect(login).toBe(lang === "ar" ? "/ar/admin/login" : "/admin/login");
+      const page = await app.request(login);
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-security-policy")).toContain("script-src 'self'");
+      expect(page.headers.get("x-robots-tag")).toContain("noindex");
+      const html = await page.text();
       expect(html).toContain(`lang="${lang}"`);
-      expect(html).toContain('src="/assets/admin.js"');
-      expect(html).toContain('id="teamRows"');
+      expect(html).toContain('name="token"');
       expect(html).not.toContain(ADMIN);
     }
-    expect((await app.request("/ar/admin")).status).toBe(200);
-    const js = await app.request("/assets/admin.js");
-    expect(js.headers.get("content-type")).toContain("javascript");
-    expect(await js.text()).toContain("/api/admin");
+    expect((await app.request("/assets/admin.js")).status).toBe(404);
   });
 });
 

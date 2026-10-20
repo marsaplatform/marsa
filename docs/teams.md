@@ -10,23 +10,57 @@ Marsa has no user accounts. When an instance has an `ADMIN_TOKEN`, the operator 
 Guest uploads (no team key) keep working exactly as before. They never get backend access and are
 never listed.
 
+## Signing in
+
+Marsa Spaces has two browser sign-ins. Both create a **signed session cookie** (HMAC-SHA256 with
+`SESSION_SECRET`, `HttpOnly`, `Secure` on HTTPS with the `__Host-` prefix, `SameSite=Lax`). No key or
+token is stored in the browser.
+
+| Who | Where | With | Session |
+| --- | --- | --- | --- |
+| Team member | `/login` (Arabic `/ar/login`) | the team key | `SESSION_TTL_HOURS` (default 7 days) |
+| Admin | `/admin/login` (Arabic `/ar/admin/login`) | `ADMIN_TOKEN` | `ADMIN_SESSION_TTL_HOURS` (default 12 hours) |
+
+- Sign-in attempts are rate-limited per client IP (`LOGIN_ATTEMPTS_PER_15_MIN`, default 10).
+- Every form that changes something carries a CSRF token bound to the session, and the request must
+  come from this instance (Origin / `Sec-Fetch-Site`). Uploaded pages run in a sandbox and can't use
+  the session.
+- **Sign out** ends the session at once. Rotating a team key or deleting the team signs its members
+  out; changing `ADMIN_TOKEN` or `SESSION_SECRET` signs everyone out.
+- Without `SESSION_SECRET`, a random secret is generated at start, so sessions end on every restart.
+  Set one in production: `openssl rand -hex 32`.
+
+## The team dashboard
+
+After signing in, a team member lands on `/team` (or `/ar/team`):
+
+- **Status**: the team name, how many sites are live, whether *data and files* are on for the team (and
+  whether the server has a backend configured), and whether the team is listed on the home page.
+- **Live sites**: title, link, expiry, size and home-page visibility, with **Manage** and **Delete**.
+- **Publish a new site**: drag and drop files, a folder or one `.zip`, or pick them, then choose when
+  it expires (within the instance limits).
+- **Manage a site** (`/team/sites/<id>`): copy the link, **extend** the expiry (never past created +
+  `MAX_TTL_HOURS`), **hide from / show on the home page**, **replace the files** (same link), **delete**,
+  see the published files, and, for teams with backend access, a small **browser of the site's KV
+  values and uploaded files** with delete buttons.
+- **Snippets for agents**: a `curl` call and a prompt using `$MARSA_TEAM_KEY` (never the real key).
+
+Team sites are managed through the session: nobody on the team needs the per-site edit token.
+Every site still has one (only its hash is stored), so scripts keep using `PUT/PATCH/DELETE
+/api/sites/:id` with the token returned at upload time. Sites a team published through the API with
+`X-Team-Key` appear in its dashboard too.
+
 ## The admin console
 
-Open `https://marsa.example.com/admin` (Arabic: `/ar/admin`) and paste the instance's `ADMIN_TOKEN`.
-The token is sent only to this instance's `/api/admin/*` routes and kept in this browser tab's
-`sessionStorage` until you sign out or close the tab.
+Sign in at `/admin/login` with `ADMIN_TOKEN`. The console has two tabs:
 
-From the console you can:
-
-1. **Create a team**: type a name, tick *Backend access* if the team should get KV/files, and
-   leave *Show in public directory* ticked or untick it. Press **Create team**.
-2. **Copy the team key** shown in the box. It is shown **once**. Marsa stores only its SHA-256.
-3. **Toggle** *Backend access* or *Show in public directory* in the table. Changes apply to the
-   next request.
-4. **New key**: replaces the key. The old key stops working immediately; existing sites stay with
-   the team.
-5. **Delete**: removes the team. Its sites stay up as ordinary links (no backend, not listed) until
-   they expire. Use the API with `?sites=delete` to remove them too.
+1. **Teams** (`/admin`): create a team (name, *Data and files*, *On home page*). The **team key is
+   shown once** after creating or rotating; Marsa stores only its SHA-256. Each row has switches for
+   *Data and files* and *On home page* (they apply to the next request), **New key** (the old key and
+   its sessions stop at once) and **Delete** (optionally with its sites; otherwise they stay up as
+   ordinary links until they expire).
+2. **All sites** (`/admin/sites`): every live site with its owner (a team or *Guest*), link, expiry and
+   size. Filter by team or guests only, and delete any site.
 
 ## Uploading as a team
 
@@ -40,8 +74,8 @@ curl -s -X POST "https://marsa.example.com/api/sites?ttlHours=72" \
 ```
 
 - A wrong or rotated team key answers `401 INVALID_TEAM_KEY` (it never silently falls back to guest).
-- The site is then managed with its **edit token**, like any other site. The team key is only for
-  creating sites.
+- The site is managed from the team dashboard, or with its **edit token** through the API. The team
+  key itself is only for creating sites and for signing in.
 - The `<title>` of `index.html` becomes the card title in the directory (else the site id).
 
 ## Who may use the backend

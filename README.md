@@ -49,9 +49,16 @@ backend access can use it (see [Teams](docs/teams.md)).
   and `frame-ancestors 'none'`.
 - **Bilingual UI and docs**: English and Arabic (RTL), server-rendered. The guide is at `/docs` and `/ar/docs`.
 - **Optional admin API** behind `ADMIN_TOKEN`: list and delete any site, and run the sweeper.
-- **Teams and an admin console** at `/admin`: create teams with a team key, choose per team whether
-  its sites get the data/files backend, and whether they appear in the **public directory** on the
-  homepage (`GET /api/directory`). Guests keep uploading as before. See [docs/teams.md](docs/teams.md).
+- **Team sign-in and dashboard** at `/login` and `/team`: a team member signs in with the team key
+  (signed `HttpOnly` session cookie, CSRF-protected forms, rate-limited sign-in) to publish by drag and
+  drop, replace files, extend, hide from the home page or delete the team's sites, and browse each
+  site's KV values and files. Agents keep using `X-Team-Key`.
+- **Admin console** at `/admin/login`: create teams with a team key, choose per team whether its sites
+  get the data/files backend and whether they appear in the **public directory** on the homepage
+  (`GET /api/directory`), and see or delete every live site, filtered by team or guests.
+  See [docs/teams.md](docs/teams.md).
+- **Marsa platform look**: the Zad typeface (self-hosted, SIL OFL), the marsaplatform.com palette,
+  Arabic first and RTL-correct, light and dark, responsive, keyboard and screen-reader friendly.
 - **Optional data/files backend** (Cloudflare Workers KV + R2): per-site KV and files, a browser SDK at `/sdk.js`, and
   automatic cleanup when a site goes away.
 
@@ -183,7 +190,10 @@ All settings are environment variables, and all are optional. See [`.env.example
 | `UPLOADS_PER_HOUR` | `20` | Creates, updates and backend file uploads per IP per hour |
 | `API_REQUESTS_PER_MINUTE` | `120` | Any `/api` request per IP per minute |
 | `TRUST_PROXY` | `false` | Use `X-Real-IP` / the last `X-Forwarded-For` hop as the client IP |
-| `ADMIN_TOKEN` | empty (off) | Enables `/api/admin/*` (min. 24 chars) |
+| `ADMIN_TOKEN` | empty (off) | Enables `/api/admin/*` and the admin console (min. 24 chars) |
+| `SESSION_SECRET` | random per start | HMAC key for sign-in cookies and CSRF tokens (min. 32 chars). Set it, or everyone is signed out on restart |
+| `SESSION_TTL_HOURS` / `ADMIN_SESSION_TTL_HOURS` | `168` / `12` | Team and admin session lifetime |
+| `LOGIN_ATTEMPTS_PER_15_MIN` | `10` | Sign-in attempts per IP per 15 minutes |
 | `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_KV_NAMESPACE_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | empty (off) | Optional backend; set all five or none |
 | `R2_BUCKET` | `marsa-files` | R2 bucket for backend files |
 | `R2_ENDPOINT` | `https://<account>.r2.cloudflarestorage.com` | Only for EU/FedRAMP jurisdiction buckets |
@@ -284,7 +294,7 @@ Marsa is open source because a place to drop work should be one you control:
 - **الـ backend الاختياري للبيانات والملفات**: محتاج حساب Cloudflare (الخطة المجانية كفاية) فيه Workers KV وR2، من غير ما تنزّل حاجة، وبيتربط بمتغيرات البيئة. ومقفول افتراضيًا، والـ routes بتاعته بترد `503 BACKEND_NOT_CONFIGURED`.
 
 ### المميزات
-رفع بالسحب والإفلات، وAPI للنشر (ZIP أو ملفات أو JSON)، وروابط بتنتهي لوحدها، ومفتاح للتعديل والمسح، و`/llms.txt` و`/openapi.json` للـ agents، وحدود ضد الإساءة، وعرض آمن جوه sandbox، وواجهة ودليل بالعربي والإنجليزي، ولوحة أدمن اختيارية على `/admin` فيها فرق بمفاتيح خاصة (تحدد لكل فريق إذا كان ليه باك إند وإذا كان يظهر في دليل الصفحات العام على الرئيسية)، وbackend اختياري (KV وملفات) عن طريق Cloudflare Workers KV وR2.
+رفع بالسحب والإفلات، وAPI للنشر (ZIP أو ملفات أو JSON)، وروابط بتنتهي لوحدها، ومفتاح للتعديل والمسح، و`/llms.txt` و`/openapi.json` للـ agents، وحدود ضد الإساءة، وعرض آمن جوه sandbox، وواجهة ودليل بالعربي والإنجليزي، ودخول للفرق على `/login` بمفتاح الفريق ولوحة خاصة على `/team` (نشر بالسحب والإفلات، واستبدال الملفات، والتمديد، والإخفاء من الرئيسية، والحذف، وتصفّح قيم KV والملفات لكل موقع)، ولوحة مسؤول على `/admin/login` فيها الفرق بمفاتيحها (تحدد لكل فريق إذا كان له باك إند وإذا كان يظهر في دليل الصفحات العام على الرئيسية) وكل المواقع الحيّة مع التصفية والحذف، والجلسات بملف cookie موقّع `HttpOnly` مع حماية CSRF وحد لمحاولات الدخول، وbackend اختياري (KV وملفات) عن طريق Cloudflare Workers KV وR2.
 
 ### لمين؟
 اللي بيبنوا agents، والمطورين اللي بيعرضوا شغل على عملاء، ومعاينات الـ CI، والمدرّسين والطلبة، وصفحات الإيفنتات المؤقتة. وفي `examples/` أمثلة وهمية لكل حالة.

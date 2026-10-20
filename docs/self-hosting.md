@@ -39,9 +39,15 @@ Every setting is an environment variable with a safe default. Copy
 | `UPLOADS_PER_HOUR` | `20` | Creates + updates per client IP per hour |
 | `API_REQUESTS_PER_MINUTE` | `120` | Any `/api` request per client IP per minute |
 | `TRUST_PROXY` | `false` | Read the client IP from `X-Real-IP` / the last `X-Forwarded-For` hop |
-| `ADMIN_TOKEN` | empty (admin off) | Bearer token for `/api/admin/*`, at least 24 characters |
+| `ADMIN_TOKEN` | empty (admin off) | Bearer token for `/api/admin/*` and the admin sign-in, at least 24 characters |
+| `SESSION_SECRET` | random per start | HMAC key for sign-in cookies and CSRF tokens, at least 32 characters |
+| `SESSION_TTL_HOURS` / `ADMIN_SESSION_TTL_HOURS` | `168` / `12` | Team / admin session lifetime |
+| `LOGIN_ATTEMPTS_PER_15_MIN` | `10` | Sign-in attempts per client IP per 15 minutes |
 
-Generate an admin token with `openssl rand -hex 32`.
+Generate an admin token and a session secret with `openssl rand -hex 32`. Without `SESSION_SECRET`
+everyone is signed out whenever the container restarts. Serve the app over HTTPS: session cookies are
+then `Secure` and use the `__Host-` prefix. Set `TRUST_PROXY=true` behind your reverse proxy so the
+sign-in rate limit sees real client IPs.
 
 Nothing else is required. The optional [data & files backend](backend.md) adds `CLOUDFLARE_*`, `R2_*` and
 `BACKEND_*` variables; leave them empty and Marsa runs as a pure static host
@@ -79,8 +85,9 @@ curl -s https://marsa.example.com/api/admin/sites -H "Authorization: Bearer $ADM
 curl -s -X DELETE https://marsa.example.com/api/admin/sites/k3v9x2mq7a -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-- Open `/admin` with the same token to manage **teams**: team keys, backend access per team, and
-  which teams appear in the public directory on the homepage. See [Teams](teams.md).
+- Sign in at `/admin/login` with the same token to manage **teams** (team keys, backend access per
+  team, which teams appear in the public directory on the homepage) and to see or delete **all live
+  sites**. Team members sign in at `/login` with their team key. See [Teams](teams.md).
 
 ## Backups and upgrades
 

@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { ADMIN_JS, APP_CSS, APP_JS } from "./assets.js";
+import { APP_CSS, APP_JS, fontAsset } from "./assets.js";
 import { mountBackendRoutes } from "./backend/routes.js";
 import type { SiteBackend } from "./backend/types.js";
 import { APP_NAME } from "./brand.js";
@@ -24,12 +24,12 @@ import { openapi } from "./openapi.js";
 import { RateLimiter } from "./rate-limit.js";
 import { SDK_JS } from "./sdk.js";
 import { APP_CSP, baseHeaders, SITE_CSP } from "./security.js";
+import { Sessions } from "./session.js";
 import { publicMeta, type SiteMeta, type SiteStore } from "./store.js";
 import { removeSite, sweepExpired } from "./sweep.js";
 import { cleanTeamName, isTeamKey, publicTeam, type Team, TeamStore } from "./teams.js";
 import { bearer, hashToken, newEditToken, newSiteId, safeEqual } from "./tokens.js";
 import {
-  adminHtml,
   type Directory,
   docPageHtml,
   docsIndexHtml,
@@ -39,6 +39,7 @@ import {
   newHtml,
   notFoundHtml,
 } from "./ui.js";
+import { mountWebRoutes } from "./web.js";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -71,6 +72,8 @@ export interface AppDeps {
   /** Teams (admin-managed). Loaded from <dataDir>/teams.json when omitted. */
   teams?: TeamStore;
   limiter?: RateLimiter;
+  /** Browser sessions (team dashboard, admin). Built from config when omitted. */
+  sessions?: Sessions;
   now?: () => number;
 }
 
@@ -81,12 +84,14 @@ function apiError(c: Context, status: number, code: string, message: string) {
 export function createApp({
   config,
   store,
-  limiter = new RateLimiter(),
   now = Date.now,
+  limiter = new RateLimiter(now),
   docs = loadDocs(config.publicUrl),
   backend = null,
   teams = new TeamStore(config.dataDir),
+  sessions,
 }: AppDeps) {
+  const session = sessions ?? new Sessions(config, now);
   const app = new Hono();
   /** Language for pages outside the /ar tree: Arabic if the browser prefers it. */
   const langOf = (c: Context): Lang => {
@@ -255,7 +260,7 @@ export function createApp({
       );
       const byTeam = new Map<string, SiteMeta[]>();
       for (const m of await store.list()) {
-        if (!m.teamId || !listed.has(m.teamId)) continue;
+        if (!m.teamId || m.unlisted || !listed.has(m.teamId)) continue;
         byTeam.set(m.teamId, [...(byTeam.get(m.teamId) ?? []), m]);
       }
       dirCache = {
@@ -285,6 +290,56 @@ export function createApp({
       }))
       .filter((team) => team.sites.length > 0);
     return { generatedAt: new Date(t).toISOString(), teams: live };
+  }
+
+  // ---- site operations shared by the API and the dashboard ----------------
+  async function createSite(entries: UploadEntry[], ttl: unknown, team: Team | null) {
+    const files = prepareSite(entries, limits);
+    let id = newSiteId();
+    while (await store.exists(id)) id = newSiteId();
+    // Every site gets an edit token; only its hash is stored. Team sites are
+    // also managed from the team's dashboard session, without the token.
+    const token = newEditToken();
+    const ts = now();
+    const meta = await store.put(
+      {
+        id,
+        createdAt: new Date(ts).toISOString(),
+        updatedAt: new Date(ts).toISOString(),
+        expiresAt: new Date(ts + clampTtl(ttl) * HOUR).toISOString(),
+        tokenHash: hashToken(token),
+        ...(team ? { teamId: team.id } : {}),
+        ...titleOf(files),
+      },
+      files,
+    );
+    if (team) invalidateDirectory();
+    return { meta, token };
+  }
+  async function replaceSite(meta: SiteMeta, entries: UploadEntry[]) {
+    const files = prepareSite(entries, limits);
+    const { title: _old, ...rest } = meta;
+    const updated = await store.put(
+      { ...rest, ...titleOf(files), updatedAt: new Date(now()).toISOString() },
+      files,
+    );
+    invalidateDirectory();
+    return updated;
+  }
+  /** Change the expiry. A link can never outlive createdAt + MAX_TTL_HOURS. */
+  const ceilingOf = (meta: SiteMeta) => Date.parse(meta.createdAt) + config.maxTtlHours * HOUR;
+  async function extendSite(meta: SiteMeta, ttl: unknown) {
+    meta.expiresAt = new Date(
+      Math.min(now() + clampTtl(ttl) * HOUR, ceilingOf(meta)),
+    ).toISOString();
+    meta.updatedAt = new Date(now()).toISOString();
+    await store.updateMeta(meta);
+    invalidateDirectory();
+    return meta;
+  }
+  async function deleteSite(id: string) {
+    await removeSite(store, backend, id);
+    invalidateDirectory();
   }
 
   // ---- public API ---------------------------------------------------------
@@ -329,24 +384,7 @@ export function createApp({
     const limited = await uploadRate(c);
     if (limited) return limited;
     const { entries, ttl } = await readUpload(c);
-    const files = prepareSite(entries, limits);
-    let id = newSiteId();
-    while (await store.exists(id)) id = newSiteId();
-    const token = newEditToken();
-    const ts = now();
-    const meta = await store.put(
-      {
-        id,
-        createdAt: new Date(ts).toISOString(),
-        updatedAt: new Date(ts).toISOString(),
-        expiresAt: new Date(ts + clampTtl(ttl) * HOUR).toISOString(),
-        tokenHash: hashToken(token),
-        ...(team ? { teamId: team.id } : {}),
-        ...titleOf(files),
-      },
-      files,
-    );
-    if (team) invalidateDirectory();
+    const { meta, token } = await createSite(entries, ttl, team);
     return c.json({ ...view(meta), editToken: token }, 201);
   });
 
@@ -361,14 +399,7 @@ export function createApp({
     const limited = await uploadRate(c);
     if (limited) return limited;
     const { entries } = await readUpload(c);
-    const files = prepareSite(entries, limits);
-    const { title: _old, ...rest } = meta;
-    const updated = await store.put(
-      { ...rest, ...titleOf(files), updatedAt: new Date(now()).toISOString() },
-      files,
-    );
-    invalidateDirectory();
-    return c.json(view(updated));
+    return c.json(view(await replaceSite(meta, entries)));
   });
 
   /** Change the expiry. A link can never outlive createdAt + MAX_TTL_HOURS. */
@@ -376,14 +407,7 @@ export function createApp({
     const meta = await authorizeSite(c);
     if (meta instanceof Response) return meta;
     const body = (await c.req.json().catch(() => ({}))) as { ttlHours?: unknown };
-    const ceiling = Date.parse(meta.createdAt) + config.maxTtlHours * HOUR;
-    meta.expiresAt = new Date(
-      Math.min(now() + clampTtl(body.ttlHours) * HOUR, ceiling),
-    ).toISOString();
-    meta.updatedAt = new Date(now()).toISOString();
-    await store.updateMeta(meta);
-    invalidateDirectory();
-    return c.json(view(meta));
+    return c.json(view(await extendSite(meta, body.ttlHours)));
   });
 
   app.delete("/api/sites/:id", async (c) => {
@@ -518,6 +542,7 @@ export function createApp({
   const appPage = (c: Context, html: string, status = 200) => {
     c.header("Content-Security-Policy", APP_CSP);
     c.header("X-Frame-Options", "DENY");
+    c.header("Referrer-Policy", "same-origin");
     c.header("Cache-Control", "no-cache");
     return c.html(html, status as 200);
   };
@@ -538,14 +563,28 @@ export function createApp({
   app.get("/ar/", (c) => c.redirect("/ar", 301));
   app.get("/new", (c) => appPage(c, newHtml("en", config)));
   app.get("/ar/new", (c) => appPage(c, newHtml("ar", config)));
-  // Admin console (static page; every action needs the ADMIN_TOKEN, sent by its script).
-  const adminPage = (lang: Lang) => (c: Context) => {
-    c.header("X-Robots-Tag", "noindex, nofollow");
-    c.header("Cache-Control", "no-store");
-    return appPage(c, adminHtml(lang, config));
-  };
-  app.get("/admin", adminPage("en"));
-  app.get("/ar/admin", adminPage("ar"));
+  // Team dashboard, sign-in and the admin console (server-rendered, session cookies).
+  mountWebRoutes(app, {
+    config,
+    store,
+    teams,
+    backend,
+    sessions: session,
+    limiter,
+    now,
+    appPage,
+    uploadLimit,
+    uploadRate,
+    readUpload,
+    createSite,
+    replaceSite,
+    extendSite,
+    deleteSite,
+    ceilingOf,
+    siteUrl,
+    invalidateDirectory,
+    siteCounts,
+  });
   app.get("/docs", (c) => appPage(c, docsIndexHtml("en", config, docs)));
   app.get("/ar/docs", (c) => appPage(c, docsIndexHtml("ar", config, docs)));
   for (const prefix of ["", "/ar"] as const) {
@@ -570,7 +609,13 @@ export function createApp({
     return asset("text/javascript; charset=utf-8", SDK_JS)(c);
   });
   app.get("/assets/app.js", asset("text/javascript; charset=utf-8", APP_JS));
-  app.get("/assets/admin.js", asset("text/javascript; charset=utf-8", ADMIN_JS));
+  app.get("/assets/fonts/zad/:file", (c) => {
+    const font = fontAsset(c.req.param("file"));
+    if (!font) return apiError(c, 404, "NOT_FOUND", "no such font");
+    c.header("Content-Type", font.type);
+    c.header("Cache-Control", "public, max-age=31536000, immutable");
+    return c.body(font.body as unknown as ArrayBuffer);
+  });
   app.get("/assets/app.css", asset("text/css; charset=utf-8", APP_CSS));
 
   // ---- serving uploaded sites --------------------------------------------

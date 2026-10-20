@@ -1,0 +1,625 @@
+import { randomBytes } from "node:crypto";
+import type { Context, Hono, MiddlewareHandler } from "hono";
+import type { SiteBackend } from "./backend/types.js";
+import { clientIp } from "./client-ip.js";
+import type { Config } from "./config.js";
+import { UploadError } from "./errors.js";
+import { type Lang, STRINGS } from "./i18n.js";
+import type { UploadEntry } from "./ingest.js";
+import type { RateLimiter } from "./rate-limit.js";
+import { fingerprint, type Session, type Sessions, sameOrigin } from "./session.js";
+import type { SiteMeta, SiteStore } from "./store.js";
+import { cleanTeamName, type Team, type TeamStore } from "./teams.js";
+import { safeEqual } from "./tokens.js";
+import {
+  adminSitesHtml,
+  adminTeamsHtml,
+  type Flash,
+  localePath,
+  loginHtml,
+  messageHtml,
+  type TeamSiteRow,
+  teamHtml,
+  teamSiteHtml,
+} from "./ui.js";
+
+export interface WebDeps {
+  config: Config;
+  store: SiteStore;
+  teams: TeamStore;
+  backend: SiteBackend | null;
+  sessions: Sessions;
+  limiter: RateLimiter;
+  now: () => number;
+  appPage: (c: Context, html: string, status?: number) => Response;
+  uploadLimit: MiddlewareHandler;
+  uploadRate: (c: Context) => Promise<Response | null>;
+  readUpload: (c: Context) => Promise<{ entries: UploadEntry[]; ttl?: unknown }>;
+  createSite: (
+    entries: UploadEntry[],
+    ttl: unknown,
+    team: Team | null,
+  ) => Promise<{ meta: SiteMeta; token: string }>;
+  replaceSite: (meta: SiteMeta, entries: UploadEntry[]) => Promise<SiteMeta>;
+  extendSite: (meta: SiteMeta, ttl: unknown) => Promise<SiteMeta>;
+  deleteSite: (id: string) => Promise<void>;
+  ceilingOf: (meta: SiteMeta) => number;
+  siteUrl: (id: string) => string;
+  invalidateDirectory: () => void;
+  siteCounts: () => Promise<Map<string, number>>;
+}
+
+const LOGIN_WINDOW = 15 * 60_000;
+const FLASH_TTL = 5 * 60_000;
+const KV_PREVIEW = 20;
+const VALUE_PREVIEW = 400;
+
+/**
+ * Browser routes: team sign-in and dashboard (/login, /team) and the admin
+ * console (/admin/login, /admin, /admin/sites), in English and under /ar.
+ *
+ * Everything is server-rendered HTML with plain forms (works without
+ * JavaScript); the page script only adds drag-and-drop, folder uploads,
+ * confirmations and copy buttons. Every POST checks the Origin and a CSRF
+ * token, and answers with a 303 redirect (or JSON when the script asks).
+ */
+export function mountWebRoutes(app: Hono, d: WebDeps): void {
+  const { config, store, teams, backend, sessions, limiter, now } = d;
+
+  // ---- one-shot flash messages, bound to the session that caused them ------
+  const flashes = new Map<string, { flash: Flash; sid: string; exp: number }>();
+  const putFlash = (s: Session, flash: Flash): string => {
+    const t = now();
+    for (const [k, v] of flashes) if (v.exp <= t) flashes.delete(k);
+    const id = randomBytes(9).toString("base64url");
+    flashes.set(id, { flash, sid: s.sid, exp: t + FLASH_TTL });
+    return id;
+  };
+  const takeFlash = (c: Context, s: Session): Flash | null => {
+    const id = c.req.query("f");
+    if (!id) return null;
+    const v = flashes.get(id);
+    if (!v || v.sid !== s.sid || v.exp <= now()) return null;
+    flashes.delete(id);
+    return v.flash;
+  };
+
+  const page = (c: Context, html: string, status = 200) => {
+    const res = d.appPage(c, html, status);
+    res.headers.set("Cache-Control", "no-store");
+    res.headers.set("X-Robots-Tag", "noindex, nofollow");
+    return res;
+  };
+  const wantsJson = (c: Context) => (c.req.header("accept") ?? "").includes("application/json");
+
+  /** Redirect after a POST (or JSON for the page script). */
+  const done = (c: Context, s: Session, to: string, flash?: Flash) => {
+    const url = flash ? `${to}${to.includes("?") ? "&" : "?"}f=${putFlash(s, flash)}` : to;
+    if (wantsJson(c)) return c.json({ ok: flash?.kind !== "err", redirect: url });
+    return c.redirect(url, 303);
+  };
+
+  const formOf = async (c: Context): Promise<FormData | null> => {
+    const type = (c.req.header("content-type") ?? "").toLowerCase();
+    if (
+      !type.startsWith("application/x-www-form-urlencoded") &&
+      !type.startsWith("multipart/form-data")
+    ) {
+      return null;
+    }
+    try {
+      return await c.req.formData();
+    } catch {
+      return null;
+    }
+  };
+  const field = (f: FormData | null, k: string) => {
+    const v = f?.get(k);
+    return typeof v === "string" ? v : "";
+  };
+
+  const forbidden = (c: Context, lang: Lang, back: string) => {
+    const t = STRINGS[lang];
+    if (wantsJson(c)) return c.json({ error: { code: "CSRF", message: t.badRequest } }, 403);
+    return page(
+      c,
+      messageHtml(lang, config, "403", t.badRequest, "", {
+        href: back,
+        label: t.common.cancel,
+      }),
+      403,
+    );
+  };
+
+  /** Origin + CSRF check for a signed-in POST. Returns the parsed form. */
+  async function guardPost(
+    c: Context,
+    s: Session,
+    lang: Lang,
+    back: string,
+  ): Promise<FormData | Response> {
+    if (!sameOrigin(c, config.publicUrl)) return forbidden(c, lang, back);
+    const form = await formOf(c);
+    const token = c.req.header("x-csrf-token") || field(form, "_csrf");
+    if (!sessions.checkCsrf(s, token)) return forbidden(c, lang, back);
+    return form ?? new FormData();
+  }
+
+  const loginRate = (c: Context) =>
+    limiter.hit(
+      `login:${clientIp(c, config.trustProxy)}`,
+      config.sessions.loginAttemptsPer15Min,
+      LOGIN_WINDOW,
+    );
+
+  // ---- who is signed in -----------------------------------------------------------
+  function teamSession(c: Context): { s: Session; team: Team } | null {
+    const s = sessions.read(c);
+    if (s?.role !== "team") return null;
+    const team = teams.get(s.teamId);
+    // A rotated key or a deleted team ends the session.
+    if (!team || !safeEqual(s.fp, fingerprint(team.keyHash))) return null;
+    return { s, team };
+  }
+  function adminSession(c: Context): Session | null {
+    const s = sessions.read(c);
+    if (s?.role !== "admin" || !config.adminToken) return null;
+    return safeEqual(s.fp, fingerprint(config.adminToken)) ? s : null;
+  }
+
+  const teamRow = (m: SiteMeta, team: Team): TeamSiteRow => ({
+    id: m.id,
+    title: m.title || m.id,
+    url: d.siteUrl(m.id),
+    createdAt: m.createdAt,
+    expiresAt: m.expiresAt,
+    totalBytes: m.totalBytes,
+    fileCount: m.fileCount,
+    listed: team.directory && !m.unlisted,
+    unlisted: !!m.unlisted,
+  });
+
+  const live = (m: SiteMeta) => Date.parse(m.expiresAt) > now();
+
+  for (const prefix of ["", "/ar"] as const) {
+    const lang: Lang = prefix ? "ar" : "en";
+    const t = STRINGS[lang];
+    const href = (p: string) => localePath(lang, p);
+
+    // ---- team sign-in -------------------------------------------------------------
+    app.get(`${prefix}/login`, (c) => {
+      if (teamSession(c)) return c.redirect(href("/team"), 303);
+      const notice = c.req.query("out") ? t.login.signedOut : undefined;
+      const error = c.req.query("expired") ? t.login.expired : undefined;
+      return page(
+        c,
+        loginHtml(lang, config, { kind: "team", csrf: sessions.loginCsrf(c), notice, error }),
+      );
+    });
+
+    app.post(`${prefix}/login`, async (c) => {
+      const render = (error: string, status: number) =>
+        page(
+          c,
+          loginHtml(lang, config, { kind: "team", csrf: sessions.loginCsrf(c), error }),
+          status,
+        );
+      const r = loginRate(c);
+      if (!r.allowed) {
+        c.header("Retry-After", String(r.retryAfterSec));
+        return render(t.login.limited, 429);
+      }
+      const form = await formOf(c);
+      if (!sameOrigin(c, config.publicUrl) || !sessions.checkLoginCsrf(c, field(form, "_csrf"))) {
+        return render(t.login.csrf, 403);
+      }
+      const team = teams.byTeamKey(field(form, "key").trim());
+      if (!team) return render(t.login.invalid, 401);
+      sessions.start(c, "team", fingerprint(team.keyHash), team.id);
+      return c.redirect(href("/team"), 303);
+    });
+
+    app.post(`${prefix}/logout`, async (c) => {
+      const s = sessions.read(c);
+      if (s) {
+        const form = await formOf(c);
+        if (!sameOrigin(c, config.publicUrl) || !sessions.checkCsrf(s, field(form, "_csrf"))) {
+          return forbidden(c, lang, href("/"));
+        }
+        sessions.end(c, s);
+        return c.redirect(href(s.role === "admin" ? "/admin/login?out=1" : "/login?out=1"), 303);
+      }
+      return c.redirect(href("/login"), 303);
+    });
+
+    // ---- team dashboard -----------------------------------------------------------
+    const needTeam = (c: Context) => {
+      const ts = teamSession(c);
+      if (ts) return ts;
+      if (wantsJson(c)) {
+        return c.json({ error: { code: "UNAUTHORIZED", message: t.login.expired } }, 401);
+      }
+      return c.redirect(href(sessions.hasCookie(c) ? "/login?expired=1" : "/login"), 303);
+    };
+    const ownSite = async (c: Context, team: Team) => {
+      const m = await store.get(c.req.param("id") ?? "");
+      return m && m.teamId === team.id && live(m) ? m : null;
+    };
+    const notYours = (c: Context, s: Session) =>
+      done(c, s, href("/team"), { kind: "err", text: t.team.notYours });
+    const uploadErr = (err: unknown): string => {
+      if (err instanceof UploadError)
+        return err.path ? `${err.message} (${err.path})` : err.message;
+      throw err;
+    };
+
+    app.get(`${prefix}/team`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const sites = (await store.list())
+        .filter((m) => m.teamId === team.id && live(m))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .map((m) => teamRow(m, team));
+      return page(
+        c,
+        teamHtml(lang, config, {
+          team,
+          backendConfigured: !!backend,
+          sites,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+
+    app.post(`${prefix}/team/sites`, d.uploadLimit, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const form = await guardPost(c, s, lang, href("/team"));
+      if (form instanceof Response) return form;
+      const limited = await d.uploadRate(c);
+      if (limited) return done(c, s, href("/team"), { kind: "err", text: t.tooMany });
+      try {
+        const { entries, ttl } = await d.readUpload(c);
+        const { meta } = await d.createSite(entries, ttl, team);
+        return done(c, s, href("/team"), {
+          kind: "ok",
+          text: t.team.published,
+          link: d.siteUrl(meta.id),
+        });
+      } catch (err) {
+        return done(c, s, href("/team"), { kind: "err", text: uploadErr(err) });
+      }
+    });
+
+    app.get(`${prefix}/team/sites/:id`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const m = await ownSite(c, team);
+      if (!m) return notYours(c, s);
+      let backendBrowser: Parameters<typeof teamSiteHtml>[2]["backendBrowser"] = {
+        state: "off",
+        ...(team.backend && !backend ? { reason: t.team.backendNotConfigured } : {}),
+      };
+      if (backend && (team.backend || config.backend.guestAccess)) {
+        const base = `${config.publicUrl}/api/sites/${m.id}/files`;
+        try {
+          const [keys, files] = await Promise.all([
+            backend.kvList(m.id, config.backend.maxKeys),
+            backend.filesList(m.id, config.backend.maxFiles),
+          ]);
+          const shown = keys.slice(0, KV_PREVIEW);
+          const values = await Promise.all(shown.map((k) => backend.kvGet(m.id, k)));
+          backendBrowser = {
+            state: "on",
+            kv: shown.map((key, i) => {
+              const v = values[i];
+              return {
+                key,
+                value:
+                  v === undefined
+                    ? undefined
+                    : v.length > VALUE_PREVIEW
+                      ? `${v.slice(0, VALUE_PREVIEW)}…`
+                      : v,
+              };
+            }),
+            moreKeys: Math.max(0, keys.length - shown.length),
+            files: files.map((f) => ({ ...f, url: `${base}/${f.id}` })),
+          };
+        } catch (err) {
+          console.error(`[dashboard] backend read for ${m.id} failed`, err);
+          backendBrowser = { state: "on", kv: [], moreKeys: 0, files: [], error: t.team.failed };
+        }
+      }
+      const site = {
+        ...teamRow(m, team),
+        files: Object.entries(m.files)
+          .map(([p, f]) => [p, f.size] as [string, number])
+          .sort((a, b) => a[0].localeCompare(b[0])),
+        ceiling: new Date(d.ceilingOf(m)).toISOString(),
+      };
+      return page(
+        c,
+        teamSiteHtml(lang, config, {
+          team,
+          backendConfigured: !!backend,
+          sites: [],
+          site,
+          backendBrowser,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+
+    /** A POST on one of the team's own sites. */
+    const sitePost = (
+      path: string,
+      fn: (
+        c: Context,
+        ctx: { s: Session; team: Team; m: SiteMeta; form: FormData; back: string },
+      ) => Promise<Response>,
+      upload = false,
+    ) => {
+      const handler = async (c: Context) => {
+        const ts = needTeam(c);
+        if (ts instanceof Response) return ts;
+        const { s, team } = ts;
+        const back = href(`/team/sites/${c.req.param("id")}`);
+        const form = await guardPost(c, s, lang, back);
+        if (form instanceof Response) return form;
+        const m = await ownSite(c, team);
+        if (!m) return notYours(c, s);
+        return fn(c, { s, team, m, form, back });
+      };
+      if (upload) app.post(`${prefix}/team/sites/:id/${path}`, d.uploadLimit, handler);
+      else app.post(`${prefix}/team/sites/:id/${path}`, handler);
+    };
+
+    sitePost(
+      "replace",
+      async (c, { s, m, back }) => {
+        const limited = await d.uploadRate(c);
+        if (limited) return done(c, s, back, { kind: "err", text: t.tooMany });
+        try {
+          const { entries } = await d.readUpload(c);
+          await d.replaceSite(m, entries);
+          return done(c, s, back, { kind: "ok", text: t.team.replaced, link: d.siteUrl(m.id) });
+        } catch (err) {
+          return done(c, s, back, { kind: "err", text: uploadErr(err) });
+        }
+      },
+      true,
+    );
+
+    sitePost("extend", async (c, { s, m, form, back }) => {
+      await d.extendSite(m, field(form, "ttlHours"));
+      return done(c, s, back, { kind: "ok", text: t.team.extended });
+    });
+
+    sitePost("delete", async (c, { s, m }) => {
+      await d.deleteSite(m.id);
+      return done(c, s, href("/team"), { kind: "ok", text: t.team.deleted });
+    });
+
+    sitePost("listing", async (c, { s, m, form, back }) => {
+      if (field(form, "listed") === "1") delete m.unlisted;
+      else m.unlisted = true;
+      m.updatedAt = new Date(now()).toISOString();
+      await store.updateMeta(m);
+      d.invalidateDirectory();
+      return done(c, s, back, { kind: "ok", text: t.team.listingSaved });
+    });
+
+    const backendFor = (team: Team) =>
+      backend && (team.backend || config.backend.guestAccess) ? backend : null;
+
+    sitePost("kv/delete", async (c, { s, team, m, form, back }) => {
+      const b = backendFor(team);
+      const key = field(form, "key");
+      if (b && /^[A-Za-z0-9._:-]{1,128}$/.test(key)) await b.kvDelete(m.id, key);
+      return done(c, s, back, { kind: "ok", text: t.team.keyDeleted });
+    });
+
+    sitePost("files/delete", async (c, { s, team, m, form, back }) => {
+      const b = backendFor(team);
+      const id = field(form, "fileId");
+      if (b && /^[A-Za-z0-9._-]{1,36}$/.test(id)) await b.fileDelete(m.id, id);
+      return done(c, s, back, { kind: "ok", text: t.team.fileDeleted });
+    });
+
+    // ---- admin ----------------------------------------------------------------------
+    app.get(`${prefix}/admin/login`, (c) => {
+      if (adminSession(c)) return c.redirect(href("/admin"), 303);
+      const notice = c.req.query("out") ? t.login.signedOut : undefined;
+      const error = c.req.query("expired") ? t.login.expired : undefined;
+      return page(
+        c,
+        loginHtml(lang, config, {
+          kind: "admin",
+          csrf: sessions.loginCsrf(c),
+          notice,
+          error,
+          disabled: !config.adminToken,
+        }),
+        config.adminToken ? 200 : 404,
+      );
+    });
+
+    app.post(`${prefix}/admin/login`, async (c) => {
+      const render = (error: string, status: number) =>
+        page(
+          c,
+          loginHtml(lang, config, {
+            kind: "admin",
+            csrf: sessions.loginCsrf(c),
+            error,
+            disabled: !config.adminToken,
+          }),
+          status,
+        );
+      if (!config.adminToken) return render(t.admin.disabled, 404);
+      const r = loginRate(c);
+      if (!r.allowed) {
+        c.header("Retry-After", String(r.retryAfterSec));
+        return render(t.login.limited, 429);
+      }
+      const form = await formOf(c);
+      if (!sameOrigin(c, config.publicUrl) || !sessions.checkLoginCsrf(c, field(form, "_csrf"))) {
+        return render(t.login.csrf, 403);
+      }
+      if (!safeEqual(field(form, "token").trim(), config.adminToken)) {
+        return render(lang === "ar" ? "رمز المسؤول غير صحيح." : "Wrong admin token.", 401);
+      }
+      sessions.start(c, "admin", fingerprint(config.adminToken));
+      return c.redirect(href("/admin"), 303);
+    });
+
+    const needAdmin = (c: Context) => {
+      const s = adminSession(c);
+      if (s) return s;
+      return c.redirect(
+        href(sessions.hasCookie(c) ? "/admin/login?expired=1" : "/admin/login"),
+        303,
+      );
+    };
+
+    app.get(`${prefix}/admin`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      const counts = await d.siteCounts();
+      return page(
+        c,
+        adminTeamsHtml(lang, config, {
+          teams: teams.list().map((x) => ({
+            id: x.id,
+            name: x.name,
+            backend: x.backend,
+            directory: x.directory,
+            keyPrefix: x.keyPrefix,
+            createdAt: x.createdAt,
+            liveSites: counts.get(x.id) ?? 0,
+          })),
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+          backendConfigured: !!backend,
+        }),
+      );
+    });
+
+    const adminPost = (
+      path: string,
+      fn: (c: Context, ctx: { s: Session; form: FormData }) => Promise<Response>,
+    ) => {
+      app.post(`${prefix}${path}`, async (c) => {
+        const s = needAdmin(c);
+        if (s instanceof Response) return s;
+        const form = await guardPost(c, s, lang, href("/admin"));
+        if (form instanceof Response) return form;
+        return fn(c, { s, form });
+      });
+    };
+    const keyFlash = (text: string, key: string): Flash => ({
+      kind: "ok",
+      text,
+      secret: { label: t.admin.newKey, note: t.admin.newKeyNote, value: key },
+    });
+
+    adminPost("/admin/teams", async (c, { s, form }) => {
+      const name = cleanTeamName(field(form, "name"));
+      if (!name) return done(c, s, href("/admin"), { kind: "err", text: t.badRequest });
+      const { key } = await teams.create(
+        name,
+        field(form, "backend") === "1",
+        now(),
+        field(form, "directory") === "1",
+      );
+      d.invalidateDirectory();
+      return done(c, s, href("/admin"), keyFlash(t.admin.created, key));
+    });
+
+    adminPost("/admin/teams/:id/update", async (c, { s, form }) => {
+      const patch: { backend?: boolean; directory?: boolean; name?: string } = {};
+      for (const k of ["backend", "directory"] as const) {
+        const v = field(form, k);
+        if (v === "1" || v === "0") patch[k] = v === "1";
+      }
+      if (form.has("name")) {
+        const name = cleanTeamName(field(form, "name"));
+        if (name) patch.name = name;
+      }
+      const team = await teams.update(c.req.param("id") ?? "", patch, now());
+      if (!team) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
+      d.invalidateDirectory();
+      return done(c, s, href("/admin"), { kind: "ok", text: t.admin.saved });
+    });
+
+    adminPost("/admin/teams/:id/rotate", async (c, { s }) => {
+      const r = await teams.rotate(c.req.param("id") ?? "", now());
+      if (!r) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
+      return done(c, s, href("/admin"), keyFlash(t.admin.rotated, r.key));
+    });
+
+    adminPost("/admin/teams/:id/delete", async (c, { s, form }) => {
+      const id = c.req.param("id") ?? "";
+      if (!teams.get(id)) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
+      if (field(form, "sites") === "delete") {
+        for (const m of await store.list()) if (m.teamId === id) await d.deleteSite(m.id);
+      }
+      await teams.delete(id);
+      d.invalidateDirectory();
+      return done(c, s, href("/admin"), { kind: "ok", text: t.admin.deleted });
+    });
+
+    const ownerFilter = (raw: string | undefined) =>
+      raw === "guest" || (raw && teams.get(raw)) ? raw : "all";
+
+    app.get(`${prefix}/admin/sites`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      const owner = ownerFilter(c.req.query("owner"));
+      const sites = (await store.list())
+        .filter((m) => live(m))
+        .filter((m) =>
+          owner === "all" ? true : owner === "guest" ? !teams.get(m.teamId) : m.teamId === owner,
+        )
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .map((m) => {
+          const tm = teams.get(m.teamId);
+          return {
+            id: m.id,
+            title: m.title || m.id,
+            url: d.siteUrl(m.id),
+            owner: tm?.name ?? null,
+            ownerId: tm?.id ?? null,
+            createdAt: m.createdAt,
+            expiresAt: m.expiresAt,
+            totalBytes: m.totalBytes,
+          };
+        });
+      return page(
+        c,
+        adminSitesHtml(lang, config, {
+          sites,
+          teams: teams.list().map((x) => ({ id: x.id, name: x.name })),
+          owner,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+
+    adminPost("/admin/sites/:id/delete", async (c, { s, form }) => {
+      const owner = ownerFilter(field(form, "owner"));
+      const back = href(`/admin/sites${owner === "all" ? "" : `?owner=${owner}`}`);
+      const id = c.req.param("id") ?? "";
+      if (!(await store.exists(id))) return done(c, s, back, { kind: "err", text: t.notFound });
+      await d.deleteSite(id);
+      return done(c, s, back, { kind: "ok", text: t.admin.siteDeleted });
+    });
+  }
+}

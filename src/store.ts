@@ -18,6 +18,8 @@ export interface SiteMeta {
   teamId?: string;
   /** <title> of index.html, if any (shown in the public directory). */
   title?: string;
+  /** The team hid this site from the public directory (team sites only). */
+  unlisted?: boolean;
   fileCount: number;
   totalBytes: number;
   files: Record<string, SiteFile>;

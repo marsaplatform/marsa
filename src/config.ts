@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 /** Runtime configuration, read once from environment variables. See .env.example. */
 export interface Config {
   port: number;
@@ -26,6 +28,24 @@ export interface Config {
   /** Optional Cloudflare-backed data/files backend (Workers KV + R2). null = off (the default). */
   cloudflare: CloudflareConfig | null;
   backend: BackendLimits;
+  /** Browser sign-in for teams and the admin (signed session cookies). */
+  sessions: SessionConfig;
+}
+
+export interface SessionConfig {
+  /**
+   * HMAC key for session cookies and CSRF tokens (>= 32 chars). When empty a
+   * random key is generated at start, so sessions end on every restart.
+   */
+  secret: string;
+  /** True when SESSION_SECRET was not set and a random one was generated. */
+  ephemeral: boolean;
+  /** Team session lifetime, in hours (default 168 = 7 days). */
+  teamTtlHours: number;
+  /** Admin session lifetime, in hours (default 12). */
+  adminTtlHours: number;
+  /** Sign-in attempts allowed per client IP per 15 minutes. */
+  loginAttemptsPer15Min: number;
 }
 
 export interface CloudflareConfig {
@@ -103,7 +123,17 @@ export function loadConfig(env: Env = process.env): Config {
       maxKeys: int(env, "BACKEND_MAX_KEYS", 1000, 1),
       maxFiles: int(env, "BACKEND_MAX_FILES", 100, 1),
     },
+    sessions: {
+      secret: env.SESSION_SECRET?.trim() || randomBytes(32).toString("hex"),
+      ephemeral: !env.SESSION_SECRET?.trim(),
+      teamTtlHours: int(env, "SESSION_TTL_HOURS", 168, 1),
+      adminTtlHours: int(env, "ADMIN_SESSION_TTL_HOURS", 12, 1),
+      loginAttemptsPer15Min: int(env, "LOGIN_ATTEMPTS_PER_15_MIN", 10, 1),
+    },
   };
+  if (cfg.sessions.secret.length < 32) {
+    throw new Error("SESSION_SECRET must be at least 32 characters (or empty for a random one)");
+  }
   if (cfg.minTtlHours > cfg.maxTtlHours) {
     throw new Error("MIN_TTL_HOURS must be <= MAX_TTL_HOURS");
   }

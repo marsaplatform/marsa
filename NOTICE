@@ -22,3 +22,9 @@ Third-party dependencies
 
 Runtime dependencies: hono (MIT), @hono/node-server (MIT), yauzl (MIT).
 They are fetched from npm under their own licenses.
+
+Fonts
+-----
+public/fonts/zad/*.woff2: "Zad" by Ahmed Morsy, a web-optimized subset derivative of IBM Plex Sans
+Arabic (Copyright (c) 2017 IBM Corp.). Licensed under the SIL Open Font License 1.1; see
+public/fonts/zad/OFL.txt.

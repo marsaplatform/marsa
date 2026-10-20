@@ -1,17 +1,62 @@
-import { APP_NAME } from "./brand.js";
+import { PRODUCT_NAME } from "./brand.js";
 
 export type Lang = "en" | "ar";
 
+export interface LimitValues {
+  maxFileMb: number;
+  maxSiteMb: number;
+  maxFiles: number;
+  defaultTtl: string;
+  maxTtl: string;
+  uploadsPerHour: number;
+}
+
+/** Wrap Latin/number runs in a bidi isolate so they read correctly inside Arabic text. */
+const iso = (s: string | number) => `\u2066${s}\u2069`;
+
+export function hoursLabel(lang: Lang, h: number): string {
+  if (lang === "ar") {
+    if (h === 1) return "ساعة واحدة";
+    if (h === 2) return "ساعتان";
+    if (h < 24) return h <= 10 ? `${h} ساعات` : `${h} ساعة`;
+    const d = h / 24;
+    if (d === 1) return "يوم واحد";
+    if (d === 2) return "يومان";
+    return Number.isInteger(d) && d <= 10 ? `${d} أيام` : `${h} ساعة`;
+  }
+  if (h < 24) return h === 1 ? "1 hour" : `${h} hours`;
+  const d = h / 24;
+  if (!Number.isInteger(d)) return `${h} hours`;
+  return d === 1 ? "1 day" : `${d} days`;
+}
+
+export function bytesLabel(lang: Lang, n: number): string {
+  const unit = lang === "ar" ? ["بايت", "ك.ب", "م.ب"] : ["B", "KB", "MB"];
+  if (n < 1024) return `${n} ${unit[0]}`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} ${unit[1]}`;
+  return `${(n / 1024 / 1024).toFixed(1)} ${unit[2]}`;
+}
+
 export interface Strings {
   dir: "ltr" | "rtl";
+  product: string;
   switchLabel: string;
   skip: string;
-  nav: { home: string; try: string; docs: string; api: string };
-  hero: { eyebrow: string; title: string; sub: string; ctaTry: string; ctaDocs: string };
+  nav: {
+    label: string;
+    home: string;
+    publish: string;
+    docs: string;
+    signIn: string;
+    platform: string;
+  };
+  hero: { eyebrow: string; title: string; sub: string; ctaTry: string; ctaTeam: string };
+  strip: string[];
   why: { title: string; items: [string, string][] };
   how: { title: string; steps: [string, string][] };
   uses: { title: string; sub: string; items: [string, string][]; more: string };
-  agents: { title: string; sub: string; llms: string; openapi: string };
+  teamsBand: { title: string; sub: string; cta: string; docs: string };
+  agents: { title: string; sub: string; llms: string; openapi: string; guide: string };
   try: {
     title: string;
     sub: string;
@@ -24,6 +69,7 @@ export interface Strings {
     tokenNote: string;
     mine: string;
     none: string;
+    teamHint: string;
   };
   limits: {
     title: string;
@@ -40,12 +86,110 @@ export interface Strings {
     expires: string;
     pages: (n: number) => string;
   };
-  admin: {
+  footer: { about: string; note: string; product: string; resources: string; platform: string };
+  docs: { title: string; sub: string; englishOnly: string; back: string };
+  notFound: string;
+  notFoundSub: string;
+  gone: string;
+  goneSub: string;
+  home: string;
+  tooMany: string;
+  badRequest: string;
+  common: {
+    copy: string;
+    copied: string;
+    del: string;
+    save: string;
+    cancel: string;
+    signOut: string;
+    on: string;
+    off: string;
+    guest: string;
+    size: string;
+    expires: string;
+    created: string;
+    actions: string;
+    link: string;
+    title: string;
+    open: string;
+    files: (n: number) => string;
+    confirm: string;
+  };
+  login: {
     title: string;
     sub: string;
+    keyLabel: string;
+    keyHelp: string;
+    submit: string;
+    invalid: string;
+    limited: string;
+    csrf: string;
+    noKey: string;
+    adminLink: string;
+    signedOut: string;
+    expired: string;
+  };
+  team: {
+    eyebrow: string;
+    sites: string;
+    backend: string;
+    backendOn: string;
+    backendOff: string;
+    backendNotConfigured: string;
+    directoryOn: string;
+    directoryOff: string;
+    sitesCount: (n: number) => string;
+    empty: string;
+    emptySub: string;
+    publishTitle: string;
+    publishSub: string;
+    publish: string;
+    listed: string;
+    hidden: string;
+    show: string;
+    hide: string;
+    replace: string;
+    replaceHelp: string;
+    extend: string;
+    extendTo: string;
+    manage: string;
+    back: string;
+    confirmDelete: string;
+    published: string;
+    replaced: string;
+    extended: string;
+    deleted: string;
+    listingSaved: string;
+    notYours: string;
+    capped: string;
+    filesTitle: string;
+    kvTitle: string;
+    kvEmpty: string;
+    backendFilesTitle: string;
+    backendFilesEmpty: string;
+    backendBrowserOff: string;
+    key: string;
+    value: string;
+    moreKeys: (n: number) => string;
+    keyDeleted: string;
+    fileDeleted: string;
+    agentsTitle: string;
+    agentsSub: string;
+    uploading: string;
+    failed: string;
+    pickZip: string;
+  };
+  admin: {
+    eyebrow: string;
+    title: string;
+    sub: string;
+    loginTitle: string;
+    loginSub: string;
     tokenLabel: string;
-    connect: string;
-    signOut: string;
+    disabled: string;
+    tabsLabel: string;
+    teamsTab: string;
+    sitesTab: string;
     teams: string;
     create: string;
     name: string;
@@ -53,137 +197,142 @@ export interface Strings {
     directory: string;
     liveSites: string;
     key: string;
-    actions: string;
     rotate: string;
-    del: string;
     none: string;
     newKey: string;
     newKeyNote: string;
+    confirmRotate: string;
+    confirmDelete: string;
+    alsoDeleteSites: string;
+    created: string;
+    saved: string;
+    rotated: string;
+    deleted: string;
+    siteDeleted: string;
     howTitle: string;
     how: string[];
+    sitesTitle: string;
+    sitesSub: string;
+    filter: string;
+    all: string;
+    guests: string;
+    apply: string;
+    owner: string;
+    noSites: string;
+    total: (n: number, size: string) => string;
   };
-  footer: string;
-  docs: { title: string; sub: string; englishOnly: string; back: string };
-  notFound: string;
-  gone: string;
-  home: string;
-}
-
-export interface LimitValues {
-  maxFileMb: number;
-  maxSiteMb: number;
-  maxFiles: number;
-  defaultTtl: string;
-  maxTtl: string;
-  uploadsPerHour: number;
-}
-
-/** Wrap Latin/number runs in a bidi isolate so they read correctly inside Arabic text. */
-const iso = (s: string | number) => `\u2066${s}\u2069`;
-
-export function hoursLabel(lang: Lang, h: number): string {
-  if (lang === "ar") return h < 24 ? `${h} ساعة` : h === 24 ? "يوم" : `${h / 24} أيام`;
-  if (h < 24) return h === 1 ? "1 hour" : `${h} hours`;
-  return h === 24 ? "1 day" : `${h / 24} days`;
 }
 
 const en: Strings = {
   dir: "ltr",
+  product: PRODUCT_NAME.en,
   switchLabel: "عربي",
   skip: "Skip to content",
-  nav: { home: "Home", try: "Try it", docs: "Guide", api: "API" },
-  hero: {
-    eyebrow: "Open source · No account · Expiring links",
-    title: "A harbor for your work. Land it, share it, let it go.",
-    sub: `${APP_NAME} (Arabic for "harbor") is where you, or your AI agent, drop a static site, an HTML report or a prototype and get a shareable link in seconds. No sign-up. Links clean themselves up.`,
-    ctaTry: "Drop files now",
-    ctaDocs: "Read the guide",
+  nav: {
+    label: "Main",
+    home: "Home",
+    publish: "Publish",
+    docs: "Guide",
+    signIn: "Team sign-in",
+    platform: "Marsa platform",
   },
+  hero: {
+    eyebrow: "Open source · Arabic first · Links that expire",
+    title: "A link for work worth sharing.",
+    sub: "Publish an HTML report, a static site or a prototype and get a public link in seconds. Built for civil-society, digital-rights and free-expression teams, and for the AI agents that work with them.",
+    ctaTry: "Publish now",
+    ctaTeam: "Team sign-in",
+  },
+  strip: ["No account for guests", "Teams with their own dashboard", "API and agents", "MIT"],
   why: {
-    title: `Why ${APP_NAME}?`,
+    title: "Small on purpose",
     items: [
       [
-        "No account, no friction",
-        "Nobody has to sign up, verify an email or pick a plan to see your work. Drop, copy the link, send it.",
+        "No account needed",
+        "Anyone you share with opens the link in a browser. No sign-up, no app, no tracking.",
       ],
       [
-        "Made for AI agents",
-        "One HTTP call turns a folder or ZIP into a URL. Agents get a link and a token back as JSON, plus /llms.txt and an OpenAPI spec.",
+        "Made for agents too",
+        "One HTTP call turns a folder or ZIP into a link. Agents get JSON back, plus /llms.txt and an OpenAPI spec.",
       ],
       [
         "Nothing lingers",
-        "Every link has an expiry, from one hour to a week. When it ends, the files are deleted from disk. You can delete earlier with your token.",
+        "Every link expires, from one hour to a week. When it ends the files are deleted from the server.",
       ],
     ],
   },
   how: {
     title: "How it works",
     steps: [
-      ["Drop", "Drag in files, a folder or a .zip, or POST them to the API."],
-      ["Share", "You get a public link and a private edit token. Send the link to anyone."],
+      ["Drop", "Drag in files, a folder or a .zip, or send them to the API."],
+      ["Share", "You get a public link. Teams manage their sites from a dashboard."],
       [
         "It expires",
-        "When time is up the site is removed. Update, extend or delete it with the token.",
+        "When the time is up the site is removed. Extend, update or delete it earlier.",
       ],
     ],
   },
   uses: {
-    title: "What people use it for",
-    sub: "Anything that is static HTML, CSS, JS and assets.",
+    title: "What teams use it for",
+    sub: "Anything that is static HTML, CSS, JavaScript and assets.",
     items: [
       [
-        "An agent shares an HTML report",
-        "Your AI agent builds a report or dashboard, zips it and posts back a link instead of a wall of text.",
+        "A report for partners",
+        "Share a research brief or monitoring report as a readable page instead of a heavy attachment.",
       ],
       [
-        "A prototype for a client",
-        "Send a clickable demo for review without setting up hosting or giving them an account.",
+        "A campaign or event page",
+        "Agenda, map and contacts for a workshop or a campaign moment, gone the week after.",
       ],
       [
-        "A temporary event page",
-        "Schedule, map and RSVP info for a meetup that is gone the week after.",
+        "A prototype for review",
+        "Send a clickable demo to colleagues without setting up hosting or accounts.",
       ],
       [
-        "A class assignment",
-        "Students publish their HTML/CSS homework and hand in a link; the teacher reviews it in a browser.",
-      ],
-      [
-        "A preview from CI",
-        "Every pull request gets a preview link of its static build, posted as a comment.",
+        "An agent shares its output",
+        "Your AI agent builds a dashboard, zips it and posts back a link instead of a wall of text.",
       ],
     ],
     more: "See the examples",
+  },
+  teamsBand: {
+    title: "Working as a team?",
+    sub: "Your admin gives the team a key. Sign in with it to publish, update, extend and remove your sites, and, if enabled, to see the data and files your pages store.",
+    cta: "Team sign-in",
+    docs: "How teams work",
   },
   agents: {
     title: "For AI agents",
     sub: "Give your agent this snippet or point it at /llms.txt. It zips the output, posts it and returns the link.",
     llms: "llms.txt",
     openapi: "OpenAPI spec",
+    guide: "Agent guide",
   },
   try: {
-    title: "Try it now",
-    sub: "Everything you upload is public to anyone with the link.",
-    drop: "Drop files, a folder, or a .zip here",
+    title: "Publish a page",
+    sub: "Everything you publish is public to anyone with the link. Don't upload secrets or personal data.",
+    drop: "Drop files, a folder or a .zip here",
     pickFiles: "Choose files",
-    pickDir: "Choose folder",
+    pickDir: "Choose a folder",
     expires: "Expires after",
     ready: "Your link is ready",
     copy: "Copy link",
     tokenNote:
-      "Edit/delete token. It's saved in this browser; keep a copy if you want to manage the site elsewhere.",
-    mine: "Your drops in this browser",
+      "Edit token. It is saved in this browser; keep a copy if you want to manage the site from elsewhere.",
+    mine: "Published from this browser",
     none: "Nothing yet.",
+    teamHint: "Part of a team? Sign in to publish to your team's dashboard.",
   },
   limits: {
-    title: "Limits & privacy",
-    sub: "Small on purpose, so it stays fast and hard to abuse.",
+    title: "Limits and privacy",
+    sub: "Kept small so it stays fast and hard to abuse.",
     privacyTitle: "Privacy",
     privacy: [
-      "Anyone with the link can view the site. Don't upload secrets or personal data.",
-      "No accounts, no tracking cookies, no analytics.",
+      "Anyone with the link can view the site.",
+      "No tracking cookies and no analytics. Teams get one sign-in cookie, nothing else.",
       "Your IP is used only in memory for rate limits. It is not stored.",
-      "Uploaded pages run in a browser sandbox and can't reach this app or your token.",
-      "Expired and deleted sites are removed from disk.",
+      "Published pages run in a browser sandbox and can't reach this app or your session.",
+      "Expired and deleted sites are removed from the server.",
     ],
     limitItems: (l) => [
       `Up to ${l.maxFiles} files, ${l.maxFileMb} MB per file, ${l.maxSiteMb} MB per site`,
@@ -200,190 +349,434 @@ const en: Strings = {
   directory: {
     title: "Published by teams",
     sub: "Live pages that teams on this instance chose to share. Each link expires on its own.",
-    empty: "No team pages are live right now. Check back soon.",
+    empty: "No team pages are live right now.",
     expires: "Expires",
     pages: (n) => (n === 1 ? "1 page" : `${n} pages`),
   },
-  admin: {
-    title: "Admin: teams",
-    sub: "Create teams, give each one a team key, and decide which teams may use the data/files backend and which appear in the public directory.",
-    tokenLabel: "Admin token",
-    connect: "Open",
-    signOut: "Sign out",
-    teams: "Teams",
-    create: "Create team",
-    name: "Team name",
-    backend: "Backend access",
-    directory: "Show in public directory",
-    liveSites: "Live sites",
-    key: "Key",
-    actions: "Actions",
-    rotate: "New key",
-    del: "Delete",
-    none: "No teams yet.",
-    newKey: "Team key (shown only once)",
-    newKeyNote:
-      "Copy it now and give it to the team. Uploads sent with this key belong to the team. Marsa stores only a hash.",
-    howTitle: "How teams upload",
-    how: [
-      "Send the team key with the upload: header X-Team-Key: <key> (or Authorization: Bearer <key>).",
-      "Uploads without a key stay guest uploads: no backend, never listed.",
-      "Turning backend access off blocks that team's sites from KV/files immediately (403 BACKEND_NOT_ALLOWED).",
-      "Deleting a team leaves its sites up as ordinary links until they expire, unless you also delete them.",
-    ],
+  footer: {
+    about:
+      "Marsa Spaces is part of Marsa: open knowledge and tools for civil-society, digital-rights and free-expression teams.",
+    note: "Open source (MIT). Published content is public to anyone with the link.",
+    product: "Spaces",
+    resources: "For developers",
+    platform: "Marsa platform",
   },
-  footer: `${APP_NAME} is open source (MIT). Uploaded content is public to anyone with the link.`,
   docs: {
     title: "Guide",
-    sub: `Everything you need to use ${APP_NAME} from a browser, a script, an AI agent or CI, and to host your own.`,
+    sub: "Everything you need to use Marsa Spaces from a browser, a script, an AI agent or CI, and to host your own.",
     englishOnly: "",
     back: "All guides",
   },
-  notFound: "This link doesn't exist.",
-  gone: "This link has expired and its files were deleted.",
-  home: "Go to the home page",
+  notFound: "This page doesn't exist.",
+  notFoundSub: "The link may be mistyped, or the site was removed.",
+  gone: "This link has expired.",
+  goneSub: "Its files were deleted when its time ran out.",
+  home: "Back to the home page",
+  tooMany: "Too many attempts. Wait a few minutes and try again.",
+  badRequest: "This form has expired. Reload the page and try again.",
+  common: {
+    copy: "Copy",
+    copied: "Copied",
+    del: "Delete",
+    save: "Save",
+    cancel: "Cancel",
+    signOut: "Sign out",
+    on: "On",
+    off: "Off",
+    guest: "Guest",
+    size: "Size",
+    expires: "Expires",
+    created: "Created",
+    actions: "Actions",
+    link: "Link",
+    title: "Title",
+    open: "Open",
+    files: (n) => (n === 1 ? "1 file" : `${n} files`),
+    confirm: "Are you sure?",
+  },
+  login: {
+    title: "Team sign-in",
+    sub: "Paste the team key your admin gave you. You stay signed in on this browser for a week, or until you sign out.",
+    keyLabel: "Team key",
+    keyHelp: "Starts with marsa_team_. The key is never shown again after it is created.",
+    submit: "Sign in",
+    invalid: "That key doesn't match any team. Check it, or ask your admin for a new one.",
+    limited: "Too many sign-in attempts from your network. Try again in a few minutes.",
+    csrf: "This form has expired. Please try again.",
+    noKey: "No key? Teams are created by the admin of this instance.",
+    adminLink: "Admin sign-in",
+    signedOut: "You are signed out.",
+    expired: "Your session ended. Please sign in again.",
+  },
+  team: {
+    eyebrow: "Team dashboard",
+    sites: "Live sites",
+    backend: "Data and files",
+    backendOn: "Enabled for this team",
+    backendOff: "Not enabled for this team",
+    backendNotConfigured: "Enabled, but this server has no backend configured yet",
+    directoryOn: "Your sites appear on the home page",
+    directoryOff: "Your sites are not listed on the home page",
+    sitesCount: (n) => (n === 1 ? "1 live site" : `${n} live sites`),
+    empty: "No live sites yet.",
+    emptySub: "Publish your first page below. It will show up here with its link and expiry.",
+    publishTitle: "Publish a new site",
+    publishSub: "Drop files, a folder or a single .zip. index.html is the start page.",
+    publish: "Publish",
+    listed: "Listed",
+    hidden: "Hidden",
+    show: "Show on home page",
+    hide: "Hide from home page",
+    replace: "Replace files",
+    replaceHelp: "Upload a new version. The link stays the same.",
+    extend: "Extend",
+    extendTo: "Expire after",
+    manage: "Manage",
+    back: "All sites",
+    confirmDelete: "Delete this site now? The link stops working and its data is removed.",
+    published: "Published. Your link is live.",
+    replaced: "Files replaced. Same link, new content.",
+    extended: "Expiry updated.",
+    deleted: "Site deleted.",
+    listingSaved: "Saved.",
+    notYours: "This site doesn't exist or doesn't belong to your team.",
+    capped: "A link can live at most the maximum time from when it was first published.",
+    filesTitle: "Published files",
+    kvTitle: "Stored values (KV)",
+    kvEmpty: "No values stored.",
+    backendFilesTitle: "Uploaded files (backend)",
+    backendFilesEmpty: "No files uploaded.",
+    backendBrowserOff: "Data and files are not available for this site.",
+    key: "Key",
+    value: "Value",
+    moreKeys: (n) => `${n} more keys not shown.`,
+    keyDeleted: "Value deleted.",
+    fileDeleted: "File deleted.",
+    agentsTitle: "Publish from an agent or script",
+    agentsSub:
+      "Use your team key in the X-Team-Key header. Never paste the key into a public page or repository.",
+    uploading: "Publishing…",
+    failed: "Publishing failed",
+    pickZip: "Choose files or a .zip",
+  },
+  admin: {
+    eyebrow: "Admin",
+    title: "Teams",
+    sub: "Create teams, give each a key, and decide which teams may use data and files and which appear on the home page.",
+    loginTitle: "Admin sign-in",
+    loginSub: "Paste the admin token of this instance. Admin sessions last 12 hours.",
+    tokenLabel: "Admin token",
+    disabled: "Admin is disabled on this instance (ADMIN_TOKEN is not set).",
+    tabsLabel: "Admin sections",
+    teamsTab: "Teams",
+    sitesTab: "All sites",
+    teams: "Teams",
+    create: "Create team",
+    name: "Team name",
+    backend: "Data and files",
+    directory: "On home page",
+    liveSites: "Live sites",
+    key: "Key",
+    rotate: "New key",
+    none: "No teams yet. Create the first one below.",
+    newKey: "Team key, shown only once",
+    newKeyNote:
+      "Copy it now and give it to the team. They sign in with it at /login, and agents send it as X-Team-Key. Marsa stores only a hash.",
+    confirmRotate: "Make a new key? The old key and its sessions stop working right away.",
+    confirmDelete: "Delete this team? Its members are signed out.",
+    alsoDeleteSites: "Also delete its sites",
+    created: "Team created.",
+    saved: "Saved.",
+    rotated: "New key created. The old key no longer works.",
+    deleted: "Team deleted.",
+    siteDeleted: "Site deleted.",
+    howTitle: "How teams work",
+    how: [
+      "A team member signs in at /login with the team key and manages the team's sites from the dashboard.",
+      "Agents send the same key in the X-Team-Key header.",
+      "Uploads without a key are guest uploads: no backend, never listed.",
+      "Turning data and files off blocks that team's sites from KV and files at once.",
+    ],
+    sitesTitle: "All live sites",
+    sitesSub: "Every site on this instance, from teams and guests.",
+    filter: "Owner",
+    all: "Everyone",
+    guests: "Guests only",
+    apply: "Filter",
+    owner: "Owner",
+    noSites: "No sites match.",
+    total: (n, size) => `${n} site${n === 1 ? "" : "s"} · ${size}`,
+  },
 };
 
 const ar: Strings = {
   dir: "rtl",
+  product: PRODUCT_NAME.ar,
   switchLabel: "English",
-  skip: "انتقل للمحتوى",
-  nav: { home: "الرئيسية", try: "جرّب", docs: "الدليل", api: "API" },
-  hero: {
-    eyebrow: "مفتوح المصدر · من غير حساب · روابط بتنتهي لوحدها",
-    title: "مرسى لشغلك. ارسيه، شاركه، وسيبه يمشي.",
-    sub: `${iso(APP_NAME)} (يعني مَرسى) هو المكان اللي انت أو الـ AI agent بتاعك ترفعوا فيه موقع ثابت أو تقرير HTML أو نموذج أولي، وتاخدوا رابط تشاركوه في ثواني. من غير تسجيل، والروابط بتتمسح لوحدها.`,
-    ctaTry: "ارفع ملفاتك دلوقتي",
-    ctaDocs: "اقرأ الدليل",
+  skip: "تخطَّ إلى المحتوى",
+  nav: {
+    label: "القائمة الرئيسية",
+    home: "الرئيسية",
+    publish: "انشر",
+    docs: "الدليل",
+    signIn: "دخول الفرق",
+    platform: "منصة مرسى",
   },
+  hero: {
+    eyebrow: "مفتوح المصدر · العربية أولًا · روابط تنتهي تلقائيًا",
+    title: "رابط للعمل الذي يستحق المشاركة.",
+    sub: "انشر تقرير HTML أو موقعًا ثابتًا أو نموذجًا أوليًا، واحصل على رابط عام خلال ثوانٍ. صُمّمت لفرق المجتمع المدني والحقوق الرقمية وحرية التعبير، وللوكلاء الآليين الذين يعملون معها.",
+    ctaTry: "انشر الآن",
+    ctaTeam: "دخول الفرق",
+  },
+  strip: ["بلا حساب للزوار", "لوحة خاصة لكل فريق", "واجهة برمجية ووكلاء آليون", "رخصة MIT"],
   why: {
-    title: `ليه ${iso(APP_NAME)}؟`,
+    title: "صغيرة عن قصد",
     items: [
+      ["بلا حساب", "من تشارك معه الرابط يفتحه في المتصفح مباشرة. لا تسجيل، ولا تطبيق، ولا تتبّع."],
       [
-        "من غير حساب ولا تعقيد",
-        "محدش محتاج يسجّل أو يأكد إيميل أو يختار باقة علشان يشوف شغلك. ارفع، انسخ الرابط، وابعته.",
+        "مصمّمة للوكلاء الآليين أيضًا",
+        `طلب HTTP واحد يحوّل مجلدًا أو ملف ZIP إلى رابط. يحصل الوكيل على النتيجة بصيغة JSON، ومعها ${iso("/llms.txt")} ومواصفات OpenAPI.`,
       ],
-      [
-        "معمول للـ AI agents",
-        `طلب HTTP واحد بيحوّل فولدر أو ملف ZIP لرابط. الـ agent بياخد الرابط ومفتاح التعديل في JSON، ومعاهم ${iso("/llms.txt")} ومواصفات OpenAPI.`,
-      ],
-      [
-        "مفيش حاجة بتفضل",
-        "كل رابط له مدة، من ساعة لأسبوع. لما تخلص، الملفات بتتمسح من على السيرفر. وتقدر تمسحه قبلها بالمفتاح.",
-      ],
+      ["لا شيء يبقى", "لكل رابط مدة، من ساعة إلى أسبوع. حين تنتهي تُحذف الملفات من الخادم."],
     ],
   },
   how: {
-    title: "بيشتغل إزاي",
+    title: "كيف تعمل",
     steps: [
-      ["ارفع", "اسحب ملفات أو فولدر أو ملف zip، أو ابعتهم للـ API."],
-      ["شارك", "هتاخد رابط عام ومفتاح تعديل خاص بيك. ابعت الرابط لأي حد."],
-      ["بينتهي", "لما المدة تخلص الموقع بيتمسح. وتقدر تحدّثه أو تمدّه أو تمسحه بالمفتاح."],
+      ["ارفع", "اسحب ملفات أو مجلدًا أو ملف zip، أو أرسلها عبر الواجهة البرمجية."],
+      ["شارك", "تحصل على رابط عام. والفرق تدير مواقعها من لوحتها الخاصة."],
+      ["ينتهي", "حين تنتهي المدة يُحذف الموقع. ويمكنك تمديده أو تحديثه أو حذفه قبل ذلك."],
     ],
   },
   uses: {
-    title: "الناس بتستخدمه في إيه",
-    sub: "أي حاجة عبارة عن HTML وCSS وJS وملفات ثابتة.",
+    title: "كيف تستخدمها الفرق",
+    sub: "أي محتوى ثابت: HTML وCSS وJavaScript وملفات.",
     items: [
+      ["تقرير للشركاء", "شارك موجز بحث أو تقرير رصد صفحةً مقروءة بدل مرفق ثقيل."],
       [
-        "agent بيشارك تقرير HTML",
-        "الـ AI agent بيعمل تقرير أو داشبورد، يضغطه ويرجعلك رابط بدل كلام كتير.",
+        "صفحة حملة أو فعالية",
+        "البرنامج والخريطة وبيانات التواصل لورشة أو لحظة حملة، تختفي بعد أسبوع.",
       ],
-      ["نموذج أولي لعميل", "ابعت ديمو تقدر تدوس فيه للمراجعة، من غير استضافة ولا حساب للعميل."],
-      ["صفحة مؤقتة لإيفنت", "الجدول والمكان والتسجيل لميت أب، والصفحة تختفي بعدها بأسبوع."],
-      ["واجب لفصل دراسي", "الطلبة ينشروا واجب HTML/CSS ويسلّموا رابط، والمدرّس يراجعه في المتصفح."],
-      ["معاينة من الـ CI", "كل Pull Request بياخد رابط معاينة للنسخة المبنية، ويتحط كتعليق."],
+      ["نموذج أولي للمراجعة", "أرسل نموذجًا تفاعليًا لزملائك دون إعداد استضافة أو حسابات."],
+      [
+        "وكيل آلي يشارك نتيجته",
+        "يبني الوكيل لوحة بيانات، ويضغطها، ثم يعيد إليك رابطًا بدل نص طويل.",
+      ],
     ],
-    more: "شوف الأمثلة",
+    more: "شاهد الأمثلة",
+  },
+  teamsBand: {
+    title: "تعملون كفريق؟",
+    sub: "يمنح المسؤول فريقك مفتاحًا. ادخل به لتنشر مواقعك وتحدّثها وتمدّدها وتحذفها، وإن كان مفعّلًا، لتطّلع على البيانات والملفات التي تحفظها صفحاتك.",
+    cta: "دخول الفرق",
+    docs: "كيف تعمل الفرق",
   },
   agents: {
-    title: "للـ AI agents",
-    sub: `ادّي الـ agent بتاعك الكود ده أو وجّهه لـ ${iso("/llms.txt")}. هيضغط الناتج، يرفعه، ويرجعلك الرابط.`,
+    title: "للوكلاء الآليين",
+    sub: `أعطِ الوكيل هذا المقتطف أو وجّهه إلى ${iso("/llms.txt")}. سيضغط الناتج، ويرسله، ثم يعيد الرابط.`,
     llms: "llms.txt",
     openapi: "مواصفات OpenAPI",
+    guide: "دليل الوكلاء",
   },
   try: {
-    title: "جرّب دلوقتي",
-    sub: "أي حاجة بترفعها بتبقى متاحة لأي حد معاه الرابط.",
-    drop: "اسحب الملفات أو الفولدر أو ملف zip هنا",
-    pickFiles: "اختار ملفات",
-    pickDir: "اختار فولدر",
+    title: "انشر صفحة",
+    sub: "كل ما تنشره متاح لأي شخص لديه الرابط. لا ترفع أسرارًا أو بيانات شخصية.",
+    drop: "أفلت هنا ملفات أو مجلدًا أو ملف zip",
+    pickFiles: "اختر ملفات",
+    pickDir: "اختر مجلدًا",
     expires: "ينتهي بعد",
-    ready: "الرابط جاهز",
+    ready: "رابطك جاهز",
     copy: "انسخ الرابط",
     tokenNote:
-      "مفتاح التعديل والمسح. محفوظ في المتصفح ده، احتفظ بنسخة لو هتدير الموقع من مكان تاني.",
-    mine: "اللي رفعته من المتصفح ده",
-    none: "لسه مفيش.",
+      "مفتاح التعديل. محفوظ في هذا المتصفح؛ احتفظ بنسخة منه إن أردت إدارة الموقع من مكان آخر.",
+    mine: "ما نشرته من هذا المتصفح",
+    none: "لا شيء بعد.",
+    teamHint: "تعمل ضمن فريق؟ ادخل لتنشر في لوحة فريقك.",
   },
   limits: {
     title: "الحدود والخصوصية",
-    sub: "صغير بقصد، علشان يفضل سريع وصعب يتساء استخدامه.",
+    sub: "حدود صغيرة لتبقى الخدمة سريعة وصعبة الإساءة.",
     privacyTitle: "الخصوصية",
     privacy: [
-      "أي حد معاه الرابط يقدر يشوف الموقع. ماترفعش أسرار أو بيانات شخصية.",
-      "مفيش حسابات، ولا cookies للتتبع، ولا تحليلات.",
-      "الـ IP بتاعك بيستخدم في الذاكرة بس لحدود الاستخدام، ومش بيتسجّل.",
-      "الصفحات المرفوعة بتشتغل جوه sandbox في المتصفح، ومتقدرش توصل للتطبيق ولا لمفتاحك.",
-      "المواقع اللي انتهت أو اتمسحت بتتشال من على السيرفر.",
+      "أي شخص لديه الرابط يستطيع رؤية الموقع.",
+      "لا ملفات تتبّع ولا تحليلات. للفرق ملف دخول واحد فقط.",
+      "يُستخدم عنوان IP في الذاكرة فقط لحدود الاستخدام، ولا يُخزَّن.",
+      "تعمل الصفحات المنشورة داخل بيئة معزولة في المتصفح، ولا تصل إلى التطبيق أو إلى جلستك.",
+      "تُحذف المواقع المنتهية والمحذوفة من الخادم.",
     ],
     limitItems: (l) => [
-      `لحد ${iso(l.maxFiles)} ملف، و${iso(`${l.maxFileMb} MB`)} للملف، و${iso(`${l.maxSiteMb} MB`)} للموقع`,
-      `الرابط بيعيش ${l.defaultTtl} افتراضيًا، وبحد أقصى ${l.maxTtl}`,
-      `${iso(l.uploadsPerHour)} رفعة في الساعة لكل IP`,
-      "ملفات ثابتة بس: سكريبتات السيرفر والبرامج التنفيذية مرفوضة",
+      `حتى ${iso(l.maxFiles)} ملف، و${iso(`${l.maxFileMb} MB`)} للملف، و${iso(`${l.maxSiteMb} MB`)} للموقع`,
+      `يبقى الرابط ${l.defaultTtl} افتراضيًا، وبحدٍّ أقصى ${l.maxTtl}`,
+      `${iso(l.uploadsPerHour)} عملية رفع في الساعة لكل عنوان IP`,
+      "ملفات ثابتة فقط: تُرفض سكربتات الخادم والملفات التنفيذية",
     ],
   },
   selfhost: {
     title: "شغّل نسختك",
-    sub: "container واحد، وفولدر بيانات واحد، ومن غير قاعدة بيانات. ترخيص MIT.",
+    sub: "حاوية واحدة، ومجلد بيانات واحد، دون قاعدة بيانات. برخصة MIT.",
     cta: "دليل الاستضافة الذاتية",
   },
   directory: {
     title: "منشورات الفرق",
-    sub: "صفحات شغالة دلوقتي اختارت الفرق على النسخة دي إنها تشاركها. كل رابط بينتهي لوحده.",
-    empty: "مفيش صفحات فرق شغالة دلوقتي. ارجع تاني قريب.",
+    sub: "صفحات حيّة اختارت الفرق على هذه النسخة مشاركتها. ينتهي كل رابط تلقائيًا.",
+    empty: "لا توجد صفحات فرق منشورة الآن.",
     expires: "ينتهي",
-    pages: (n) =>
-      n === 1 ? "صفحة واحدة" : n === 2 ? "صفحتين" : n <= 10 ? `${iso(n)} صفحات` : `${iso(n)} صفحة`,
+    pages: (n) => (n === 1 ? "صفحة واحدة" : n === 2 ? "صفحتان" : `${n} صفحات`),
   },
-  admin: {
-    title: "الإدارة: الفرق",
-    sub: "اعمل فرق، وادّي كل فريق مفتاح خاص بيه، وحدد مين يقدر يستخدم الباك إند (البيانات والملفات) ومين يظهر في الدليل العام.",
-    tokenLabel: "مفتاح الأدمن",
-    connect: "ادخل",
-    signOut: "اخرج",
-    teams: "الفرق",
-    create: "اعمل فريق",
-    name: "اسم الفريق",
-    backend: "وصول للباك إند",
-    directory: "يظهر في الدليل العام",
-    liveSites: "مواقع شغالة",
-    key: "المفتاح",
-    actions: "إجراءات",
-    rotate: "مفتاح جديد",
-    del: "امسح",
-    none: "مفيش فرق لسه.",
-    newKey: "مفتاح الفريق (بيظهر مرة واحدة بس)",
-    newKeyNote: `انسخه دلوقتي وادّيه للفريق. أي رفع بالمفتاح ده بيتحسب على الفريق. ${iso(APP_NAME)} بيحفظ الـ hash بتاعه بس.`,
-    howTitle: "الفرق بترفع إزاي",
-    how: [
-      `ابعت مفتاح الفريق مع الرفع في الهيدر ${iso("X-Team-Key: <key>")} (أو ${iso("Authorization: Bearer <key>")}).`,
-      "الرفع من غير مفتاح بيفضل رفع ضيف: من غير باك إند، ومش بيظهر في الدليل.",
-      `لما تقفل الباك إند لفريق، مواقعه بتتمنع من الـ KV والملفات على طول (${iso("403 BACKEND_NOT_ALLOWED")}).`,
-      "لو مسحت فريق، مواقعه بتفضل شغالة كروابط عادية لحد ما تنتهي، إلا لو مسحتها هي كمان.",
-    ],
+  footer: {
+    about:
+      "مساحات مرسى جزء من مرسى: معرفة وأدوات مفتوحة لفرق المجتمع المدني والحقوق الرقمية وحرية التعبير.",
+    note: "مفتوحة المصدر (MIT). المحتوى المنشور متاح لأي شخص لديه الرابط.",
+    product: "المساحات",
+    resources: "للمطوّرين",
+    platform: "منصة مرسى",
   },
-  footer: `${iso(APP_NAME)} مفتوح المصدر (MIT). أي حد معاه الرابط يقدر يشوف المحتوى المرفوع.`,
   docs: {
     title: "الدليل",
-    sub: `كل اللي محتاجه علشان تستخدم ${iso(APP_NAME)} من المتصفح أو سكريبت أو AI agent أو الـ CI، وتشغّل نسختك.`,
-    englishOnly: "(بالإنجليزي)",
+    sub: "كل ما تحتاجه لاستخدام مساحات مرسى من المتصفح أو من سكربت أو وكيل آلي أو CI، ولاستضافة نسختك.",
+    englishOnly: "(بالإنجليزية)",
     back: "كل الأدلة",
   },
-  notFound: "الرابط ده مش موجود.",
-  gone: "الرابط ده انتهت صلاحيته وملفاته اتمسحت.",
-  home: "روح للصفحة الرئيسية",
+  notFound: "هذه الصفحة غير موجودة.",
+  notFoundSub: "ربما كُتب الرابط خطأً، أو حُذف الموقع.",
+  gone: "انتهت صلاحية هذا الرابط.",
+  goneSub: "حُذفت ملفاته حين انتهت مدته.",
+  home: "العودة إلى الرئيسية",
+  tooMany: "محاولات كثيرة. انتظر بضع دقائق ثم أعد المحاولة.",
+  badRequest: "انتهت صلاحية هذا النموذج. أعد تحميل الصفحة وحاول مرة أخرى.",
+  common: {
+    copy: "نسخ",
+    copied: "تم النسخ",
+    del: "حذف",
+    save: "حفظ",
+    cancel: "إلغاء",
+    signOut: "خروج",
+    on: "مفعّل",
+    off: "متوقف",
+    guest: "زائر",
+    size: "الحجم",
+    expires: "ينتهي",
+    created: "أُنشئ",
+    actions: "إجراءات",
+    link: "الرابط",
+    title: "العنوان",
+    open: "فتح",
+    files: (n) => (n === 1 ? "ملف واحد" : n === 2 ? "ملفان" : `${iso(n)} ملفات`),
+    confirm: "هل أنت متأكد؟",
+  },
+  login: {
+    title: "دخول الفرق",
+    sub: "الصق مفتاح الفريق الذي أعطاك إياه المسؤول. تبقى مسجّلًا في هذا المتصفح أسبوعًا، أو حتى تخرج.",
+    keyLabel: "مفتاح الفريق",
+    keyHelp: "يبدأ بـ marsa_team_. لا يُعرض المفتاح مرة أخرى بعد إنشائه.",
+    submit: "دخول",
+    invalid: "هذا المفتاح لا يطابق أي فريق. تحقّق منه، أو اطلب مفتاحًا جديدًا من المسؤول.",
+    limited: "محاولات دخول كثيرة من شبكتك. أعد المحاولة بعد بضع دقائق.",
+    csrf: "انتهت صلاحية هذا النموذج. حاول مرة أخرى.",
+    noKey: "ليس لديك مفتاح؟ ينشئ مسؤول هذه النسخة الفرق ومفاتيحها.",
+    adminLink: "دخول المسؤول",
+    signedOut: "خرجت من حسابك.",
+    expired: "انتهت جلستك. ادخل مرة أخرى.",
+  },
+  team: {
+    eyebrow: "لوحة الفريق",
+    sites: "المواقع الحيّة",
+    backend: "البيانات والملفات",
+    backendOn: "مفعّلة لهذا الفريق",
+    backendOff: "غير مفعّلة لهذا الفريق",
+    backendNotConfigured: "مفعّلة، لكن لم تُضبط الخدمة الخلفية على هذا الخادم بعد",
+    directoryOn: "تظهر مواقعكم في الصفحة الرئيسية",
+    directoryOff: "لا تظهر مواقعكم في الصفحة الرئيسية",
+    sitesCount: (n) => (n === 1 ? "موقع حيّ واحد" : n === 2 ? "موقعان حيّان" : `${n} مواقع حيّة`),
+    empty: "لا توجد مواقع حيّة بعد.",
+    emptySub: "انشر صفحتك الأولى من الأسفل، وستظهر هنا مع رابطها وموعد انتهائها.",
+    publishTitle: "انشر موقعًا جديدًا",
+    publishSub: "أفلت ملفات أو مجلدًا أو ملف zip واحدًا. الصفحة الأولى هي index.html.",
+    publish: "انشر",
+    listed: "ظاهر",
+    hidden: "مخفي",
+    show: "أظهره في الرئيسية",
+    hide: "أخفِه من الرئيسية",
+    replace: "استبدل الملفات",
+    replaceHelp: "ارفع نسخة جديدة. يبقى الرابط كما هو.",
+    extend: "مدّد",
+    extendTo: "ينتهي بعد",
+    manage: "إدارة",
+    back: "كل المواقع",
+    confirmDelete: "حذف هذا الموقع الآن؟ سيتوقف الرابط وتُحذف بياناته.",
+    published: "نُشر الموقع. رابطك يعمل الآن.",
+    replaced: "استُبدلت الملفات. الرابط نفسه بمحتوى جديد.",
+    extended: "حُدّث موعد الانتهاء.",
+    deleted: "حُذف الموقع.",
+    listingSaved: "حُفظ.",
+    notYours: "هذا الموقع غير موجود أو لا يتبع فريقك.",
+    capped: "لا يتجاوز عمر الرابط الحدّ الأقصى محسوبًا من أول نشر.",
+    filesTitle: "الملفات المنشورة",
+    kvTitle: "القيم المخزّنة (KV)",
+    kvEmpty: "لا توجد قيم مخزّنة.",
+    backendFilesTitle: "الملفات المرفوعة (الخدمة الخلفية)",
+    backendFilesEmpty: "لا توجد ملفات مرفوعة.",
+    backendBrowserOff: "البيانات والملفات غير متاحة لهذا الموقع.",
+    key: "المفتاح",
+    value: "القيمة",
+    moreKeys: (n) => `${n} مفاتيح أخرى غير معروضة.`,
+    keyDeleted: "حُذفت القيمة.",
+    fileDeleted: "حُذف الملف.",
+    agentsTitle: "النشر من وكيل آلي أو سكربت",
+    agentsSub: "استخدم مفتاح الفريق في الترويسة X-Team-Key. لا تضع المفتاح في صفحة عامة أو مستودع.",
+    uploading: "جارٍ النشر…",
+    failed: "تعذّر النشر",
+    pickZip: "اختر ملفات أو ملف zip",
+  },
+  admin: {
+    eyebrow: "الإدارة",
+    title: "الفرق",
+    sub: "أنشئ الفرق، وامنح كل فريق مفتاحًا، وحدّد أي الفرق تستخدم البيانات والملفات وأيها يظهر في الصفحة الرئيسية.",
+    loginTitle: "دخول المسؤول",
+    loginSub: "الصق رمز المسؤول لهذه النسخة. تبقى جلسة المسؤول 12 ساعة.",
+    tokenLabel: "رمز المسؤول",
+    disabled: "الإدارة غير مفعّلة على هذه النسخة (لم يُضبط ADMIN_TOKEN).",
+    tabsLabel: "أقسام الإدارة",
+    teamsTab: "الفرق",
+    sitesTab: "كل المواقع",
+    teams: "الفرق",
+    create: "إنشاء فريق",
+    name: "اسم الفريق",
+    backend: "البيانات والملفات",
+    directory: "في الرئيسية",
+    liveSites: "مواقع حيّة",
+    key: "المفتاح",
+    rotate: "مفتاح جديد",
+    none: "لا توجد فرق بعد. أنشئ أول فريق من الأسفل.",
+    newKey: "مفتاح الفريق، يُعرض مرة واحدة فقط",
+    newKeyNote:
+      "انسخه الآن وسلّمه للفريق. يدخل به الفريق من /login، ويرسله الوكلاء في الترويسة X-Team-Key. لا تحفظ مرسى إلا بصمته.",
+    confirmRotate: "إنشاء مفتاح جديد؟ سيتوقف المفتاح القديم وجلساته فورًا.",
+    confirmDelete: "حذف هذا الفريق؟ سيخرج أعضاؤه من حساباتهم.",
+    alsoDeleteSites: "احذف مواقعه أيضًا",
+    created: "أُنشئ الفريق.",
+    saved: "حُفظ.",
+    rotated: "أُنشئ مفتاح جديد. المفتاح القديم لم يعد يعمل.",
+    deleted: "حُذف الفريق.",
+    siteDeleted: "حُذف الموقع.",
+    howTitle: "كيف تعمل الفرق",
+    how: [
+      "يدخل عضو الفريق من /login بمفتاح الفريق، ويدير مواقع الفريق من اللوحة.",
+      "يرسل الوكلاء المفتاح نفسه في الترويسة X-Team-Key.",
+      "الرفع دون مفتاح رفعُ زائر: بلا خدمة خلفية، ولا يظهر في الرئيسية.",
+      "إيقاف البيانات والملفات يمنع مواقع الفريق من KV والملفات فورًا.",
+    ],
+    sitesTitle: "كل المواقع الحيّة",
+    sitesSub: "كل المواقع على هذه النسخة، من الفرق والزوار.",
+    filter: "المالك",
+    all: "الجميع",
+    guests: "الزوار فقط",
+    apply: "تصفية",
+    owner: "المالك",
+    noSites: "لا توجد مواقع مطابقة.",
+    total: (n, size) => `${iso(n)} موقع · ${iso(size)}`,
+  },
 };
 
 export const STRINGS: Record<Lang, Strings> = { en, ar };

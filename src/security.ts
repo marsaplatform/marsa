@@ -1,7 +1,9 @@
 /** Security headers shared by every response surface. */
 export function baseHeaders(h: Headers): void {
   h.set("X-Content-Type-Options", "nosniff");
-  h.set("Referrer-Policy", "no-referrer");
+  // App pages opt into "same-origin" (so browsers send Origin on their own form
+  // posts); everything else, including uploaded sites, sends no referrer.
+  if (!h.has("Referrer-Policy")) h.set("Referrer-Policy", "no-referrer");
 }
 
 /** Strict CSP for the app's own pages (upload UI, manage page). */

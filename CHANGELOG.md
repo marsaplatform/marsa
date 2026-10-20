@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-10-20
+
+### Added
+- **Team sign-in** at `/login` and `/ar/login`: paste the team key to get a signed session cookie
+  (HMAC-SHA256 with `SESSION_SECRET`, `HttpOnly`, `Secure` + `__Host-` prefix on HTTPS, `SameSite=Lax`,
+  7 days by default). Sign-in is rate-limited per IP; sign-out revokes the session; rotating a team key
+  or deleting the team ends its sessions.
+- **Team dashboard** at `/team`: status (live sites, data/files on or off and whether the server has a
+  backend, home-page listing), the team's live sites (title, link, expiry, size, listing), publishing by
+  drag and drop or file/ZIP/folder pick with an expiry picker, and per site (`/team/sites/<id>`):
+  replace files, extend, hide from or show on the home page, delete, the published file list and a KV
+  and files browser (read and delete) for teams with backend access. Copy-ready agent snippets use a
+  `$MARSA_TEAM_KEY` placeholder. Team sites are managed from the session; edit tokens stay hashed.
+- **Admin sign-in** at `/admin/login` (same session mechanism, separate admin role, 12 hours), the
+  teams console as server-rendered forms, and **All sites** (`/admin/sites`) with a team/guest filter
+  and delete.
+- Per-site `unlisted` flag: teams can hide one site from the public directory.
+- CSRF protection on every state-changing form (session-bound token or double-submit cookie on sign-in
+  forms) plus an Origin / `Sec-Fetch-Site` check.
+- New settings: `SESSION_SECRET`, `SESSION_TTL_HOURS`, `ADMIN_SESSION_TTL_HOURS`,
+  `LOGIN_ATTEMPTS_PER_15_MIN`.
+
+### Changed
+- **New design aligned with marsaplatform.com**: the Zad typeface (self-hosted from `public/fonts/zad`,
+  SIL OFL-1.1), the platform palette (light and dark), a shared header (logo, Home, Publish, Guide,
+  Team sign-in, language switch, mobile menu) and a footer linking back to marsaplatform.com. The
+  product is named "مساحات مرسى / Marsa Spaces" in the UI; Arabic copy is in Modern Standard Arabic.
+- Polished empty states, error pages (403/404/410/429) and focus styles; mixed Arabic/Latin text is
+  isolated with `bdi` / `dir`.
+- App pages send `Referrer-Policy: same-origin` (uploaded sites keep `no-referrer`).
+
+### Removed
+- The paste-the-token-in-a-tab admin page and `/assets/admin.js`. The `/api/admin/*` bearer API is
+  unchanged.
+
 ## [0.5.0] - 2026-10-20
 
 ### Changed

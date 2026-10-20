@@ -45,7 +45,7 @@ describe("landing page", () => {
     const app = await setup();
     const html = await (await app.request("/ar")).text();
     expect(html).toContain('<html lang="ar" dir="rtl">');
-    expect(html).toContain("جرّب دلوقتي");
+    expect(html).toContain("انشر صفحة");
     expect(html).toContain('hreflang="en"');
   });
 

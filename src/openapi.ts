@@ -51,7 +51,7 @@ export function openapi(config: Config) {
     info: {
       title: `${APP_NAME} API`,
       version: "0.5.0",
-      description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site.`,
+      description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site. Teams can also sign in in a browser at /login (team key) to manage their sites; the admin signs in at /admin/login. Those browser routes use session cookies and are not part of this API.`,
       license: { name: "MIT", identifier: "MIT" },
     },
     servers: [{ url: config.publicUrl }],
