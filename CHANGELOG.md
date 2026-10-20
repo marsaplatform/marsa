@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.11.3] - 2026-10-20
+
+### Fixed
+- The site page's MCP snippets no longer widen the page on phones (375 px). The code blocks scroll
+  inside their box instead.
+- The Cursor snippet no longer claims to work in Claude Desktop. There is now a Claude Desktop
+  snippet that uses `mcp-remote`, because the token goes in a header.
+
 ## [0.11.2] - 2026-10-20
 
 ### Fixed

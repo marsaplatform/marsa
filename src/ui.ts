@@ -1194,7 +1194,7 @@ function mcpSection(
     <h3>${esc(t.mcp.snippets)}</h3>
     <p class="meta">${esc(t.mcp.snippetNote)}</p>
     <div class="two-col mcp-snippets">
-      <div><p class="snippet-label">Cursor · <code>.cursor/mcp.json</code> · Claude Desktop (Connectors)</p><pre class="code" dir="ltr"><code>{
+      <div><p class="snippet-label">Cursor · <code>.cursor/mcp.json</code></p><pre class="code" dir="ltr"><code>{
   "mcpServers": {
     "${esc(server)}": {
       "url": "${ep}",
@@ -1207,7 +1207,12 @@ function mcpSection(
   --header "Authorization: Bearer marsa_mcp_…"</code></pre>
       <p class="snippet-label">VS Code · <code>.vscode/mcp.json</code></p><pre class="code" dir="ltr"><code>{ "servers": { "${esc(server)}": {
   "type": "http", "url": "${ep}",
-  "headers": { "Authorization": "Bearer marsa_mcp_…" } } } }</code></pre></div>
+  "headers": { "Authorization": "Bearer marsa_mcp_…" } } } }</code></pre>
+      <p class="snippet-label">Claude Desktop · <code>claude_desktop_config.json</code> (mcp-remote)</p><pre class="code" dir="ltr"><code>{ "mcpServers": { "${esc(server)}": {
+  "command": "npx",
+  "args": ["-y", "mcp-remote", "${ep}",
+           "--header", "Authorization:\${AUTH_HEADER}"],
+  "env": { "AUTH_HEADER": "Bearer marsa_mcp_…" } } } }</code></pre></div>
     </div>
   </section>`;
 }
