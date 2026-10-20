@@ -64,7 +64,7 @@ describe("MCP per space", () => {
     expect(again).toContain("Laptop");
     expect(again).toContain(`${BASE}/mcp/s/${site.id}`);
     expect(again).toContain("Bearer marsa_mcp_…");
-    expect(again).toContain("claude mcp add --transport http");
+    expect(again).toContain(`claude mcp add --transport http marsa-${site.id} \\\n`);
     const raw = await readFile(join(t.dir, "sites", site.id, "meta.json"), "utf8");
     expect(raw).not.toContain(secret);
     expect(raw).toContain("mcpTokens");

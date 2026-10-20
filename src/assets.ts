@@ -251,6 +251,7 @@ a.card:hover{border-color:var(--accent);transform:translateY(-2px);color:var(--i
 .mcp-create input,.mcp-create select{width:100%}
 .snippet-label{font-size:13px;font-weight:650;color:var(--ink);margin:10px 0 6px}
 .mcp-snippets .code{font-size:12.5px}
+.mcp-block h3{margin-top:22px}
 
 /* uploader */
 .try{scroll-margin-top:24px}

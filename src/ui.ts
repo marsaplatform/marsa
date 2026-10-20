@@ -983,8 +983,8 @@ function mcpSection(lang: Lang, m: McpPanel, csrf: string, base: string, siteId:
     }
   }
 }</code></pre></div>
-      <div><p class="snippet-label">Claude Code</p><pre class="code" dir="ltr"><code>claude mcp add --transport http ${esc(server)} \
-  ${ep} \
+      <div><p class="snippet-label">Claude Code</p><pre class="code" dir="ltr"><code>claude mcp add --transport http ${esc(server)} \\
+  ${ep} \\
   --header "Authorization: Bearer marsa_mcp_…"</code></pre>
       <p class="snippet-label">VS Code · <code>.vscode/mcp.json</code></p><pre class="code" dir="ltr"><code>{ "servers": { "${esc(server)}": {
   "type": "http", "url": "${ep}",
