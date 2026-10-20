@@ -720,7 +720,7 @@ function auditTable(lang: Lang, rows: AuditView[], withSite: boolean, labelId: s
           : withSite && e.site === null
             ? ""
             : "";
-      return `<tr><td data-label="${esc(t.members.when)}">${timeTag(lang, e.at)}</td>${td(t.members.who, `<bdi>${esc(e.who)}</bdi> <span class="badge muted">${esc(t.members.actorKinds[e.kind])}</span>`)}${td(t.members.what, `${esc(what)}${e.detail ? ` <span class="meta"><bdi>${esc(e.detail)}</bdi></span>` : ""}${site}`)}</tr>`;
+      return `<tr><td data-label="${esc(t.members.when)}">${timeTag(lang, e.at)}</td>${td(t.members.who, `<bdi>${esc(e.who)}</bdi> <span class="badge muted">${esc(t.members.actorKinds[e.kind])}</span>`)}${td(t.members.what, `${esc(what)}${e.detail ? ` <span class="meta">${/^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(e.detail) ? timeTag(lang, e.detail) : `<bdi>${esc(e.detail)}</bdi>`}</span>` : ""}${site}`)}</tr>`;
     })
     .join("");
   return `<div class="table-wrap"><table class="data stack audit-table" aria-labelledby="${labelId}"><thead><tr><th scope="col">${esc(t.members.when)}</th><th scope="col">${esc(t.members.who)}</th><th scope="col">${esc(t.members.what)}</th></tr></thead><tbody>${body}</tbody></table></div>`;
@@ -1225,7 +1225,7 @@ export function membersHtml(lang: Lang, c: Config, o: MembersPageOpts): string {
     })
     .join("");
   const people = o.members.length
-    ? `<div class="table-wrap"><table class="data stack" aria-labelledby="people-title"><thead><tr><th scope="col">${esc(t.admin.name)}</th><th scope="col">${esc(tm.role)}</th><th scope="col">${esc(tm.joined)}</th><th scope="col">${esc(tm.lastSeen)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
+    ? `<div class="table-wrap"><table class="data stack" aria-labelledby="people-title"><thead><tr><th scope="col">${esc(tm.nameCol)}</th><th scope="col">${esc(tm.role)}</th><th scope="col">${esc(tm.joined)}</th><th scope="col">${esc(tm.lastSeen)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
     : `<p class="meta">${esc(tm.none)}</p>`;
   const inviteRows = o.invites
     .map(

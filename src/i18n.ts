@@ -161,6 +161,7 @@ export interface Strings {
     roles: Record<"owner" | "editor" | "viewer", string>;
     roleHelp: Record<"owner" | "editor" | "viewer", string>;
     listTitle: string;
+    nameCol: string;
     none: string;
     joined: string;
     lastSeen: string;
@@ -572,7 +573,7 @@ const en: Strings = {
   },
   login: {
     title: "Team sign-in",
-    sub: "Paste the team key your admin gave you. You stay signed in on this browser for a week, or until you sign out.",
+    sub: "Sign in with your member account, or with the team key your admin gave you. You stay signed in on this browser for a week, or until you sign out.",
     keyLabel: "Team key",
     keyHelp: "Starts with marsa_team_. The key is never shown again after it is created.",
     submit: "Sign in",
@@ -600,7 +601,7 @@ const en: Strings = {
     signInMember: "Sign in",
     invalidMember: "Wrong username or password.",
     signedInAs: (name, role) => `Signed in as ${name} · ${role}`,
-    viaKey: "team key (owner)",
+    viaKey: "team key",
     roles: { owner: "Owner", editor: "Editor", viewer: "Viewer" },
     roleHelp: {
       owner: "Everything, including members and invites",
@@ -608,6 +609,7 @@ const en: Strings = {
       viewer: "Read-only",
     },
     listTitle: "People",
+    nameCol: "Name",
     none: "No members yet. Invite someone below.",
     joined: "Joined",
     lastSeen: "Last sign-in",
@@ -1035,7 +1037,7 @@ const ar: Strings = {
   },
   login: {
     title: "دخول الفرق",
-    sub: "الصق مفتاح الفريق الذي أعطاك إياه المسؤول. تبقى مسجّلًا في هذا المتصفح أسبوعًا، أو حتى تخرج.",
+    sub: "ادخل بحساب العضو الخاص بك، أو بمفتاح الفريق الذي أعطاك إياه المسؤول. تبقى مسجّلًا في هذا المتصفح أسبوعًا، أو حتى تخرج.",
     keyLabel: "مفتاح الفريق",
     keyHelp: "يبدأ بـ marsa_team_. لا يُعرض المفتاح مرة أخرى بعد إنشائه.",
     submit: "دخول",
@@ -1063,7 +1065,7 @@ const ar: Strings = {
     signInMember: "ادخل",
     invalidMember: "اسم المستخدم أو كلمة المرور غير صحيحة.",
     signedInAs: (name, role) => `أنت داخل باسم ${name} · ${role}`,
-    viaKey: "مفتاح الفريق (مالك)",
+    viaKey: "مفتاح الفريق",
     roles: { owner: "مالك", editor: "محرّر", viewer: "مشاهد" },
     roleHelp: {
       owner: "كل شيء، ومنه إدارة الأعضاء والدعوات",
@@ -1071,6 +1073,7 @@ const ar: Strings = {
       viewer: "قراءة فقط",
     },
     listTitle: "الأشخاص",
+    nameCol: "الاسم",
     none: "لا يوجد أعضاء بعد. ادعُ أحدًا بالأسفل.",
     joined: "انضم",
     lastSeen: "آخر دخول",

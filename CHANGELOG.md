@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.11.1] - 2026-10-20
+
+### Fixed
+- The login page intro mentions member accounts as well as the team key.
+- The members table's name column, and the "Signed in as team key · Owner" line, read correctly.
+- Activity entries show expiry dates as local times instead of raw ISO strings.
+
 ## [0.11.0] - 2026-10-20
 
 ### Added
