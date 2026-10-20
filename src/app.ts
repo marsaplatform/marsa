@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { open, readFile } from "node:fs/promises";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { APP_CSS, APP_JS, fontAsset } from "./assets.js";
@@ -8,6 +9,7 @@ import type { SiteBackend } from "./backend/types.js";
 import { APP_NAME } from "./brand.js";
 import { clientIp } from "./client-ip.js";
 import type { Config } from "./config.js";
+import { COVER_MAX_BYTES, type Cover, looksLike, pickCover } from "./cover.js";
 import { type DocPage, loadDocs } from "./docs.js";
 import { UploadError } from "./errors.js";
 import type { Lang } from "./i18n.js";
@@ -249,6 +251,32 @@ export function createApp({
   const invalidateDirectory = () => {
     dirCache = null;
   };
+  // Cover picks are memoised per site version, so a rebuild only re-reads changed sites.
+  const coverMemo = new Map<string, { v: string; cover: Cover | null }>();
+  async function coverOf(m: SiteMeta): Promise<Cover | null> {
+    const hit = coverMemo.get(m.id);
+    if (hit && hit.v === m.updatedAt) return hit.cover;
+    let head: Uint8Array | null = null;
+    const index = store.filePath(m, "index.html");
+    if (index) {
+      const fh = await open(index, "r").catch(() => null);
+      if (fh) {
+        try {
+          const buf = new Uint8Array(128 * 1024);
+          const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+          head = buf.subarray(0, bytesRead);
+        } finally {
+          await fh.close();
+        }
+      }
+    }
+    const cover = pickCover(m, head, config.publicUrl);
+    coverMemo.set(m.id, { v: m.updatedAt, cover });
+    return cover;
+  }
+  const coverUrl = (m: SiteMeta) =>
+    `/covers/${m.id}?v=${createHash("sha256").update(m.updatedAt).digest("hex").slice(0, 10)}`;
+
   async function directory(): Promise<Directory> {
     const t = now();
     if (!dirCache || t - dirCache.at > DIR_TTL) {
@@ -263,24 +291,29 @@ export function createApp({
         if (!m.teamId || m.unlisted || !listed.has(m.teamId)) continue;
         byTeam.set(m.teamId, [...(byTeam.get(m.teamId) ?? []), m]);
       }
-      dirCache = {
-        at: t,
-        teams: [...listed.values()]
-          .map((team) => ({
-            id: team.id,
-            name: team.name,
-            sites: (byTeam.get(team.id) ?? [])
-              .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-              .map((m) => ({
-                id: m.id,
-                title: m.title || m.id,
-                url: siteUrl(m.id),
-                createdAt: m.createdAt,
-                expiresAt: m.expiresAt,
-              })),
-          }))
-          .sort((a, b) => a.name.localeCompare(b.name)),
-      };
+      const seen = new Set<string>();
+      const teamsOut: Directory["teams"] = [];
+      for (const team of listed.values()) {
+        const metas = (byTeam.get(team.id) ?? []).sort((a, b) =>
+          b.createdAt.localeCompare(a.createdAt),
+        );
+        const sites: Directory["teams"][number]["sites"] = [];
+        for (const m of metas) {
+          seen.add(m.id);
+          const cover = await coverOf(m);
+          sites.push({
+            id: m.id,
+            title: m.title || m.id,
+            url: siteUrl(m.id),
+            createdAt: m.createdAt,
+            expiresAt: m.expiresAt,
+            cover: cover ? coverUrl(m) : null,
+          });
+        }
+        teamsOut.push({ id: team.id, name: team.name, sites });
+      }
+      for (const id of coverMemo.keys()) if (!seen.has(id)) coverMemo.delete(id);
+      dirCache = { at: t, teams: teamsOut.sort((a, b) => a.name.localeCompare(b.name)) };
     }
     // Expiry is re-checked on every read, so a cached entry never outlives its link.
     const live = dirCache.teams
@@ -289,7 +322,16 @@ export function createApp({
         sites: team.sites.filter((x) => Date.parse(x.expiresAt) > t).slice(0, 60),
       }))
       .filter((team) => team.sites.length > 0);
-    return { generatedAt: new Date(t).toISOString(), teams: live };
+    const ids = new Set(live.flatMap((team) => team.sites.map((x) => x.id)));
+    const featured = config.featuredSites.filter((id) => ids.has(id));
+    if (featured.length === 0 && live.length > 0) {
+      // Nothing pinned (or the pinned sites are gone): spotlight the newest page.
+      const newest = live
+        .flatMap((team) => team.sites)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      if (newest) featured.push(newest.id);
+    }
+    return { generatedAt: new Date(t).toISOString(), featured, teams: live };
   }
 
   // ---- site operations shared by the API and the dashboard ----------------
@@ -617,6 +659,34 @@ export function createApp({
     return c.body(font.body as unknown as ArrayBuffer);
   });
   app.get("/assets/app.css", asset("text/css; charset=utf-8", APP_CSS));
+
+  // ---- directory covers (images that are already part of a listed site) ---
+  app.get("/covers/:id", async (c) => {
+    const id = c.req.param("id");
+    const notFound = () => {
+      c.header("Cache-Control", "public, max-age=60");
+      return c.body(null, 404);
+    };
+    const listed = (await directory()).teams.some((team) => team.sites.some((x) => x.id === id));
+    if (!listed) return notFound();
+    const meta = await store.get(id);
+    if (!meta) return notFound();
+    const cover = await coverOf(meta);
+    const path = cover ? store.filePath(meta, cover.path) : null;
+    if (!cover || !path) return notFound();
+    const body = await readFile(path).catch(() => null);
+    if (!body || body.byteLength > COVER_MAX_BYTES || !looksLike(cover.mime, body))
+      return notFound();
+    const etag = `"${createHash("sha256").update(`${meta.updatedAt}:${cover.path}`).digest("hex").slice(0, 16)}"`;
+    c.header("ETag", etag);
+    c.header("Cache-Control", "public, max-age=300");
+    c.header("Content-Security-Policy", "default-src 'none'; sandbox");
+    c.header("Cross-Origin-Resource-Policy", "same-origin");
+    if (c.req.header("if-none-match") === etag) return c.body(null, 304);
+    c.header("Content-Type", cover.mime);
+    c.header("Content-Disposition", "inline");
+    return c.body(new Uint8Array(body) as unknown as ArrayBuffer);
+  });
 
   // ---- serving uploaded sites --------------------------------------------
   app.get("/s/:id", (c) => c.redirect(`/s/${c.req.param("id")}/`, 301));

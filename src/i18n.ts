@@ -52,6 +52,18 @@ export interface Strings {
   };
   hero: { eyebrow: string; title: string; sub: string; ctaTry: string; ctaTeam: string };
   strip: string[];
+  landing: {
+    statsLabel: string;
+    statTeams: string;
+    statPages: string;
+    statTtl: string;
+    howEyebrow: string;
+    featured: string;
+    open: string;
+    by: string;
+    preview: (title: string) => string;
+    allPages: string;
+  };
   why: { title: string; items: [string, string][] };
   how: { title: string; steps: [string, string][] };
   uses: { title: string; sub: string; items: [string, string][]; more: string };
@@ -260,6 +272,18 @@ const en: Strings = {
     ctaTeam: "Team sign-in",
   },
   strip: ["No account for guests", "Teams with their own dashboard", "API and agents", "MIT"],
+  landing: {
+    statsLabel: "On this instance right now",
+    statTeams: "teams publishing",
+    statPages: "live pages",
+    statTtl: "longest link life",
+    howEyebrow: "Three steps",
+    featured: "Featured",
+    open: "Open the page",
+    by: "By",
+    preview: (title) => `Preview of ${title}`,
+    allPages: "All team pages",
+  },
   why: {
     title: "Small on purpose",
     items: [
@@ -563,6 +587,18 @@ const ar: Strings = {
     ctaTeam: "دخول الفرق",
   },
   strip: ["بلا حساب للزوار", "لوحة خاصة لكل فريق", "واجهة برمجية ووكلاء آليون", "رخصة MIT"],
+  landing: {
+    statsLabel: "على هذه النسخة الآن",
+    statTeams: "فرق تنشر",
+    statPages: "صفحات حيّة",
+    statTtl: "أقصى عمر للرابط",
+    howEyebrow: "ثلاث خطوات",
+    featured: "مختارة",
+    open: "افتح الصفحة",
+    by: "من",
+    preview: (title) => `معاينة ${title}`,
+    allPages: "كل صفحات الفرق",
+  },
   why: {
     title: "صغيرة عن قصد",
     items: [

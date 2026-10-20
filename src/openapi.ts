@@ -50,7 +50,7 @@ export function openapi(config: Config) {
     openapi: "3.1.0",
     info: {
       title: `${APP_NAME} API`,
-      version: "0.5.0",
+      version: "0.7.0",
       description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site. Teams can also sign in in a browser at /login (team key) to manage their sites; the admin signs in at /admin/login. Those browser routes use session cookies and are not part of this API.`,
       license: { name: "MIT", identifier: "MIT" },
     },
@@ -160,6 +160,12 @@ export function openapi(config: Config) {
           type: "object",
           properties: {
             generatedAt: { type: "string", format: "date-time" },
+            featured: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Site ids spotlighted on the home page: FEATURED_SITES that are live, else the newest page.",
+            },
             teams: {
               type: "array",
               items: {
@@ -177,6 +183,12 @@ export function openapi(config: Config) {
                         url: { type: "string", format: "uri" },
                         createdAt: { type: "string", format: "date-time" },
                         expiresAt: { type: "string", format: "date-time" },
+                        cover: {
+                          type: "string",
+                          nullable: true,
+                          description:
+                            "Same-origin URL (/covers/<id>?v=…) of the site's own cover image, or null.",
+                        },
                       },
                     },
                   },
@@ -434,6 +446,20 @@ export function openapi(config: Config) {
             "Only teams with directory=true and their unexpired sites. Never guest uploads, tokens or keys. Cached 30 s.",
           responses: {
             "200": { description: "OK", content: json({ $ref: "#/components/schemas/Directory" }) },
+          },
+        },
+      },
+      "/covers/{id}": {
+        get: {
+          summary: "Cover image of a site in the public directory",
+          operationId: "getCover",
+          description:
+            "A raster image (PNG, JPEG, WebP, AVIF, GIF, max 2 MB) that is already part of the site: cover.* at its root, else a local og:image, else the first local <img>. 404 when the site has none or is not listed.",
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": { description: "The image" },
+            "304": { description: "Not modified (ETag)" },
+            "404": { description: "No cover" },
           },
         },
       },

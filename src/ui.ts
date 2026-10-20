@@ -1,6 +1,7 @@
 import { ASSET_VERSION } from "./assets.js";
 import { PLATFORM_URL } from "./brand.js";
 import type { Config } from "./config.js";
+import { hashIndex, initialOf } from "./cover.js";
 import type { DocPage } from "./docs.js";
 import { bytesLabel, hoursLabel, type Lang, type LimitValues, STRINGS } from "./i18n.js";
 
@@ -29,10 +30,20 @@ export function limitValues(lang: Lang, c: Config): LimitValues {
 /** The public directory: live sites of teams that are listed, grouped by team. */
 export interface Directory {
   generatedAt: string;
+  /** Site ids to spotlight on the home page (FEATURED_SITES, else the newest page). */
+  featured?: string[];
   teams: {
     id: string;
     name: string;
-    sites: { id: string; title: string; url: string; createdAt: string; expiresAt: string }[];
+    sites: {
+      id: string;
+      title: string;
+      url: string;
+      createdAt: string;
+      expiresAt: string;
+      /** Same-origin URL of the site's cover image, or null (a placeholder is drawn). */
+      cover?: string | null;
+    }[];
   }[];
 }
 
@@ -216,19 +227,55 @@ function emptyState(title: string, sub: string, action = ""): string {
 
 // ---- landing -------------------------------------------------------------------
 
+type DirSite = Directory["teams"][number]["sites"][number];
+
+/** Placeholder palettes (see .ph-0 … .ph-5 in app.css). */
+const PALETTES = 6;
+const paletteOf = (key: string) => hashIndex(key, PALETTES);
+
+/** A drawn stand-in for a site with no cover image: its first letter on a page sketch. */
+function placeholderArt(title: string, key: string): string {
+  return `<svg class="thumb-art ph-${paletteOf(key)}" viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+<rect class="ph-bg" width="320" height="180"/>
+<circle class="ph-orb" cx="292" cy="-6" r="92"/>
+<rect class="ph-win" x="26" y="28" width="178" height="124" rx="9"/>
+<path class="ph-bar" d="M35 28h160a9 9 0 0 1 9 9v13H26V37a9 9 0 0 1 9-9z"/>
+<circle class="ph-dot" cx="40" cy="39" r="3.4"/><circle class="ph-dot" cx="51" cy="39" r="3.4"/><circle class="ph-dot" cx="62" cy="39" r="3.4"/>
+<rect class="ph-line strong" x="42" y="66" width="92" height="9" rx="4.5"/>
+<rect class="ph-line" x="42" y="86" width="142" height="6" rx="3"/>
+<rect class="ph-line" x="42" y="99" width="124" height="6" rx="3"/>
+<rect class="ph-line" x="42" y="112" width="134" height="6" rx="3"/>
+<rect class="ph-pill" x="42" y="128" width="46" height="12" rx="4"/>
+<path class="ph-wave" d="M0 166c20 0 20-8 40-8s20 8 40 8 20-8 40-8 20 8 40 8 20-8 40-8 20 8 40 8 20-8 40-8 20 8 40 8"/>
+<text class="ph-glyph" x="258" y="112" text-anchor="middle">${esc(initialOf(title))}</text>
+</svg>`;
+}
+
+/** The 16:9 preview of a site: its cover image, or the drawn placeholder. */
+function thumb(lang: Lang, x: DirSite, teamId: string, eager = false): string {
+  const inner = x.cover
+    ? `<img src="${esc(x.cover)}" alt="${esc(STRINGS[lang].landing.preview(x.title))}" width="640" height="360" ${eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">`
+    : placeholderArt(x.title, teamId);
+  return `<span class="thumb${x.cover ? " has-cover" : ""}">${inner}</span>`;
+}
+
+function teamBadge(name: string, id: string): string {
+  return `<span class="team-avatar ph-${paletteOf(id)}" aria-hidden="true">${esc(initialOf(name))}</span>`;
+}
+
+function directoryCard(lang: Lang, x: DirSite, teamId: string): string {
+  const t = STRINGS[lang].directory;
+  return `<li class="dir-card"><a class="dir-link" href="${esc(x.url)}" target="_blank" rel="noopener">${thumb(lang, x, teamId)}<span class="dir-body"><span class="dir-title"><bdi>${esc(x.title)}</bdi></span><span class="dir-url">${ltr(hostless(x.url))}</span></span></a><p class="meta dir-expiry">${esc(t.expires)} ${timeTag(lang, x.expiresAt)}</p></li>`;
+}
+
 function directorySection(lang: Lang, dir: Directory): string {
   const t = STRINGS[lang].directory;
   const groups = dir.teams.length
     ? dir.teams
         .map(
           (team) => `<div class="dir-team" role="group" aria-labelledby="dir-${esc(team.id)}">
-      <h3 id="dir-${esc(team.id)}"><bdi>${esc(team.name)}</bdi> <span class="count">${esc(t.pages(team.sites.length))}</span></h3>
-      <ul class="card-grid">${team.sites
-        .map(
-          (x) =>
-            `<li class="card dir-card"><a class="dir-title" href="${esc(x.url)}" target="_blank" rel="noopener"><bdi>${esc(x.title)}</bdi></a><p class="dir-url">${ltr(hostless(x.url))}</p><p class="meta">${esc(t.expires)} ${timeTag(lang, x.expiresAt)}</p></li>`,
-        )
-        .join("")}</ul>
+      <h3 id="dir-${esc(team.id)}" class="dir-team-head">${teamBadge(team.name, team.id)}<bdi>${esc(team.name)}</bdi> <span class="count">${esc(t.pages(team.sites.length))}</span></h3>
+      <ul class="dir-grid">${team.sites.map((x) => directoryCard(lang, x, team.id)).join("")}</ul>
     </div>`,
         )
         .join("\n")
@@ -239,6 +286,68 @@ function directorySection(lang: Lang, dir: Directory): string {
     <p>${esc(t.sub)}</p>
   </div>
   ${groups}
+</section>`;
+}
+
+/** The spotlighted page: the first live FEATURED_SITES id, else the newest team page. */
+function featuredSection(lang: Lang, dir: Directory): string {
+  const t = STRINGS[lang];
+  for (const id of dir.featured ?? []) {
+    for (const team of dir.teams) {
+      const x = team.sites.find((y) => y.id === id);
+      if (!x) continue;
+      return `<section class="section wrap featured" aria-labelledby="featured-title">
+  <article class="feature-card">
+    <a class="feature-thumb" href="${esc(x.url)}" target="_blank" rel="noopener" tabindex="-1" aria-hidden="true">${thumb(lang, x, team.id, true)}</a>
+    <div class="feature-body">
+      <p class="eyebrow">${esc(t.landing.featured)}</p>
+      <h2 id="featured-title"><bdi>${esc(x.title)}</bdi></h2>
+      <p class="feature-team">${teamBadge(team.name, team.id)}<span>${esc(t.landing.by)} <bdi>${esc(team.name)}</bdi></span></p>
+      <p class="dir-url">${ltr(hostless(x.url))}</p>
+      <p class="meta">${esc(t.directory.expires)} ${timeTag(lang, x.expiresAt)}</p>
+      <div class="actions">
+        <a class="button" href="${esc(x.url)}" target="_blank" rel="noopener">${esc(t.landing.open)} <span aria-hidden="true" class="arrow"></span></a>
+        <a class="text-link" href="#directory">${esc(t.landing.allPages)}</a>
+      </div>
+    </div>
+  </article>
+</section>`;
+    }
+  }
+  return "";
+}
+
+const fmt = (lang: Lang, n: number) =>
+  new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-GB").format(n);
+
+function heroStats(lang: Lang, c: Config, dir: Directory): string {
+  const t = STRINGS[lang].landing;
+  const pages = dir.teams.reduce((n, team) => n + team.sites.length, 0);
+  const item = (value: string, label: string) =>
+    `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`;
+  return `<dl class="hero-stats" aria-label="${esc(t.statsLabel)}">${item(fmt(lang, dir.teams.length), t.statTeams)}${item(fmt(lang, pages), t.statPages)}${item(hoursLabel(lang, c.maxTtlHours), t.statTtl)}</dl>`;
+}
+
+const STEP_ICONS = [
+  '<path d="M24 30V12M16 20l8-8 8 8M10 30v5a4 4 0 0 0 4 4h20a4 4 0 0 0 4-4v-5"/>',
+  '<path d="M21 27a6 6 0 0 0 8.5 0l5-5a6 6 0 0 0-8.5-8.5l-2 2M27 21a6 6 0 0 0-8.5 0l-5 5a6 6 0 0 0 8.5 8.5l2-2"/>',
+  '<circle cx="24" cy="25" r="13"/><path d="M24 17v8l6 4M19 8h10"/>',
+];
+
+function howStrip(lang: Lang): string {
+  const t = STRINGS[lang];
+  return `<section class="how-strip" aria-labelledby="how-title">
+  <div class="wrap">
+    <div class="how-head"><p class="eyebrow">${esc(t.landing.howEyebrow)}</p><h2 id="how-title">${esc(t.how.title)}</h2></div>
+    <ol class="how-steps">
+      ${t.how.steps
+        .map(
+          ([h, p], i) =>
+            `<li><span class="how-icon" aria-hidden="true"><svg viewBox="0 0 48 48" focusable="false">${STEP_ICONS[i] ?? ""}</svg></span><div><h3><span class="how-num">${esc(fmt(lang, i + 1))}</span> ${esc(h)}</h3><p>${esc(p)}</p></div></li>`,
+        )
+        .join("")}
+    </ol>
+  </div>
 </section>`;
 }
 
@@ -317,12 +426,18 @@ export function landingHtml(
     <p class="hero-description">${esc(t.hero.sub)}</p>
     <div class="actions">
       <a class="button" href="${href("/new")}">${esc(t.hero.ctaTry)}</a>
-      <a class="text-link" href="${href("/login")}">${esc(t.hero.ctaTeam)} <span aria-hidden="true" class="arrow"></span></a>
+      <a class="button ghost" href="${href("/login")}">${esc(t.hero.ctaTeam)}</a>
+      <a class="text-link" href="#directory">${esc(t.directory.title)} <span aria-hidden="true" class="arrow"></span></a>
     </div>
+    ${heroStats(lang, c, dir)}
   </div>
   <figure class="hero-figure">${HERO_ART}</figure>
 </section>
 <div class="principles-strip"><div class="wrap">${t.strip.map((x, i) => (i === 0 ? `<p>${esc(x)}</p>` : `<span>${esc(x)}</span>`)).join("")}</div></div>
+
+${howStrip(lang)}
+
+${featuredSection(lang, dir)}
 
 ${directorySection(lang, dir)}
 
@@ -333,13 +448,6 @@ ${directorySection(lang, dir)}
       ${t.why.items.map(([h, p]) => `<article class="feature"><h3>${esc(h)}</h3><p>${esc(p)}</p></article>`).join("")}
     </div>
   </div>
-</section>
-
-<section class="section wrap" aria-labelledby="how-title">
-  <div class="section-heading"><h2 id="how-title">${esc(t.how.title)}</h2></div>
-  <ol class="steps">
-    ${t.how.steps.map(([h, p]) => `<li><h3>${esc(h)}</h3><p>${esc(p)}</p></li>`).join("")}
-  </ol>
 </section>
 
 <section class="section wrap" aria-labelledby="teams-title">

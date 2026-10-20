@@ -43,6 +43,7 @@ Every setting is an environment variable with a safe default. Copy
 | `SESSION_SECRET` | random per start | HMAC key for sign-in cookies and CSRF tokens, at least 32 characters |
 | `SESSION_TTL_HOURS` / `ADMIN_SESSION_TTL_HOURS` | `168` / `12` | Team / admin session lifetime |
 | `LOGIN_ATTEMPTS_PER_15_MIN` | `10` | Sign-in attempts per client IP per 15 minutes |
+| `FEATURED_SITES` | empty | Site ids for the home page's Featured card, comma-separated (first live one). Empty = newest listed page |
 
 Generate an admin token and a session secret with `openssl rand -hex 32`. Without `SESSION_SECRET`
 everyone is signed out whenever the container restarts. Serve the app over HTTPS: session cookies are

@@ -93,15 +93,44 @@ To go back to the old open policy (every site may use the backend) set `BACKEND_
 ## The public directory
 
 The homepage (`/` and `/ar`) shows a **Published by teams** section: one heading per listed team,
-then a grid of cards with the page title, the link and when it expires. The same data is public
-JSON at `GET /api/directory` (cached for 30 seconds, CORS open):
+then a grid of image cards: a preview picture, the page title, the link and when it expires. Above it,
+one page is **Featured** in a large card (see `FEATURED_SITES` below). The same data is public JSON at
+`GET /api/directory` (cached for 30 seconds, CORS open):
 
 ```json
-{ "generatedAt": "…",
+{ "generatedAt": "…", "featured": ["k3v9x2mq7a"],
   "teams": [ { "id": "t_…", "name": "Field notes",
     "sites": [ { "id": "k3v9x2mq7a", "title": "Weekly report",
-      "url": "https://marsa.example.com/s/k3v9x2mq7a/", "createdAt": "…", "expiresAt": "…" } ] } ] }
+      "url": "https://marsa.example.com/s/k3v9x2mq7a/", "createdAt": "…", "expiresAt": "…",
+      "cover": "/covers/k3v9x2mq7a?v=1a2b3c4d5e" } ] } ] }
 ```
+
+### Cover images (the card picture)
+
+Marsa never takes screenshots and never downloads anything from elsewhere. The card picture is an
+image that is **already in your upload**. It picks the first of:
+
+1. a file named `cover.png`, `cover.jpg`, `cover.jpeg`, `cover.webp`, `cover.avif` or `cover.gif`
+   at the root of the site (next to `index.html`);
+2. the page's `<meta property="og:image" content="…">` (or `twitter:image`) in `index.html`, if it
+   points to a file inside the site (`img/share.png`, `/s/<id>/img/share.png` or the full link of
+   this site all work; links to other websites are ignored);
+3. the first `<img src="…">` in `index.html` that points to a file inside the site.
+
+The image must be PNG, JPEG, WebP, AVIF or GIF (not SVG) and at most 2 MB; a 1200×675 (16:9) picture
+looks best. Otherwise the card shows a drawn placeholder with the first letter of the title, in a
+colour of the team. To set or change a cover, add `cover.png` to the site and **replace the files**
+from the team dashboard (same link) or re-upload; the card updates within 30 seconds.
+
+Covers are served from `GET /covers/<id>` only for listed, live sites, with
+`Content-Security-Policy: default-src 'none'; sandbox`, `nosniff` and a check that the file really is
+the image type it claims to be.
+
+### The featured page
+
+`FEATURED_SITES=<id>[,<id>…]` (server environment) pins the page shown in the **Featured** card: the
+first id that is live and listed. Without it (or when those pages are gone) the newest listed page is
+featured. Nothing is featured when the directory is empty.
 
 Only live (not expired) sites of teams with *Show in public directory* on appear. Guest uploads,
 edit tokens, team keys and hashes are never included. Teams with no live sites are left out.

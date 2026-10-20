@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-10-20
+
+### Added
+- **Image cards in the public directory.** Every team page on the home page is a card with a 16:9
+  preview. The picture is an image already inside the site: `cover.(png|jpg|jpeg|webp|avif|gif)` at
+  its root, else a local `og:image` / `twitter:image`, else the first local `<img>` in `index.html`
+  (raster only, max 2 MB; nothing external is fetched and no headless browser runs). Sites without one
+  get a drawn placeholder (first letter of the title, a colour per team, light and dark).
+- `GET /covers/<id>`: serves that image for listed, live sites only, after checking its magic bytes,
+  with `default-src 'none'; sandbox`, `nosniff`, `ETag` and a 5-minute cache. Picks are memoised per
+  site version.
+- `/api/directory` gains `featured` (site ids) and a `cover` URL (or `null`) per site. Additive; the
+  existing fields are unchanged.
+- **Featured page**: a large card above the directory. `FEATURED_SITES=<id>,…` pins it; otherwise the
+  newest listed page.
+- Home page: hero with a "Team sign-in" button, a link to the directory and live counts (teams
+  publishing, live pages, longest link life); a "How it works" strip with icons right under it (it
+  replaces the old How it works section further down). Team headings get a coloured initial.
+
+### Docs
+- `docs/teams.md` and the Arabic guide: how a team sets its cover image, and `FEATURED_SITES`.
+
 ## [0.6.3] - 2026-10-20
 
 ### Fixed

@@ -30,6 +30,8 @@ export interface Config {
   backend: BackendLimits;
   /** Browser sign-in for teams and the admin (signed session cookies). */
   sessions: SessionConfig;
+  /** Site ids spotlighted on the home page (FEATURED_SITES, comma-separated). */
+  featuredSites: string[];
 }
 
 export interface SessionConfig {
@@ -116,6 +118,11 @@ export function loadConfig(env: Env = process.env): Config {
     adminToken: env.ADMIN_TOKEN?.trim() ?? "",
     sweepIntervalSeconds: int(env, "SWEEP_INTERVAL_SECONDS", 60, 5),
     cloudflare: cloudflareConfig(env),
+    featuredSites: (env.FEATURED_SITES ?? "")
+      .split(",")
+      .map((x) => x.trim())
+      .filter((x) => /^[a-z0-9]{6,32}$/.test(x))
+      .slice(0, 6),
     backend: {
       guestAccess: bool(env, "BACKEND_GUEST_ACCESS", false),
       publicRead: bool(env, "BACKEND_PUBLIC_READ", true),
