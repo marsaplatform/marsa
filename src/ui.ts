@@ -1151,6 +1151,8 @@ export function teamSettingsHtml(
     keyPrefix: string;
     slug: string | null;
     workers: { enabled: boolean; count: number; max: number; kb: number };
+    /** 0.16.0: owner-only panels (sign the whole team out). */
+    extra?: string;
   },
 ): string {
   const t = STRINGS[lang];
@@ -1218,6 +1220,7 @@ export function teamSettingsHtml(
     </section>
   </div>
   ${account}
+  ${o.extra ?? ""}
 </div>`;
   return dashLayout({
     lang,
@@ -1636,11 +1639,11 @@ export function adminTeamsHtml(
                 confirm: d.rotateConfirm,
               },
               {
-                kind: "post" as const,
+                // 0.16.0: deleting needs the typed name, on the team's Settings tab.
+                kind: "link" as const,
                 label: t.common.del,
-                action: href(`${base}/delete`),
-                danger: true,
-                confirm: t.admin.confirmDelete,
+                href: href(`${base}?tab=settings#dz-title`),
+                icon: "trash",
               },
             ],
             filters: { workers: tm.workers ? "on" : "off" },
@@ -2467,6 +2470,8 @@ export interface AdminSettingsOpts {
   settings: AdminWorkersOpts["settings"];
   /** 0.15.2: prerendered token permission checklists + health interval. */
   extra?: string;
+  /** 0.16.0: backups, deleted teams, sign out everywhere. */
+  lifecycle?: string;
   server: {
     version: string;
     publicUrl: string;
@@ -2498,6 +2503,7 @@ export function adminSettingsHtml(lang: Lang, c: Config, o: AdminSettingsOpts): 
   ${pageHead(t.admin.eyebrow, esc(d.settings), d.adminSettingsSub, adminTools(lang, "settings", o.csrf))}
   ${flashBox(lang, o.flash)}
   ${cfCard(lang, o.settings, o.csrf)}
+  ${o.lifecycle ?? ""}
   ${o.extra ?? ""}
   <section class="card-block" aria-labelledby="srv-title">
     <h2 id="srv-title" class="h3">${esc(d.server)}</h2>
@@ -3577,11 +3583,19 @@ function privacyText(
   op: Operator,
 ): { title: string; sub: string; updated: string; sections: PolicySection[] } {
   const auth = op.authority.url ? `${op.authority[lang]}, ${op.authority.url}` : op.authority[lang];
+  // 0.16.0: the DPA reference stays a clearly marked placeholder until the operator confirms it.
+  const dpa = op.cloudflareDpa
+    ? lang === "en"
+      ? `The agreement with Cloudflare: ${op.cloudflareDpa}.`
+      : `الاتفاقية مع Cloudflare: ${op.cloudflareDpa}.`
+    : lang === "en"
+      ? "[PLACEHOLDER: reference to the Cloudflare Data Processing Addendum, not yet confirmed by the operator]"
+      : "[مكان محجوز: مرجع ملحق معالجة البيانات لدى Cloudflare، لم يؤكده المشغّل بعد]";
   if (lang === "en")
     return {
       title: "Privacy policy",
       sub: "What this Marsa Spaces instance stores, why, for how long, who else handles it, and your rights under the EU General Data Protection Regulation (GDPR). It describes what the software does.",
-      updated: "Last updated: 21 October 2026 (version 0.14.1)",
+      updated: "Last updated: 21 October 2026 (version 0.16.0)",
       sections: [
         [
           "Who is responsible (data controller)",
@@ -3607,6 +3621,8 @@ function privacyText(
             "Team keys, invite links, MCP tokens and agent keys are shown once and stored only as SHA-256 hashes, with a short prefix so you can tell them apart.",
             "Each team has an activity log of the last 500 actions (who did what and when), visible to its members and the admin.",
             "Notifications (deploys, key and member changes) are kept for the team's owners and the admin, the newest 200 per team.",
+            "Agent notes: agents and members can leave short notes for the team (at most 2000 characters, with anything that looks like a key or password redacted before it is stored). The newest 500 per team are kept.",
+            "Ended sessions: when you sign out (or someone signs everyone out), the server keeps the session's id, or the time of the sign-out-everywhere, until the session would have expired, so the cookie stops working even after a restart.",
           ],
         ],
         [
@@ -3638,6 +3654,9 @@ function privacyText(
           [
             "Each deploy is stored as a version on this server: the code, the plain variables, the names of the secrets, who deployed it, when, its size and SHA-256, and an optional note. The last 10 versions per Worker are kept and deleted with the Worker.",
             "Secret values are never stored by Spaces: they go straight to Cloudflare and only their names are kept.",
+            "Health checks: if a team keeps them on, Spaces requests each Worker's address (or sends an MCP initialize call) every few minutes and stores the time, result, status code and response time. Single checks are kept 7 days and daily totals 31 days; they are deleted with the Worker.",
+            "Logs and analytics: for the Worker pages, Spaces reads request counts, errors, CPU time and recent log lines from Cloudflare. They are kept only in memory for a few minutes, and anything that looks like a key or password is redacted before it is shown.",
+            "Repository checks: if a team links a Worker or space to a GitHub repository, Spaces asks GitHub's public API whether the repository is public and whether the deployed commit is the newest one. GitHub receives the repository name and the server's IP address; the answers are cached in memory.",
           ],
         ],
         [
@@ -3653,7 +3672,9 @@ function privacyText(
           "Service providers (processors) and recipients",
           [
             "Cloudflare: if the admin enables the data and files backend, KV values and uploaded files of allowed sites are stored with Cloudflare (Workers KV and R2). Team Workers are deployed to Cloudflare's network through the platform's Cloudflare account, and Cloudflare stores their code, plain variables and secrets.",
-            "This site may be served through Cloudflare, which can add its Web Analytics script; the page security policy allows it. Fonts and other assets are served from this server.",
+            "This site, including the signed-in dashboards, is served through Cloudflare, which adds its Web Analytics script (static.cloudflareinsights.com). It counts page views and measures load times without cookies; Cloudflare receives the page address, the referrer, the browser type and your IP address. Fonts and other assets are served from this server.",
+            "Backups: once a day the whole data folder (accounts with hashed passwords, keys as hashes, activity, notes, Worker code and versions, settings) is encrypted on this server with AES-256-GCM and stored in Cloudflare R2. Cloudflare cannot read it; the key is not stored with the backups.",
+            "GitHub: only for repository checks (above), and only for repositories a team links.",
             "Outgoing webhooks send notification text (team name, who did what) only to the URLs the team owner or admin sets.",
             "Published sites are public by design: anyone with the link can see them.",
           ],
@@ -3662,6 +3683,8 @@ function privacyText(
           "International transfers",
           [
             "Cloudflare runs a global network, so data handled by Cloudflare (above) may be processed outside the European Economic Area. Such transfers rely on the safeguards in Cloudflare's data processing terms, such as the EU Standard Contractual Clauses.",
+            dpa,
+            "GitHub is based in the United States; repository checks send it only the repository name and the server's IP address.",
           ],
         ],
         [
@@ -3670,6 +3693,9 @@ function privacyText(
             "Sites: until they expire or are deleted. Accounts, keys and team recipes: until they are deleted or revoked, or the team is deleted.",
             "Visit totals: 90 days by default. Activity log: the last 500 actions per team. Notifications: the newest 200 per team. Worker versions: the last 10 per Worker. End-user key counts: 7 days.",
             "Session cookies: 7 days (teams) or 12 hours (admin) at most. Rate-limit data stays in memory only.",
+            "Health checks: 7 days (daily totals 31 days). Agent notes: the newest 500 per team. Worker logs and analytics: a few minutes, in memory.",
+            "Deleted teams: kept for 7 days so the admin can restore them, then deleted for good. The export made at deletion is kept 30 more days, then deleted.",
+            "Backups: 14 daily and 8 weekly copies, so deleted data can remain in an encrypted backup for up to about 8 weeks before it rotates out.",
           ],
         ],
         [
@@ -3677,6 +3703,7 @@ function privacyText(
           [
             "The platform's Cloudflare API token and webhook signing secrets are encrypted at rest with AES-256-GCM, using a key that is not stored with the data.",
             "Keys and tokens are stored only as hashes (SHA-256), and passwords as scrypt hashes.",
+            "Daily backups are encrypted with AES-256-GCM before they leave the server, checked after every upload, and a restore can be tested without touching live data.",
             "Agent keys carry scopes (for example workers:read or spaces:write) and a required expiry of at most one year; calls outside a key's scopes are refused. Keys can be revoked at any time.",
             "Webhooks are signed with HMAC-SHA256. Published sites run in a sandbox with a strict content security policy, separate from the app.",
           ],
@@ -3684,7 +3711,7 @@ function privacyText(
         [
           "Your rights",
           [
-            "You can delete your sites, KV values and files, and revoke keys and tokens from the dashboard or the API at any time. A team owner can remove members; the admin can delete a team, which removes its members, keys, notifications and Workers.",
+            "You can delete your sites, KV values and files, and revoke keys and tokens from the dashboard or the API at any time. A team owner can remove members and sign the whole team out everywhere; the admin can export a team (a portable zip) and delete it, which removes its members, keys, notifications, notes and Workers after a 7-day grace period.",
             "Under the GDPR you have the right to access your personal data, to have it corrected or erased, to restrict its processing, to receive it in a portable format, and to object to processing based on legitimate interests (Articles 15 to 21).",
             `To use these rights, write to ${op.email}. We answer within one month, as the GDPR requires.`,
             `You also have the right to lodge a complaint with a data protection supervisory authority: ${auth}.`,
@@ -3695,7 +3722,7 @@ function privacyText(
   return {
     title: "سياسة الخصوصية",
     sub: "ما الذي تحفظه نسخة Marsa Spaces هذه، ولماذا، وإلى متى، ومن يتعامل معه أيضًا، وحقوقك بموجب اللائحة الأوروبية العامة لحماية البيانات (GDPR). تصف السياسة ما يفعله البرنامج فعليًا.",
-    updated: "آخر تحديث: 21 أكتوبر 2026 (الإصدار 0.14.1)",
+    updated: "آخر تحديث: 21 أكتوبر 2026 (الإصدار 0.16.0)",
     sections: [
       [
         "المسؤول عن البيانات (المتحكّم)",
@@ -3721,6 +3748,8 @@ function privacyText(
           "مفاتيح الفرق وروابط الدعوة ورموز MCP ومفاتيح الوكلاء تظهر مرة واحدة وتُحفظ كبصمات SHA-256 فقط، مع بادئة قصيرة للتمييز بينها.",
           "لكل فريق سجل نشاط بآخر 500 عملية (من فعل ماذا ومتى) يراه أعضاؤه والمدير.",
           "تُحفظ الإشعارات (النشر وتغييرات المفاتيح والأعضاء) لمالكي الفريق والمدير، آخر 200 إشعار لكل فريق.",
+          "ملاحظات الوكلاء: يمكن للوكلاء والأعضاء ترك ملاحظات قصيرة للفريق (2000 حرف على الأكثر، ويُحجب قبل الحفظ كل ما يشبه مفتاحًا أو كلمة مرور). تُحفظ آخر 500 ملاحظة لكل فريق.",
+          "الجلسات المنتهية: عند تسجيل الخروج (أو إخراج الجميع من كل الأجهزة) يحفظ الخادم معرّف الجلسة، أو وقت الإخراج الشامل، حتى موعد انتهاء الجلسة، فيتوقف الكوكي حتى بعد إعادة التشغيل.",
         ],
       ],
       [
@@ -3752,6 +3781,9 @@ function privacyText(
         [
           "كل نشر يُحفظ كإصدار على هذا الخادم: الكود والمتغيرات العادية وأسماء الأسرار ومن نشره ومتى وحجمه وبصمته SHA-256 وملاحظة اختيارية. تُحفظ آخر 10 إصدارات لكل وركر وتُحذف معه.",
           "لا تحفظ Spaces قيم الأسرار أبدًا: تذهب مباشرة إلى Cloudflare ونحفظ أسماءها فقط.",
+          "فحوص الصحة: إذا أبقاها الفريق مفعّلة، تطلب مساحات عنوان كل وركر (أو ترسل طلب MCP initialize) كل بضع دقائق وتحفظ الوقت والنتيجة ورمز الحالة وزمن الاستجابة. تُحفظ الفحوص المفردة 7 أيام والمجاميع اليومية 31 يومًا، وتُحذف مع الوركر.",
+          "السجلات والإحصاءات: لصفحات الوركرز تقرأ مساحات من Cloudflare عدد الطلبات والأخطاء ووقت المعالج وآخر سطور السجل. تبقى في الذاكرة فقط لبضع دقائق، ويُحجب قبل العرض كل ما يشبه مفتاحًا أو كلمة مرور.",
+          "فحص المستودعات: إذا ربط فريق وركر أو مساحة بمستودع GitHub، تسأل مساحات الـ API العامة لـ GitHub إن كان المستودع عامًا وإن كان الـ commit المنشور هو الأحدث. يصل إلى GitHub اسم المستودع وعنوان IP للخادم، وتُحفظ الإجابات مؤقتًا في الذاكرة.",
         ],
       ],
       [
@@ -3767,7 +3799,9 @@ function privacyText(
         "مزودو الخدمة (المعالجون) والجهات المتلقية",
         [
           "Cloudflare: إذا فعّل المدير خلفية البيانات والملفات، تُحفظ قيم KV والملفات المرفوعة للمواقع المسموح لها لدى Cloudflare ‏(Workers KV وR2). وتُنشر وركرز الفرق على شبكة Cloudflare عبر حساب Cloudflare الخاص بالمنصة، وتحفظ Cloudflare كودها ومتغيراتها وأسرارها.",
-          "قد يُقدَّم هذا الموقع عبر Cloudflare التي يمكن أن تضيف سكربت Web Analytics الخاص بها، وسياسة أمان الصفحات تسمح به. الخطوط وبقية الملفات تُقدَّم من هذا الخادم.",
+          "يُقدَّم هذا الموقع، ومنه لوحات التحكم بعد تسجيل الدخول، عبر Cloudflare التي تضيف سكربت Web Analytics الخاص بها (static.cloudflareinsights.com). يعدّ مشاهدات الصفحات ويقيس سرعة التحميل بلا كوكيز، ويصل إلى Cloudflare عنوان الصفحة والصفحة السابقة ونوع المتصفح وعنوان IP. الخطوط وبقية الملفات تُقدَّم من هذا الخادم.",
+          "النسخ الاحتياطية: مرة كل يوم يُشفَّر مجلد البيانات كاملًا (الحسابات بكلمات مرور مبصومة، والمفاتيح كبصمات، والنشاط والملاحظات وكود الوركرز وإصداراتها والإعدادات) على هذا الخادم بـ AES-256-GCM ويُحفظ في Cloudflare R2. لا تستطيع Cloudflare قراءته، والمفتاح لا يُحفظ مع النسخ.",
+          "GitHub: لفحص المستودعات فقط (أعلاه)، وللمستودعات التي يربطها فريق فقط.",
           "ترسل الـ Webhooks الصادرة نص الإشعار (اسم الفريق ومن فعل ماذا) فقط إلى الروابط التي يحددها مالك الفريق أو المدير.",
           "المواقع المنشورة عامة بطبيعتها: يستطيع أي شخص لديه الرابط رؤيتها.",
         ],
@@ -3776,6 +3810,8 @@ function privacyText(
         "النقل الدولي للبيانات",
         [
           "تشغّل Cloudflare شبكة عالمية، لذا قد تُعالَج البيانات التي تتعامل معها Cloudflare (أعلاه) خارج المنطقة الاقتصادية الأوروبية. يستند هذا النقل إلى الضمانات الواردة في شروط معالجة البيانات لدى Cloudflare، مثل البنود التعاقدية القياسية للاتحاد الأوروبي.",
+          dpa,
+          "مقر GitHub في الولايات المتحدة؛ ولا يرسل إليه فحص المستودعات إلا اسم المستودع وعنوان IP للخادم.",
         ],
       ],
       [
@@ -3784,6 +3820,9 @@ function privacyText(
           "المواقع: حتى تنتهي مدتها أو تُحذف. الحسابات والمفاتيح ووصفات الفريق: حتى تُحذف أو تُلغى أو يُحذف الفريق.",
           "مجاميع الزيارات: 90 يومًا افتراضيًا. سجل النشاط: آخر 500 عملية لكل فريق. الإشعارات: آخر 200 لكل فريق. إصدارات الوركر: آخر 10 لكل وركر. عدّادات مفاتيح المستخدمين: 7 أيام.",
           "كوكي الجلسة: 7 أيام (للفرق) أو 12 ساعة (للمدير) على الأكثر. بيانات حدود المعدل في الذاكرة فقط.",
+          "فحوص الصحة: 7 أيام (المجاميع اليومية 31 يومًا). ملاحظات الوكلاء: آخر 500 لكل فريق. سجلات الوركرز وإحصاءاتها: بضع دقائق في الذاكرة.",
+          "الفرق المحذوفة: تبقى 7 أيام ليستطيع المدير استعادتها، ثم تُحذف نهائيًا. ويبقى التصدير المأخوذ عند الحذف 30 يومًا أخرى ثم يُحذف.",
+          "النسخ الاحتياطية: 14 نسخة يومية و8 أسبوعية، لذا قد تبقى البيانات المحذوفة في نسخة مشفّرة نحو 8 أسابيع على الأكثر قبل أن تُستبدل.",
         ],
       ],
       [
@@ -3791,6 +3830,7 @@ function privacyText(
         [
           "رمز Cloudflare الخاص بالمنصة وأسرار توقيع الـ Webhooks مشفّرة أثناء التخزين بـ AES-256-GCM بمفتاح لا يُحفظ مع البيانات.",
           "المفاتيح والرموز تُحفظ كبصمات فقط (SHA-256)، وكلمات المرور كبصمات scrypt.",
+          "النسخ الاحتياطية اليومية تُشفَّر بـ AES-256-GCM قبل أن تغادر الخادم، ويُتحقَّق منها بعد كل رفع، ويمكن اختبار الاستعادة دون لمس البيانات الحية.",
           "لمفاتيح الوكلاء صلاحيات محددة (مثل workers:read أو spaces:write) وتاريخ انتهاء إلزامي لا يتجاوز سنة، ويُرفض أي طلب خارج صلاحيات المفتاح. ويمكن إلغاء المفاتيح في أي وقت.",
           "الـ Webhooks موقّعة بـ HMAC-SHA256. المواقع المنشورة تعمل في بيئة معزولة بسياسة أمان صارمة ومنفصلة عن التطبيق.",
         ],
@@ -3798,7 +3838,7 @@ function privacyText(
       [
         "حقوقك",
         [
-          "تستطيع حذف مواقعك وقيم KV والملفات، وإلغاء المفاتيح والرموز، من لوحة التحكم أو الـ API في أي وقت. يستطيع مالك الفريق إزالة الأعضاء، ويستطيع المدير حذف فريق فتُحذف معه أعضاؤه ومفاتيحه وإشعاراته ووركرزه.",
+          "تستطيع حذف مواقعك وقيم KV والملفات، وإلغاء المفاتيح والرموز، من لوحة التحكم أو الـ API في أي وقت. يستطيع مالك الفريق إزالة الأعضاء وإخراج الفريق كله من كل الأجهزة، ويستطيع المدير تصدير فريق (ملف zip قابل للنقل) وحذفه، فتُحذف أعضاؤه ومفاتيحه وإشعاراته وملاحظاته ووركرزه بعد مهلة 7 أيام.",
           "بموجب GDPR لك الحق في الاطلاع على بياناتك الشخصية، وتصحيحها أو محوها، وتقييد معالجتها، والحصول عليها بصيغة قابلة للنقل، والاعتراض على المعالجة القائمة على المصلحة المشروعة (المواد 15 إلى 21).",
           `لممارسة هذه الحقوق راسلنا على ${op.email}. نرد خلال شهر واحد كما تشترط اللائحة.`,
           `ولك أيضًا الحق في تقديم شكوى إلى سلطة رقابية لحماية البيانات: ${auth}.`,
@@ -3837,7 +3877,11 @@ export function privacyHtml(lang: Lang, c: Config): string {
     .map(
       ([h, items], i) =>
         `<section class="policy-section" aria-labelledby="p-${i}"><h2 id="p-${i}">${i === shieldAt ? `${icon("shield")} ` : ""}${esc(h)}</h2><ul>${items
-          .map((x) => `<li>${policyLine(x, op)}</li>`)
+          .map((x) =>
+            x.startsWith("[")
+              ? `<li><mark class="policy-placeholder">${esc(x)}</mark></li>`
+              : `<li>${policyLine(x, op)}</li>`,
+          )
           .join("")}</ul></section>`,
     )
     .join("");

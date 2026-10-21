@@ -1,7 +1,7 @@
 ---
 title: سيرفر MCP على وركر في المساحات
 summary: الطريقة المعتمدة لبناء سيرفر MCP عن بُعد ونشره على المساحات. قالب جاهز للتنزيل بـ TypeScript وHono وحزمة MCP الرسمية، يُنشر بدون wrangler، ومعه اختبارات وفحص حي.
-version: 3
+version: 4
 updated: 2026-10-21
 tags: mcp, workers, typescript, hono, starter
 order: 1
@@ -183,6 +183,13 @@ curl -s -X POST "$MARSA_URL/api/teams/$MARSA_TEAM/notes" -H "X-Team-Key: $MARSA_
 ```
 
 وعبر MCP استخدموا أداة `leave_note`. لا تضعوا مفاتيح أو رموزًا في الملاحظة، فهي تُحذف تلقائيًا. راجعوا وصفة *ملاحظات الإيجنتس*.
+
+## تغيير في الـ API ‏(0.16.0): قيم المتغيرات تخرج من قوائم الوركرز
+
+‏`GET /api/teams/<team>/workers` و`GET …/workers/<name>` وأداة MCP ‏`list_workers` تُرجع الآن `varNames`
+لكل وركر. حتى **2026-10-28 الساعة 12:00 UTC** تبقى `vars` بقيمها مع `varValuesDeprecated: true` وعنصر في
+`deprecations` وترويستي `Deprecation` و`Sunset`. بعد ذلك لا تُرجَع القيم إلا عند طلبها: `?includeValues=1`
+(تحتاج `workers:deploy`) أو `list_workers {"includeValues": true}`. اقرأ `varNames` (أو إعداداتك) بدل الاعتماد على القيم.
 
 ## أخطاء شائعة
 

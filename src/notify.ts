@@ -41,7 +41,12 @@ export type NoticeKind =
   | "user-key-spike"
   | "agent-note-blocker"
   | "worker-down"
-  | "worker-recovered";
+  | "worker-recovered"
+  | "backup-failed"
+  | "team-delete"
+  | "team-restore"
+  | "team-purge"
+  | "api-deprecation";
 
 /** Audit actions that also raise a notification. */
 const FROM_AUDIT = new Set<string>([
@@ -59,7 +64,12 @@ const FROM_AUDIT = new Set<string>([
   "member-remove",
   "user-key-create",
   "user-key-revoke",
+  "team-delete",
+  "team-restore",
+  "team-purge",
 ]);
+/** Raised once, from the platform audit entry (the team's own entry would duplicate it). */
+const PLATFORM_ONLY = new Set<string>(["team-delete", "team-restore", "team-purge"]);
 
 export interface Notice {
   id: string;
@@ -109,6 +119,12 @@ const T: Record<Lang, Record<NoticeKind, (n: Notice) => string>> = {
     "agent-note-blocker": (n) => `Blocker note from ${n.actor}: ${n.detail}`,
     "worker-down": (n) => `Worker down: ${n.detail}`,
     "worker-recovered": (n) => `Worker back up: ${n.detail}`,
+    "backup-failed": (n) => `Backup failed: ${n.detail}`,
+    "team-delete": (n) => `${n.actor} deleted the team ${n.detail} (restorable for 7 days)`,
+    "team-restore": (n) => `${n.actor} restored the team ${n.detail}`,
+    "team-purge": (n) => `Team permanently deleted: ${n.detail}`,
+    "api-deprecation": (n) =>
+      `API change: plain var values leave the Workers lists (API and list_workers) on ${n.detail}. Read varNames instead, or ask with includeValues=1 (needs workers:deploy).`,
   },
   ar: {
     "worker-deploy": (n) => `${n.actor} نشر Worker جديدًا: ${n.detail}`,
@@ -134,6 +150,12 @@ const T: Record<Lang, Record<NoticeKind, (n: Notice) => string>> = {
     "agent-note-blocker": (n) => `ملاحظة عائقة من ${n.actor}: ${n.detail}`,
     "worker-down": (n) => `الوركر متوقف: ${n.detail}`,
     "worker-recovered": (n) => `الوركر عاد للعمل: ${n.detail}`,
+    "backup-failed": (n) => `فشل النسخ الاحتياطي: ${n.detail}`,
+    "team-delete": (n) => `${n.actor} حذف الفريق ${n.detail} (يمكن استعادته خلال ٧ أيام)`,
+    "team-restore": (n) => `${n.actor} استعاد الفريق ${n.detail}`,
+    "team-purge": (n) => `حُذف الفريق نهائيًا: ${n.detail}`,
+    "api-deprecation": (n) =>
+      `تغيير في الـ API: قيم المتغيرات العادية ستُحذف من قوائم الـ Workers (الـ API وlist_workers) في ${n.detail}. اقرأ varNames بدلًا منها، أو اطلبها بـ includeValues=1 (تحتاج workers:deploy).`,
   },
 };
 
@@ -155,7 +177,11 @@ export const noticeTone = (k: NoticeKind): "warn" | "info" | "ok" =>
   k === "user-key-revoke" ||
   k === "user-key-spike" ||
   k === "agent-note-blocker" ||
-  k === "worker-down"
+  k === "worker-down" ||
+  k === "backup-failed" ||
+  k === "team-delete" ||
+  k === "team-purge" ||
+  k === "api-deprecation"
     ? "warn"
     : k === "backend-ok" || k === "worker-recovered"
       ? "ok"
@@ -276,8 +302,24 @@ export class NotificationCenter {
     return new Date(this.d.now()).toISOString();
   }
 
-  /** Raise a notification (and fire the webhooks). */
-  async add(n: Omit<Notice, "id" | "at">): Promise<Notice> {
+  /**
+   * 0.16.0: a bell-only notice, raised at most once per team (same kind + detail).
+   * No webhooks fire: this is an in-app notice, not a message to anyone.
+   */
+  async announce(teamIds: string[], kind: NoticeKind, detail: string): Promise<number> {
+    await this.ready();
+    let added = 0;
+    for (const teamId of teamIds) {
+      const list = this.notices.get(teamId) ?? [];
+      if (list.some((x) => x.kind === kind && x.detail === detail)) continue;
+      await this.add({ teamId, kind, actor: "Marsa Spaces", detail }, { webhook: false });
+      added++;
+    }
+    return added;
+  }
+
+  /** Raise a notification (and fire the webhooks, unless webhook: false). */
+  async add(n: Omit<Notice, "id" | "at">, opts: { webhook?: boolean } = {}): Promise<Notice> {
     await this.ready();
     const notice: Notice = { id: `n_${randomBytes(6).toString("hex")}`, at: this.iso(), ...n };
     const list = this.notices.get(n.teamId) ?? [];
@@ -285,6 +327,7 @@ export class NotificationCenter {
     if (list.length > NOTICES_KEEP) list.splice(0, list.length - NOTICES_KEEP);
     this.notices.set(n.teamId, list);
     await this.save();
+    if (opts.webhook === false) return notice;
     // Team events go to the team's hook; everything goes to the platform hook.
     if (n.teamId !== PLATFORM && this.hooks[n.teamId]) this.fire(n.teamId, notice);
     if (this.hooks[PLATFORM] && n.kind !== "webhook-test") this.fire(PLATFORM, notice);
@@ -294,6 +337,7 @@ export class NotificationCenter {
   /** Called for every audit entry; raises the ones that matter. */
   fromAudit(e: Omit<AuditEntry, "at">): void {
     if (!FROM_AUDIT.has(e.action)) return;
+    if (PLATFORM_ONLY.has(e.action) && e.teamId !== PLATFORM) return;
     const actor = e.actor.label;
     let detail = e.detail;
     if (e.action === "member-join") detail = undefined;

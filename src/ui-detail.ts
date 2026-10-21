@@ -44,6 +44,7 @@ import {
   stackCell,
   toolsCell,
 } from "./ui-insight.js";
+import { teamDeleteRows } from "./ui-lifecycle.js";
 import {
   envTab,
   healthCellHtml,
@@ -192,10 +193,6 @@ export const DX = {
     rotateHelp: "The old key stops working at once; agents and sign-ins with it end.",
     rotateConfirm: "Issue a new team key? The current one stops working at once.",
     deleteTeam: "Delete this team",
-    deleteTeamHelp:
-      "Deletes its members, keys, notifications and Workers. Its spaces stay up as plain links until they expire, unless you also delete them.",
-    alsoSites: "Also delete its spaces",
-    deleteTeamConfirm: "Delete this team? This cannot be undone.",
     workersOn: "Workers on",
     workersSlug: "Slug",
     maxWorkers: "Max Workers",
@@ -374,10 +371,6 @@ export const DX = {
     rotateHelp: "يتوقف المفتاح القديم فورًا، وتنتهي الجلسات والوكلاء الذين يستخدمونه.",
     rotateConfirm: "تصدر مفتاح فريق جديدًا؟ يتوقف الحالي فورًا.",
     deleteTeam: "احذف هذا الفريق",
-    deleteTeamHelp:
-      "يحذف أعضاءه ومفاتيحه وإشعاراته ووركرزه. تبقى مساحاته روابط عادية حتى تنتهي، إلا إذا حذفتها أيضًا.",
-    alsoSites: "احذف مساحاته أيضًا",
-    deleteTeamConfirm: "تحذف هذا الفريق؟ لا يمكن التراجع.",
     workersOn: "الوركرز مفعّلة",
     workersSlug: "الاسم المختصر",
     maxWorkers: "أقصى عدد وركرز",
@@ -1700,7 +1693,6 @@ export function adminTeamHtml(lang: Lang, c: Config, o: AdminTeamOpts): string {
 
 function adminTeamSettings(lang: Lang, o: AdminTeamOpts, self: string, base: string): string {
   const x = DX[lang];
-  const t = STRINGS[lang];
   const href = (p: string) => localePath(lang, p);
   const tm = o.team;
   const toggle = (f: "backend" | "directory" | "permanent", label: string) =>
@@ -1737,16 +1729,7 @@ function adminTeamSettings(lang: Lang, o: AdminTeamOpts, self: string, base: str
         { confirm: x.rotateConfirm },
       ),
     )}
-    ${dangerRow(
-      x.deleteTeam,
-      x.deleteTeamHelp,
-      postForm(
-        href(`${base}/delete`),
-        o.csrf,
-        `<label class="check small"><input type="checkbox" name="sites" value="delete"><span>${esc(x.alsoSites)}</span></label><button class="button small danger" type="submit">${icon("trash")}${esc(t.common.del)}</button>`,
-        { confirm: x.deleteTeamConfirm, cls: "inline-form" },
-      ),
-    )}
+    ${teamDeleteRows(lang, { base, csrf: o.csrf, name: tm.name, id: tm.id }, dangerRow)}
   </section>`;
 }
 

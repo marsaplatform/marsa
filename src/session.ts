@@ -1,4 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Config } from "./config.js";
@@ -8,8 +10,9 @@ import { hashToken, safeEqual } from "./tokens.js";
  * Browser sessions for the team dashboard and the admin console.
  *
  * A session is a signed cookie: base64url(JSON payload) + "." + HMAC-SHA256.
- * Nothing is stored server-side except a short in-memory list of sessions that
- * signed out early. The payload carries a fingerprint of the credential it was
+ * Nothing is stored server-side except the list of sessions that signed out
+ * early and "signed out everywhere" times per scope (admin / one team), kept in
+ * <dataDir>/sessions.json so a restart or deploy doesn't bring them back (0.16.0). The payload carries a fingerprint of the credential it was
  * made from (team key hash / admin token), so rotating a team key, deleting a
  * team or changing ADMIN_TOKEN ends the matching sessions at once.
  *
@@ -45,11 +48,16 @@ export class Sessions {
   readonly csrfCookieName: string;
   private readonly secure: boolean;
   private readonly revoked = new Map<string, number>();
+  /** Scope ("admin" | "team:<id>") -> sessions issued before this time are void. */
+  private readonly epochs = new Map<string, number>();
+  private readonly file: string | null;
 
   constructor(
     private readonly config: Config,
     private readonly now: () => number = Date.now,
   ) {
+    this.file = config.dataDir ? join(config.dataDir, "sessions.json") : null;
+    this.load();
     this.secure = config.publicUrl.startsWith("https://");
     // __Host- cookies must be Secure, Path=/ and have no Domain: they can't be
     // set or shadowed by another subdomain.
@@ -103,7 +111,62 @@ export class Sessions {
     if (!s || typeof s.sid !== "string" || (s.role !== "team" && s.role !== "admin")) return null;
     if (typeof s.exp !== "number" || s.exp <= this.now()) return null;
     if (this.revoked.has(s.sid)) return null;
+    if (typeof s.iat !== "number") return null;
+    const scope = s.role === "admin" ? "admin" : `team:${s.teamId ?? ""}`;
+    if (s.iat < (this.epochs.get(scope) ?? 0)) return null;
     return s;
+  }
+
+  /** End every session of a scope ("admin", or one team: key and member sessions). */
+  endAll(scope: "admin" | `team:${string}`): void {
+    // Same-millisecond sessions also end: the next sign-in gets a later iat.
+    this.epochs.set(scope, this.now() + 1);
+    this.save();
+  }
+
+  /** When endAll last ran for a scope (null if never). */
+  endedAllAt(scope: "admin" | `team:${string}`): number | null {
+    return this.epochs.get(scope) ?? null;
+  }
+
+  private load(): void {
+    if (!this.file) return;
+    try {
+      const j = JSON.parse(readFileSync(this.file, "utf8")) as {
+        revoked?: Record<string, number>;
+        epochs?: Record<string, number>;
+      };
+      const t = this.now();
+      for (const [k, exp] of Object.entries(j.revoked ?? {}))
+        if (typeof exp === "number" && exp > t) this.revoked.set(k, exp);
+      for (const [k, v] of Object.entries(j.epochs ?? {}))
+        if (typeof v === "number") this.epochs.set(k, v);
+    } catch {
+      // No file yet (or unreadable): start empty.
+    }
+  }
+
+  private save(): void {
+    if (!this.file) return;
+    const t = this.now();
+    for (const [k, exp] of this.revoked) if (exp <= t) this.revoked.delete(k);
+    // Epochs older than the longest session TTL can't void anything any more.
+    const maxTtl =
+      Math.max(this.config.sessions.adminTtlHours, this.config.sessions.teamTtlHours) * 3600_000;
+    for (const [k, v] of this.epochs) if (v + maxTtl < t) this.epochs.delete(k);
+    const body = JSON.stringify({
+      version: 1,
+      revoked: Object.fromEntries(this.revoked),
+      epochs: Object.fromEntries(this.epochs),
+    });
+    try {
+      mkdirSync(this.config.dataDir, { recursive: true });
+      const tmp = `${this.file}.${randomBytes(4).toString("hex")}.tmp`;
+      writeFileSync(tmp, body, { mode: 0o600 });
+      renameSync(tmp, this.file);
+    } catch (e) {
+      console.error(`[sessions] could not save ${this.file}: ${(e as Error).message}`);
+    }
   }
 
   /** A session cookie is present (valid or not): used to say "your session ended". */
@@ -119,6 +182,7 @@ export class Sessions {
       if (this.revoked.size > 10_000) {
         for (const [k, exp] of this.revoked) if (exp <= t) this.revoked.delete(k);
       }
+      this.save();
     }
     deleteCookie(c, this.cookieName, { path: "/", secure: this.secure });
   }

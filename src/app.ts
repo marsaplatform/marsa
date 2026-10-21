@@ -7,11 +7,12 @@ import { AgentKeyStore } from "./agent-keys.js";
 import { NoteStore } from "./agent-notes.js";
 import { mountAgentInviteRoutes, mountAgentRoutes } from "./agent-routes.js";
 import { APP_CSS, APP_JS, fontAsset } from "./assets.js";
-import { CloudflareError } from "./backend/cloudflare.js";
+import { CloudflareBackend, CloudflareError } from "./backend/cloudflare.js";
 import { probeBackend } from "./backend/health.js";
 import { mountBackendRoutes } from "./backend/routes.js";
 import type { SiteBackend } from "./backend/types.js";
-import { APP_NAME } from "./brand.js";
+import { BackupService, type BlobStore, DirBlobStore, r2BlobStore } from "./backup.js";
+import { APP_NAME, APP_VERSION } from "./brand.js";
 import { CloudflareWorkersApi, type FetchFn } from "./cf-workers.js";
 import { clientIp } from "./client-ip.js";
 import type { Config } from "./config.js";
@@ -64,6 +65,7 @@ import {
   scopeError,
   type TeamCred,
 } from "./team-auth.js";
+import { TeamLifecycle, TeamLifecycleError } from "./team-lifecycle.js";
 import {
   cleanTeamName,
   isTeamKey,
@@ -150,6 +152,9 @@ export interface AppDeps {
     userKeys: UserKeyStore;
     recipes: RecipeStore;
     ops: WorkerOps;
+    lifecycle?: TeamLifecycle;
+    backups?: BackupService;
+    workers?: WorkerService;
   }) => void;
   /** Agent recipes (0.14.0). Built from docs/recipes + <dataDir> when omitted. */
   recipes?: RecipeStore;
@@ -160,6 +165,8 @@ export interface AppDeps {
   repoChecker?: RepoChecker;
   /** 0.15.2: health checks, analytics, env view (tests inject one with a fake fetch). */
   ops?: WorkerOps;
+  /** 0.16.0: encrypted backups (tests inject one with a directory store). */
+  backups?: BackupService;
   now?: () => number;
 }
 
@@ -189,6 +196,7 @@ export function createApp({
   mcpProbe,
   repoChecker,
   ops,
+  backups: backupsDep,
 }: AppDeps) {
   const probes = mcpProbe ?? new ProbeCache(cfFetch ?? ((i, init) => fetch(i, init)), now);
   const repos =
@@ -489,6 +497,62 @@ export function createApp({
   const invalidateDirectory = () => {
     dirCache = null;
   };
+
+  // ---- 0.16.0: team trash (export, soft delete, restore, purge) and backups ----------------
+  const lifecycle = new TeamLifecycle({
+    dataDir: config.dataDir,
+    teams,
+    members,
+    agentKeys,
+    notify: notices,
+    userKeys,
+    recipes,
+    agentNotes,
+    workers: workerSvc,
+    store,
+    backend,
+    sessions: session,
+    deleteSite: (id) => deleteSite(id),
+    invalidateDirectory,
+    audit: (e) => members.log(e),
+    onPurge: async (teamId) => {
+      for (const w of workerSvc.list(teamId)) await workerOps.health.purge(w.id).catch(() => {});
+    },
+    now,
+  });
+  const backupStore: BlobStore | null =
+    backend instanceof CloudflareBackend && config.cloudflare
+      ? r2BlobStore(backend, config.cloudflare.r2Bucket)
+      : config.backup.dir
+        ? new DirBlobStore(config.backup.dir)
+        : null;
+  const backups =
+    backupsDep ??
+    new BackupService({
+      dataDir: config.dataDir,
+      store: config.backup.enabled ? backupStore : null,
+      secret: config.backup.secret,
+      app: APP_VERSION,
+      hourUtc: config.backup.hourUtc,
+      keepDaily: config.backup.keepDaily,
+      keepWeekly: config.backup.keepWeekly,
+      maxBytes: config.backup.maxBytes,
+      now,
+      onFail: (run) =>
+        void notices
+          .add({ teamId: PLATFORM_AUDIT, kind: "backup-failed", detail: run.error ?? "error" })
+          .catch(() => {}),
+    });
+  expose?.({
+    agentKeys,
+    notify: notices,
+    userKeys,
+    recipes,
+    ops: workerOps,
+    lifecycle,
+    backups,
+    workers: workerSvc,
+  });
   // Cover picks are memoised per site version, so a rebuild only re-reads changed sites.
   const coverMemo = new Map<string, { v: string; cover: Cover | null }>();
   async function coverOf(m: SiteMeta): Promise<Cover | null> {
@@ -1110,41 +1174,119 @@ export function createApp({
     return c.body(null, 204);
   });
 
+  // 0.16.0: DELETE moves the team to the trash for 7 days (export first, Workers off).
+  // ?confirm=<team name or id> is required; ?sites=delete also deletes its sites at purge;
+  // ?purge=now deletes everything at once (same confirm).
+  const lifecycleFail = (c: Context, e: unknown) => {
+    if (e instanceof TeamLifecycleError) return apiError(c, e.status, e.code, e.message);
+    throw e;
+  };
   app.delete("/api/admin/teams/:id", async (c) => {
     const id = c.req.param("id");
-    if (!teams.get(id)) return apiError(c, 404, "NOT_FOUND", "team not found");
-    // A deleted team's Workers go with it (route, DNS record, script).
-    let removedWorkers = 0;
+    const confirm = c.req.query("confirm");
     try {
-      removedWorkers = await workerSvc.teardownTeam(id, ADMIN_ACTOR);
-    } catch (e) {
-      return apiError(
-        c,
-        502,
-        "CLOUDFLARE_ERROR",
-        `could not remove the team's Workers: ${(e as Error).message}`,
-      );
-    }
-    // ?sites=delete also removes the team's sites; otherwise they stay up as
-    // ordinary links (no backend, not in the directory) until they expire.
-    let removedSites = 0;
-    if (c.req.query("sites") === "delete") {
-      for (const m of await store.list()) {
-        if (m.teamId === id) {
-          await removeSite(store, backend, m.id);
-          removedSites++;
-        }
+      const tr = await lifecycle.softDelete(id, ADMIN_ACTOR, {
+        deleteSites: c.req.query("sites") === "delete",
+        confirm,
+      });
+      if (c.req.query("purge") === "now") {
+        const r = await lifecycle.purge(id, ADMIN_ACTOR, confirm);
+        return c.json({ deleted: id, purged: true, ...r });
       }
+      return c.json({
+        deleted: id,
+        purged: false,
+        trash: {
+          deletedAt: tr.deletedAt,
+          purgeAfter: tr.purgeAfter,
+          deleteSites: tr.deleteSites,
+          workersTurnedOff: tr.disabledWorkers.length,
+          export: `/api/admin/trash/${id}/export`,
+        },
+      });
+    } catch (e) {
+      return lifecycleFail(c, e);
     }
-    await teams.delete(id);
-    await members.purgeTeam(id);
-    await agentKeys.purgeTeam(id);
-    await notices.purgeTeam(id);
-    await userKeys.purgeTeam(id);
-    await recipes.purgeTeam(id);
-    await agentNotes.purgeTeam(id);
-    invalidateDirectory();
-    return c.json({ deleted: id, removedSites, removedWorkers });
+  });
+
+  app.get("/api/admin/teams/:id/export", async (c) => {
+    const team = teams.get(c.req.param("id"));
+    if (!team) return apiError(c, 404, "NOT_FOUND", "team not found");
+    const ex = await lifecycle.exportTeam(team);
+    await members.log({ teamId: team.id, actor: ADMIN_ACTOR, action: "team-export" });
+    c.header("Content-Type", "application/zip");
+    c.header("Content-Disposition", `attachment; filename="${ex.file}"`);
+    c.header("Cache-Control", "no-store");
+    return c.body(new Uint8Array(ex.zip));
+  });
+
+  app.get("/api/admin/trash", (c) =>
+    c.json({
+      teams: teams.listTrash().map((tr) => ({
+        team: publicTeam(tr.team),
+        deletedAt: tr.deletedAt,
+        purgeAfter: tr.purgeAfter,
+        deletedBy: tr.deletedBy,
+        deleteSites: tr.deleteSites,
+        workersTurnedOff: tr.disabledWorkers.length,
+        hasExport: !!tr.exportFile,
+      })),
+    }),
+  );
+  app.get("/api/admin/trash/:id/export", async (c) => {
+    const ex = await lifecycle.trashedExport(c.req.param("id"));
+    if (!ex) return apiError(c, 404, "NOT_FOUND", "no export for that team");
+    c.header("Content-Type", "application/zip");
+    c.header("Content-Disposition", `attachment; filename="${ex.file}"`);
+    c.header("Cache-Control", "no-store");
+    return c.body(new Uint8Array(ex.zip));
+  });
+  app.post("/api/admin/trash/:id/restore", async (c) => {
+    try {
+      const r = await lifecycle.restore(c.req.param("id"), ADMIN_ACTOR);
+      return c.json({ team: publicTeam(r.team), workersOn: r.workersOn, failed: r.failed });
+    } catch (e) {
+      return lifecycleFail(c, e);
+    }
+  });
+  app.delete("/api/admin/trash/:id", async (c) => {
+    try {
+      const confirm = c.req.query("confirm") ?? "";
+      return c.json({
+        purged: c.req.param("id"),
+        ...(await lifecycle.purge(c.req.param("id"), ADMIN_ACTOR, confirm)),
+      });
+    } catch (e) {
+      return lifecycleFail(c, e);
+    }
+  });
+
+  // ---- 0.16.0: backups and sessions -----------------------------------------------------
+  app.get("/api/admin/backups", async (c) => c.json({ backups: await backups.status() }));
+  app.post("/api/admin/backups/run", async (c) => {
+    const run = await backups.run("manual");
+    await members.log({
+      teamId: PLATFORM_AUDIT,
+      actor: ADMIN_ACTOR,
+      action: run.ok ? "backup-run" : "backup-fail",
+      ...(run.key ? { detail: run.key } : run.error ? { detail: run.error } : {}),
+    });
+    return c.json({ run }, run.ok ? 200 : 502);
+  });
+  app.post("/api/admin/backups/test-restore", async (c) => {
+    const r = await backups.testRestore();
+    await members.log({
+      teamId: PLATFORM_AUDIT,
+      actor: ADMIN_ACTOR,
+      action: "backup-restore-test",
+      detail: r.ok ? `${r.files} files OK` : (r.error ?? "failed"),
+    });
+    return c.json({ restoreTest: r }, r.ok ? 200 : 502);
+  });
+  app.post("/api/admin/sessions/end-all", async (c) => {
+    session.endAll("admin");
+    await members.log({ teamId: PLATFORM_AUDIT, actor: ADMIN_ACTOR, action: "sessions-end-all" });
+    return c.json({ ok: true });
   });
 
   // ---- the app's own UI ---------------------------------------------------
@@ -1229,6 +1371,8 @@ export function createApp({
     userKeyOps: ukOps,
     mcpProbe: probes,
     repoChecker: repos,
+    lifecycle,
+    backups,
     ops: workerOps,
     notes: agentNotes,
     previewImage: async (meta, teamId) => {

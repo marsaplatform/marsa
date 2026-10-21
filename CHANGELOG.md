@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.16.0] - 2026-10-21
+
+### Added (0.16.0a: safety)
+- **Daily encrypted off-site backups**: once a day (`BACKUP_HOUR_UTC`, default 01:00 UTC) the whole data
+  folder is packed, gzip-compressed and sealed with AES-256-GCM (key derived with HKDF-SHA256 from
+  `BACKUP_KEY`, or `MARSA_SECRETS_KEY` when unset; never stored with the backups) and uploaded to the R2
+  bucket under `_marsa-backups/` (or `BACKUP_DIR` without R2). Every upload is read back and every file hash
+  checked. Retention 14 daily + 8 weekly. A failure raises an admin bell notice (and the platform webhook).
+  **Admin › Settings › Backups** shows the last / last good run, kept copies, next run and the last restore
+  test, with "Back up now", "Test a restore" (into a scratch folder, then deleted) and restore steps.
+  `node dist/backup-cli.js list | run | verify | restore <key> <empty dir>`. Admin API:
+  `GET /api/admin/backups`, `POST …/backups/run`, `POST …/backups/test-restore`.
+- **Team export**: `GET /api/admin/teams/<id>/export` (and the team's Settings tab) downloads a zip with
+  members (no password hashes), activity, spaces with their files and data, Workers with their code and
+  stored versions, agent keys and Worker API keys (no hashes), recipes, notes and notifications.
+- **Team deletion with a 7-day grace period**: deleting needs the team name typed again, saves an export
+  first, turns the team's Workers off (routes removed, scripts kept) and moves the team to **Deleted
+  teams**: its keys, agent keys and sessions stop working and its spaces leave the directory. Restore brings
+  it all back (the Workers it turned off go back on). After 7 days the sweep deletes it for good (Workers,
+  stores, and its spaces if asked); the export is kept 30 more days. Activity: `team-delete`, `team-restore`,
+  `team-purge`, `team-export`. API: `DELETE /api/admin/teams/<id>?confirm=<name|id>[&sites=delete][&purge=now]`,
+  `GET /api/admin/trash`, `GET …/trash/<id>/export`, `POST …/trash/<id>/restore`, `DELETE …/trash/<id>?confirm=`.
+- **Sessions survive restarts**: sign-outs are stored in `DATA_DIR/sessions.json`; **Sign out everywhere**
+  for the admin (Settings, `POST /api/admin/sessions/end-all`) and for team owners (team Settings).
+- Docs headings have anchors (`/docs/workers#var-values`).
+
+### Changed
+- **Plain var values are leaving the Workers lists** (deprecation, nothing breaks today):
+  `GET /api/teams/<team>/workers`, `GET …/workers/<name>`, `GET /api/admin/workers` and MCP `list_workers`
+  now return `varNames`. Until **2026-10-28 12:00 UTC** (`VAR_VALUES_SUNSET`) they still return `vars` with
+  values, flagged `varValuesDeprecated: true`, with `deprecations[]` and `Deprecation` / `Sunset` / `Link`
+  headers. After that the values come only with `?includeValues=1` (agent keys need `workers:deploy`) or
+  `list_workers {"includeValues": true}`. Announced with a one-time bell notice to every team with Workers
+  (no webhooks), in the invite onboarding (`startHere.changes`), the MCP-server recipe (v4) and the docs.
+- **Privacy policy 0.16.0** (AR + EN): health checks, Worker logs and analytics, agent notes, ended
+  sessions, GitHub repository checks, the Cloudflare Web Analytics script on all pages including dashboards,
+  encrypted backups in R2, the team trash and export, retention for each. The Cloudflare DPA reference is a
+  clearly marked placeholder until `OPERATOR_CLOUDFLARE_DPA` is set.
+- The admin teams table's Delete opens the team's Settings tab (typed confirmation) instead of deleting.
+
 ## [0.15.2] - 2026-10-21
 
 ### Added

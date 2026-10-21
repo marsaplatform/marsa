@@ -50,7 +50,7 @@ export function openapi(config: Config) {
     openapi: "3.1.0",
     info: {
       title: `${APP_NAME} API`,
-      version: "0.15.2",
+      version: "0.16.0",
       description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site. Teams can also sign in in a browser at /login (team key) to manage their sites; the admin signs in at /admin/login. Those browser routes use session cookies and are not part of this API. Each site also has an MCP server (Streamable HTTP, JSON-RPC) at /mcp/s/{siteId} with per-site bearer tokens; see /docs/mcp.`,
       license: { name: "MIT", identifier: "MIT" },
     },
@@ -244,9 +244,17 @@ export function openapi(config: Config) {
           summary: "List the team's Workers",
           operationId: "listWorkers",
           description:
-            "Team Workers (see /docs/workers). Needs the team key; {team} is the team slug or id.",
+            "Team Workers (see /docs/workers). Needs the team key; {team} is the team slug or id. 0.16.0: each Worker has varNames; plain var values (vars) are deprecated here and leave the list at the Sunset date (see the Deprecation/Sunset headers and deprecations[]); includeValues=1 (workers:deploy) keeps them.",
           security: [{ teamKey: [] }],
-          parameters: [{ name: "team", in: "path", required: true, schema: { type: "string" } }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            {
+              name: "includeValues",
+              in: "query",
+              schema: { type: "string", enum: ["1"] },
+              description: "Return plain var values (needs workers:deploy)",
+            },
+          ],
           responses: { "200": { description: "Workers and quota" } },
         },
         post: {
@@ -1088,18 +1096,130 @@ export function openapi(config: Config) {
           },
         },
         delete: {
-          summary: "Delete a team (admin)",
+          summary: "Delete a team: 7-day trash first (admin)",
           operationId: "adminDeleteTeam",
+          description:
+            "0.16.0: saves an export, turns the team's Workers off and moves the team to the trash for 7 days (keys and sessions stop working). Restore with POST /api/admin/trash/{teamId}/restore. purge=now deletes it for good at once.",
           security: [{ adminToken: [] }],
           parameters: [
+            {
+              name: "confirm",
+              in: "query",
+              required: true,
+              schema: { type: "string" },
+              description: "The team's name (or id), typed again",
+            },
             {
               name: "sites",
               in: "query",
               schema: { type: "string", enum: ["delete"] },
-              description: "Also delete the team's sites",
+              description: "Also delete the team's sites when it is purged",
+            },
+            {
+              name: "purge",
+              in: "query",
+              schema: { type: "string", enum: ["now"] },
+              description: "Skip the grace period",
             },
           ],
-          responses: { "200": { description: "Deleted" }, "404": err("No such team") },
+          responses: {
+            "200": { description: "In the trash (or purged)" },
+            "400": err("CONFIRM_MISMATCH"),
+            "404": err("No such team"),
+          },
+        },
+      },
+      "/api/admin/teams/{teamId}/export": {
+        parameters: [{ name: "teamId", in: "path", required: true, schema: { type: "string" } }],
+        get: {
+          summary: "Export a team as a zip (admin)",
+          operationId: "adminExportTeam",
+          security: [{ adminToken: [] }],
+          responses: {
+            "200": { description: "application/zip (no passwords, key hashes or secrets)" },
+            "404": err("No such team"),
+          },
+        },
+      },
+      "/api/admin/trash": {
+        get: {
+          summary: "Deleted teams in their grace period (admin)",
+          operationId: "adminListTrash",
+          security: [{ adminToken: [] }],
+          responses: { "200": { description: "{teams:[{team,deletedAt,purgeAfter,…}]}" } },
+        },
+      },
+      "/api/admin/trash/{teamId}": {
+        parameters: [{ name: "teamId", in: "path", required: true, schema: { type: "string" } }],
+        delete: {
+          summary: "Delete a trashed team for good now (admin)",
+          operationId: "adminPurgeTeam",
+          security: [{ adminToken: [] }],
+          parameters: [
+            { name: "confirm", in: "query", required: true, schema: { type: "string" } },
+          ],
+          responses: {
+            "200": { description: "Purged" },
+            "400": err("CONFIRM_MISMATCH"),
+            "404": err("Not in the trash"),
+          },
+        },
+      },
+      "/api/admin/trash/{teamId}/export": {
+        parameters: [{ name: "teamId", in: "path", required: true, schema: { type: "string" } }],
+        get: {
+          summary: "The export saved when the team was deleted (admin)",
+          operationId: "adminTrashExport",
+          security: [{ adminToken: [] }],
+          responses: { "200": { description: "application/zip" }, "404": err("No export") },
+        },
+      },
+      "/api/admin/trash/{teamId}/restore": {
+        parameters: [{ name: "teamId", in: "path", required: true, schema: { type: "string" } }],
+        post: {
+          summary: "Restore a deleted team (admin)",
+          operationId: "adminRestoreTeam",
+          security: [{ adminToken: [] }],
+          responses: { "200": { description: "Restored" }, "404": err("Not in the trash") },
+        },
+      },
+      "/api/admin/backups": {
+        get: {
+          summary: "Backup status (admin)",
+          operationId: "adminBackups",
+          security: [{ adminToken: [] }],
+          responses: {
+            "200": {
+              description: "{enabled,where,offsite,last,lastOk,kept,nextDue,restoreTest,…}",
+            },
+          },
+        },
+      },
+      "/api/admin/backups/run": {
+        post: {
+          summary: "Take an encrypted backup now (admin)",
+          operationId: "adminRunBackup",
+          security: [{ adminToken: [] }],
+          responses: {
+            "200": { description: "The run" },
+            "502": err("The backup failed (or backups are off)"),
+          },
+        },
+      },
+      "/api/admin/backups/test-restore": {
+        post: {
+          summary: "Restore the newest backup into a scratch folder and check it (admin)",
+          operationId: "adminTestRestore",
+          security: [{ adminToken: [] }],
+          responses: { "200": { description: "{ok,files?,error?}" } },
+        },
+      },
+      "/api/admin/sessions/end-all": {
+        post: {
+          summary: "End every admin session (admin)",
+          operationId: "adminEndSessions",
+          security: [{ adminToken: [] }],
+          responses: { "200": { description: "Ended" } },
         },
       },
       "/api/admin/teams/{teamId}/rotate": {

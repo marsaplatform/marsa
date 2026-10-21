@@ -223,7 +223,7 @@ describe("team members", () => {
     const { b } = await joinWith(t, path ?? "", "owner1");
     expect((await b.get("/team")).status).toBe(200);
     expect(await (await admin.get("/admin")).text()).toContain("1 member");
-    await t.admin("DELETE", `/teams/${team.id}`);
+    await t.admin("DELETE", `/teams/${team.id}?purge=now&confirm=${team.id}`);
     expect((await b.get("/team")).status).toBe(303);
     const raw = await readFile(join(t.dir, "members.json"), "utf8");
     expect(raw).not.toContain("owner1");

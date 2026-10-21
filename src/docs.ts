@@ -114,6 +114,20 @@ function rewrite(html: string, publicUrl: string): string {
 export function loadDocs(publicUrl: string): DocPage[] {
   const dir = docsDir();
   const md = new Marked({ gfm: true });
+  let seen = new Map<string, number>();
+  // 0.16.0: headings get ids, so sections can be linked (e.g. /docs/workers#var-values).
+  md.use({
+    renderer: {
+      heading({ tokens, depth, text }) {
+        const base = headingId(text);
+        const n = seen.get(base) ?? 0;
+        seen.set(base, n + 1);
+        const id = base && n ? `${base}-${n + 1}` : base;
+        const inner = this.parser.parseInline(tokens);
+        return `<h${depth}${id ? ` id="${id}"` : ""}>${inner}</h${depth}>\n`;
+      },
+    },
+  });
   const out: DocPage[] = [];
   for (const p of PAGES) {
     const path = `${dir}${p.file}`;
@@ -121,8 +135,20 @@ export function loadDocs(publicUrl: string): DocPage[] {
     const src = readFileSync(path, "utf8");
     const title = /^#\s+(.+)$/m.exec(src)?.[1]?.trim() ?? p.slug;
     const body = src.replace(/^#\s+.+\n/, "");
+    seen = new Map();
     const html = rewrite(md.parse(body, { async: false }) as string, publicUrl);
     out.push({ slug: p.slug, lang: p.lang, title, summary: p.summary, html });
   }
   return out;
+}
+
+/** A heading's anchor: lower case, letters/digits (any script) joined by dashes. */
+export function headingId(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/<[^>]*>|`/g, "")
+    .replace(/&[a-z]+;|&#\d+;/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
 }

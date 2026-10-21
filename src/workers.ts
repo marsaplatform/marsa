@@ -206,6 +206,60 @@ export const workerView = (r: WorkerRec): WorkerView => ({
   spaceId: r.spaceId ?? null,
 });
 
+// ---- 0.16.0: plain var values leave list responses (7-day deprecation) ------------------
+/** Default end of the deprecation period (VAR_VALUES_SUNSET overrides it). */
+export const VAR_VALUES_SUNSET_DEFAULT = "2026-10-28T12:00:00Z";
+/** When the change was announced (the Deprecation header). */
+export const VAR_VALUES_ANNOUNCED = "2026-10-21T12:00:00Z";
+export const VAR_VALUES_DOCS = "/docs/workers#var-values";
+
+export interface VarValuesPolicy {
+  /** The caller asked for values (?includeValues=1) and may have them (workers:deploy). */
+  includeValues: boolean;
+  now: number;
+  sunset: number;
+}
+
+/**
+ * A Worker as listed by GET …/workers, GET …/workers/:name and MCP list_workers.
+ * Always has varNames. vars (with values) stays until the sunset, flagged as
+ * deprecated; after it, only with includeValues.
+ */
+export function listedWorker(r: WorkerRec, p: VarValuesPolicy) {
+  const v = workerView(r);
+  const varNames = Object.keys(v.vars).sort();
+  if (p.includeValues) return { ...v, varNames };
+  if (p.now < p.sunset) return { ...v, varNames, varValuesDeprecated: true as const };
+  const { vars: _values, ...rest } = v;
+  return { ...rest, varNames };
+}
+
+/** The deprecation notice that goes into list responses (until the sunset, and after it). */
+export function varValuesNotice(p: VarValuesPolicy, publicUrl: string) {
+  if (p.includeValues) return null;
+  const sunset = new Date(p.sunset).toISOString();
+  return {
+    field: "vars",
+    sunset,
+    active: p.now < p.sunset,
+    message:
+      p.now < p.sunset
+        ? `Plain var values in list responses are deprecated and stop on ${sunset}. Read varNames; send ?includeValues=1 (needs workers:deploy) when you really need the values.`
+        : "Plain var values are no longer listed. Read varNames, or send ?includeValues=1 (needs workers:deploy).",
+    docs: `${publicUrl}${VAR_VALUES_DOCS}`,
+  };
+}
+
+/** Deprecation (RFC 9745), Sunset (RFC 8594) and Link headers for list responses. */
+export function varValuesHeaders(p: VarValuesPolicy, publicUrl: string): Record<string, string> {
+  if (p.includeValues) return {};
+  return {
+    Deprecation: `@${Math.floor(Date.parse(VAR_VALUES_ANNOUNCED) / 1000)}`,
+    Sunset: new Date(p.sunset).toUTCString(),
+    Link: `<${publicUrl}${VAR_VALUES_DOCS}>; rel="deprecation"`,
+  };
+}
+
 /** A stored version's runtime as deploy input (older versions: keep the current one). */
 const runtimeInput = (r: WorkerRuntime | undefined): Partial<DeployInput> =>
   r
@@ -524,7 +578,7 @@ export class WorkerService {
     if (!SLUG_RE.test(slug))
       return "slug: 2-20 lowercase letters and digits, starting with a letter";
     if (RESERVED_SLUGS.has(slug)) return "slug: this name is reserved";
-    if (this.deps.teams.list().some((t) => t.id !== teamId && t.slug === slug)) {
+    if (this.deps.teams.slugTaken(slug, teamId)) {
       return "slug: another team uses it";
     }
     if (this.list(teamId).length && this.deps.teams.get(teamId)?.slug !== slug) {

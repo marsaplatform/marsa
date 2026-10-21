@@ -862,6 +862,18 @@ html:not(.js) .kebab-menu{position:static;margin-top:6px}
 .danger-row:first-of-type,.danger-zone h2+.danger-row{border-top:0}
 .danger-row>div{min-width:0;flex:1 1 260px}
 .danger-row form{margin:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.danger-row form.delete-team-form{flex-direction:column;align-items:stretch;max-width:360px}
+.confirm-input{min-width:0;width:100%;max-width:260px}
+.restore-how{margin-top:12px}
+.restore-how summary{cursor:pointer;font-weight:650}
+.restore-steps{margin:12px 0;padding-inline-start:20px;display:grid;gap:10px}
+.restore-steps pre{margin:6px 0 0;overflow-x:auto;white-space:pre}
+.trash-list{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:0}
+.trash-row{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.trash-row:first-child{border-top:0}
+.trash-row>div:first-child{flex:1 1 260px;min-width:0}
+.trash-row .acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.trash-row form{margin:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .detail-title{min-width:0}
 .detail-title h1{display:flex;flex-wrap:wrap;gap:8px;align-items:center;overflow-wrap:anywhere;margin:0 0 6px}
 .copy-line{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0;min-width:0}

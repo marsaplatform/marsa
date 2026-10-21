@@ -53,9 +53,23 @@ export interface Config {
     apiBase: string;
     /** 0.15.2: seconds between health checks of each Worker (WORKER_HEALTH_INTERVAL_SEC). */
     healthIntervalSec: number;
+    /** 0.16.0: end of the 7-day period in which list responses still carry var values (ms). */
+    varValuesSunset: number;
   };
   /** Site ids spotlighted on the home page (FEATURED_SITES, comma-separated). */
   featuredSites: string[];
+  /** 0.16.0: encrypted daily backups of the data directory. */
+  backup: {
+    enabled: boolean;
+    /** BACKUP_KEY, else MARSA_SECRETS_KEY (never shown). */
+    secret: string;
+    /** BACKUP_DIR: local directory store when there is no R2 backend (not off-site). */
+    dir: string | null;
+    hourUtc: number;
+    keepDaily: number;
+    keepWeekly: number;
+    maxBytes: number;
+  };
 }
 
 export interface SessionConfig {
@@ -111,6 +125,11 @@ export interface Operator {
   email: string;
   /** Data protection supervisory authority people can complain to. */
   authority: { en: string; ar: string; url: string };
+  /**
+   * 0.16.0: the Cloudflare data processing agreement the operator relies on
+   * (OPERATOR_CLOUDFLARE_DPA). Empty = the policy shows a marked placeholder.
+   */
+  cloudflareDpa: string;
 }
 
 /** marsaplatform's hosted instance. Self-hosters set the OPERATOR_* variables. */
@@ -127,6 +146,8 @@ export const DEFAULT_OPERATOR: Operator = {
     ar: "Garante per la protezione dei dati personali (هيئة حماية البيانات الإيطالية)",
     url: "https://www.garanteprivacy.it",
   },
+  // Not confirmed by the operator yet: the policy shows a placeholder until this is set.
+  cloudflareDpa: "",
 };
 
 type Env = Record<string, string | undefined>;
@@ -147,6 +168,7 @@ export function loadOperator(env: Env): Operator {
     authority: auth
       ? { en: auth, ar: auth, url: env.OPERATOR_AUTHORITY_URL?.trim() || "" }
       : d.authority,
+    cloudflareDpa: env.OPERATOR_CLOUDFLARE_DPA?.trim() || d.cloudflareDpa,
   };
 }
 
@@ -210,8 +232,23 @@ export function loadConfig(env: Env = process.env): Config {
         : "2025-09-01",
       apiBase: url(env, "CLOUDFLARE_API_BASE", "https://api.cloudflare.com/client/v4"),
       healthIntervalSec: Math.min(3600, int(env, "WORKER_HEALTH_INTERVAL_SEC", 300, 60)),
+      varValuesSunset: (() => {
+        const raw = env.VAR_VALUES_SUNSET?.trim() || "2026-10-28T12:00:00Z";
+        const t = Date.parse(raw);
+        if (!Number.isFinite(t)) throw new Error(`Invalid VAR_VALUES_SUNSET: "${raw}"`);
+        return t;
+      })(),
     },
     teamMaxBytes: int(env, "TEAM_MAX_MB", 200, 1) * MB,
+    backup: {
+      enabled: bool(env, "BACKUPS", true),
+      secret: env.BACKUP_KEY?.trim() || env.MARSA_SECRETS_KEY?.trim() || "",
+      dir: env.BACKUP_DIR?.trim() || null,
+      hourUtc: Math.min(23, int(env, "BACKUP_HOUR_UTC", 1, 0)),
+      keepDaily: Math.min(90, int(env, "BACKUP_KEEP_DAILY", 14, 1)),
+      keepWeekly: Math.min(52, int(env, "BACKUP_KEEP_WEEKLY", 8, 0)),
+      maxBytes: int(env, "BACKUP_MAX_MB", 2048, 1) * MB,
+    },
     featuredSites: (env.FEATURED_SITES ?? "")
       .split(",")
       .map((x) => x.trim())

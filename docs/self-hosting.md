@@ -47,6 +47,7 @@ Every setting is an environment variable with a safe default. Copy
 | `TEAM_MAX_MB` | `200` | Default quota: MB across a team's live sites (admin can override per team) |
 | `OPERATOR_NAME` / `OPERATOR_ADDRESS` / `OPERATOR_LAW` / `OPERATOR_EMAIL` | marsaplatform / Bologna, Italy / Italy / info@marsaplatform.com | Data controller shown in the privacy policy (`/privacy`). **Set these when you self-host.** |
 | `OPERATOR_AUTHORITY` / `OPERATOR_AUTHORITY_URL` | Italian Garante / https://www.garanteprivacy.it | Supervisory authority named in the privacy policy |
+| `OPERATOR_CLOUDFLARE_DPA` | empty (a marked placeholder) | The Cloudflare data processing agreement named in the privacy policy (a URL or reference) |
 | `VISITS` | `true` | Count page views per site per day, privately (see [Teams](teams.md#visit-counts)) |
 | `VISITS_RETENTION_DAYS` | `90` | Days of visit counts kept (minimum 31) |
 | `VISITS_FLUSH_SECONDS` | `60` | How often buffered counts are written to disk |
@@ -102,5 +103,52 @@ curl -s -X DELETE https://marsa.example.com/api/admin/sites/k3v9x2mq7a -H "Autho
 
 ## Backups and upgrades
 
-All state is in `DATA_DIR` (`sites/<id>/meta.json` plus `sites/<id>/files/`, and `teams.json`). Back it up as plain
-files. To upgrade, pull the new code and rebuild the container; the data format is versionless JSON.
+All state is in `DATA_DIR` (`sites/<id>/meta.json` plus `sites/<id>/files/`, `teams.json` and the other JSON
+files). To upgrade, pull the new code and rebuild the container; the data format is versionless JSON.
+
+### Daily encrypted backups (0.16.0)
+
+Once a day (at `BACKUP_HOUR_UTC`) Spaces packs the whole data folder, compresses it, encrypts it with
+AES-256-GCM and uploads it. With the Cloudflare backend configured it goes to the same R2 bucket under
+`_marsa-backups/` (off the server); otherwise to `BACKUP_DIR` if set. Every backup is downloaded again and
+checked (hash of every file). Retention: the newest backup of each of the last 14 days plus one per week for
+8 weeks. A failure raises a bell notification for the admin (and the platform webhook). Status, "Back up now",
+"Test a restore" and these steps are on **Admin › Settings › Backups**.
+
+The key is derived (HKDF-SHA256) from `BACKUP_KEY`, or from `MARSA_SECRETS_KEY` when no separate key is
+set. It is never stored with the backups: **keep it somewhere else**, a backup cannot be opened without it.
+
+Restore (always into a new, empty folder; the live data is never overwritten):
+
+```bash
+docker compose exec marsa node dist/backup-cli.js list
+docker compose exec marsa node dist/backup-cli.js verify            # newest, or give a key
+docker compose exec marsa node dist/backup-cli.js restore _marsa-backups/2026-10/marsa-<time>.msb /data/tmp/restore
+docker compose stop marsa
+mv /var/lib/marsa-data/tmp/restore /var/lib/marsa-data.restored
+mv /var/lib/marsa-data /var/lib/marsa-data.old && mv /var/lib/marsa-data.restored /var/lib/marsa-data
+docker compose start marsa
+```
+
+(Replace `marsa` with your compose service name and `/var/lib/marsa-data` with the host folder of `/data`.)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BACKUPS` | `true` | Daily backups on/off |
+| `BACKUP_KEY` | `MARSA_SECRETS_KEY` | Secret the backup key is derived from (at least 32 characters) |
+| `BACKUP_DIR` | empty | Local folder for backups when there is no R2 backend (not off-site) |
+| `BACKUP_HOUR_UTC` | `1` | Hour of the daily run |
+| `BACKUP_KEEP_DAILY` / `BACKUP_KEEP_WEEKLY` | `14` / `8` | Retention |
+| `BACKUP_MAX_MB` | `2048` | Refuse to back up more than this |
+
+### Deleting a team (0.16.0)
+
+Deleting a team needs its name typed again. It first saves an export (zip), turns its Workers off, and moves the
+team to **Deleted teams** for 7 days: its keys, sessions and agent keys stop working and its spaces leave the
+directory. Restore brings everything back. After 7 days it is deleted for good (Workers, data, and its spaces if
+you asked); the export is kept 30 more days in `DATA_DIR/trash/`.
+
+### Sessions
+
+Sign-outs are stored in `DATA_DIR/sessions.json`, so a signed-out cookie stays dead after a restart.
+**Sign out everywhere** (admin Settings, or a team owner's Settings) ends every session of that scope.
