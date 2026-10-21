@@ -1348,10 +1348,18 @@ export class WorkerService {
     rec: WorkerView,
     tries = 3,
     gapMs = 1500,
-  ): Promise<{ path: string; status: number | null; ms: number; ok: boolean } | null> {
+  ): Promise<{
+    path: string;
+    status: number | null;
+    ms: number;
+    ok: boolean;
+    error?: string;
+    note?: string;
+  } | null> {
     if (!rec.url || !this.deps.probe || rec.status === "disabled") return null;
     const path = (rec.meta as { healthPath?: string }).healthPath || "/";
     let last = { status: null as number | null, ms: 0 };
+    let error: string | undefined;
     for (let i = 0; i < tries; i++) {
       const t0 = Date.now();
       try {
@@ -1364,12 +1372,32 @@ export class WorkerService {
         await res.body?.cancel().catch(() => {});
         last = { status: res.status, ms: Date.now() - t0 };
         if (res.status < 500) break;
-      } catch {
+      } catch (e) {
         last = { status: null, ms: Date.now() - t0 };
+        const c = (e as { cause?: { code?: unknown }; name?: string }).cause?.code;
+        error =
+          typeof c === "string"
+            ? c.slice(0, 60)
+            : (e as { name?: string }).name === "TimeoutError"
+              ? "TIMEOUT"
+              : "NO_ANSWER";
       }
       if (i < tries - 1) await new Promise((r) => setTimeout(r, gapMs));
     }
-    return { path, ...last, ok: last.status !== null && last.status < 500 };
+    const ok = last.status !== null && last.status < 500;
+    // A hostname created minutes ago may still resolve to an older (cached) answer somewhere.
+    const fresh = this.deps.now() - Date.parse(rec.createdAt) < 15 * 60_000;
+    return {
+      path,
+      ...last,
+      ok,
+      ...(!ok && last.status === null && error ? { error } : {}),
+      ...(!ok && last.status === null && fresh
+        ? {
+            note: "new hostname: DNS can take a few minutes to reach every resolver; check again with GET …/health",
+          }
+        : {}),
+    };
   }
 
   // ---- 0.17.0: Browser Integrity Check exception for team Worker hosts ----------------------

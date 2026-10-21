@@ -202,7 +202,9 @@ Every default export form works: `export default {…}`, `export default app`, `
 `export default class …`.
 
 After a successful deploy, Spaces requests the Worker once (`meta.healthPath`, or `/`) and returns
-`health: {path, status, ms, ok}` (`ok` = below 500). `?health=0` skips this request.
+`health: {path, status, ms, ok}` (`ok` = below 500). `?health=0` skips this request. When no answer came
+back, `error` says why (e.g. a TLS or DNS error). For a hostname created in the last few minutes, `note`
+says that DNS can take a few minutes to reach every resolver: check again with `GET …/health`.
 
 ### Cron triggers
 

@@ -201,7 +201,9 @@ curl -s "https://spaces.marsaplatform.com/api/teams/<team>/jobs/job_…" -H "X-T
 و`export default class …`.
 
 بعد النشر الناجح يطلب Spaces الوركر مرة واحدة (`meta.healthPath` أو `/`) ويُعيد
-`health: {path, status, ms, ok}` (`ok` = أقل من 500). `?health=0` يتخطى هذا الطلب.
+`health: {path, status, ms, ok}` (`ok` = أقل من 500). `?health=0` يتخطى هذا الطلب. إن لم يصل رد، يوضّح
+`error` السبب (مثل خطأ TLS أو DNS). ولنطاق أُنشئ قبل دقائق، يذكر `note` أن وصول DNS إلى كل المحلِّلات قد يستغرق
+بضع دقائق: تحقّق مجددًا بـ `GET …/health`.
 
 ### المشغّلات المجدولة (Cron)
 
