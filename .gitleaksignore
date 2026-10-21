@@ -1,0 +1,2 @@
+# False positive: fake "token=abc123…" fixture in a redaction test (asserts agent notes scrub it).
+948552569a129878dd0916259c6773c75c869a6f:test/v151.test.ts:generic-api-key:361
