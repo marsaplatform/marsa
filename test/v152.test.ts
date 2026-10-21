@@ -314,7 +314,7 @@ describe("0.15.2 logs and usage", () => {
     const { b } = await t.signIn(team.key, "/ar");
     const logsTab = await (await b.get("/ar/team/workers/news?tab=logs")).text();
     expect(logsTab).toContain('id="logs-table"');
-    expect(logsTab).toContain("Workers Observability: Read");
+    expect(logsTab).toContain("Workers Observability: Edit (API: Write)");
     expect(logsTab).not.toContain(FAKE_LOG_KEY);
     const usageTab = await (await b.get("/ar/team/workers/news?tab=usage&range=7d")).text();
     expect(usageTab).toContain('class="bar-req"');

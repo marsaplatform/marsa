@@ -40,6 +40,14 @@ export interface WorkersPermInput {
   now: number;
 }
 
+/**
+ * 0.16.1: the Workers Logs query (`…/workers/observability/telemetry/query`) needs the token editor's
+ * "Account · Workers Observability: Edit (API: Write)"; "Read" alone answers 403.
+ */
+export const OBS_PERMISSION = "Account · Workers Observability: Edit (API: Write)";
+export const OBS_DENIED_HINT =
+  'Cloudflare\'s logs query needs "Account · Workers Observability: Edit (API: Write)"; "Read" alone is refused with 403. Edit the same token (check its last 4 characters) and press Verify.';
+
 const mk = (
   id: string,
   permission: string,
@@ -117,7 +125,12 @@ export async function checkWorkersToken(i: WorkersPermInput): Promise<PermReport
     parameters: {},
   });
   // A 400 means the token got through auth and only the query shape was refused.
-  const obsR = !obs.ok && obs.status === 400 ? { ok: true, status: 400, message: null } : obs;
+  const obsR =
+    !obs.ok && obs.status === 400
+      ? { ok: true, status: 400, message: null }
+      : !obs.ok && (obs.status === 401 || obs.status === 403)
+        ? { ...obs, message: `${obs.message ?? `HTTP ${obs.status}`}. ${OBS_DENIED_HINT}` }
+        : obs;
   const editNote = i.lastDeployAt
     ? `edit confirmed by a successful deploy (${i.lastDeployAt})`
     : "read OK; edit is confirmed by the first deploy";
@@ -148,7 +161,7 @@ export async function checkWorkersToken(i: WorkersPermInput): Promise<PermReport
           "no Spaces Worker yet to read",
         ),
     mk("analytics", "Account · Account Analytics: Read", "usage", true, analytics),
-    mk("observability", "Account · Workers Observability: Read", "logs", true, obsR),
+    mk("observability", OBS_PERMISSION, "logs", true, obsR),
     ...(hasZone
       ? [
           mk("zone", "Zone · Zone: Read", "hosts", true, zone),

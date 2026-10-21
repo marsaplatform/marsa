@@ -103,7 +103,7 @@ export const OX = {
     turnLogsOn: "Turn Workers Logs on",
     turnLogsOff: "Turn Workers Logs off",
     wlDenied: (e: string) =>
-      `Workers Logs are on but the token cannot read them: ${e}. Add "Account · Workers Observability: Read" to the Cloudflare token.`,
+      `Workers Logs are on but the token cannot read them: ${e}. Cloudflare's logs query needs "Account · Workers Observability: Edit (API: Write)" on the token; "Read" alone is refused with 403. Edit the token whose last 4 characters match Admin › Settings, then press Verify.`,
     wlError: (e: string) => `Workers Logs query failed: ${e}`,
     anDenied: (e: string) =>
       `Analytics are not readable with this token: ${e}. Add "Account · Account Analytics: Read".`,
@@ -261,7 +261,7 @@ export const OX = {
     turnLogsOn: "تشغيل سجلات Workers",
     turnLogsOff: "إيقاف سجلات Workers",
     wlDenied: (e: string) =>
-      `سجلات Workers تعمل لكن الرمز لا يستطيع قراءتها: ${e}. أضف "Account · Workers Observability: Read" لرمز Cloudflare.`,
+      `سجلات Workers تعمل لكن الرمز لا يستطيع قراءتها: ${e}. يحتاج استعلام السجلات في Cloudflare صلاحية "Account · Workers Observability: Edit (API: Write)" على الرمز؛ صلاحية "Read" وحدها تُرفض بـ 403. عدّل الرمز الذي تطابق آخر ٤ أحرف منه ما في إعدادات الإدارة، ثم اضغط تحقّق.`,
     wlError: (e: string) => `فشل استعلام سجلات Workers: ${e}`,
     anDenied: (e: string) =>
       `التحليلات غير مقروءة بهذا الرمز: ${e}. أضف "Account · Account Analytics: Read".`,

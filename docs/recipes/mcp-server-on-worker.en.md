@@ -118,6 +118,7 @@ JSON
 - **`repo`** (optional) shows the Repo column. Spaces checks GitHub read-only and caches the result: public, private or not found, and synced or behind the branch.
 - **`requiredEnv`** (optional, 0.15.2) lists the env names the code needs. The Worker page's **Variables & secrets** tab flags any that are missing (plus names it sees as `env.X` in the code). Set or rotate one secret later without redeploying: `PUT /api/teams/<team>/workers/<name>/secrets/<NAME>` with `{"value":"…"}` (write-only; never returned), `DELETE` to remove it, or the MCP tool `set_worker_secret`. An agent key needs `workers:secrets` (or `workers:deploy`).
 - After deploying, check `GET …/workers/<name>/health`, `…/usage?range=24h` and `…/logs` (or the MCP tool `worker_status`). If something stays broken, leave a note.
+- Full log lines in `…/logs` need Workers Logs on for the Worker and the operator's Cloudflare token to have **Account · Workers Observability: Edit (API: Write)** (*Read* alone answers 403). Without it you still get error counts from analytics.
 - To change `meta`, `repo` or the linked Space later without redeploying, use `POST /api/teams/<team>/workers/<name>/links`, the MCP tool `set_worker_links`, or the Worker's **Settings** tab.
 
 With MCP (an agent connected to a Space's MCP): `deploy_worker` takes the same `code`, `vars`, `secrets`, `meta`, `repo`, `compatibilityFlags` and `bindings`.

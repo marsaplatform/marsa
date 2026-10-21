@@ -43,7 +43,7 @@ Each site has a Streamable HTTP MCP server at ${base}/mcp/s/<siteId>. Auth: Auth
 - Declare what the code needs: "requiredEnv": ["API_KEY", …] on PUT ${base}/api/teams/<team>/workers/<name>. GET …/workers/<name>/env (MCP: worker_env) lists names, types and status: "missing" = declared but not set, "unset" = read in code without a default (info only). Values are never returned.
 - Secrets: PUT …/workers/<name>/secrets/<NAME> {"value": "…"} (write-only, no redeploy; agent keys need workers:secrets) or MCP set_worker_secret. Plain vars: PUT|DELETE …/vars/<NAME>.
 - Health: GET …/workers/<name>/health. Up = web Workers answer < 400 at the URL, MCP servers answer initialize (or < 500). Declare your own check with meta {"healthPath": "/health", "healthExpect": "2xx"}.
-- Usage and errors: GET …/usage?range=24h|7d|30d and GET …/logs. MCP worker_status returns health, usage and recent errors in one call.
+- Usage and errors: GET …/usage?range=24h|7d|30d and GET …/logs. MCP worker_status returns health, usage and recent errors in one call. Full log lines need Workers Logs on for that Worker and the operator's Cloudflare token to have "Account · Workers Observability: Edit (API: Write)" ("Read" alone answers 403); without it …/logs still returns analytics error counts.
 - Every change is in the team's activity log: GET ${base}/api/teams/<team>/activity (team key; ?format=csv|jsonl).
 
 ## Limits on this instance

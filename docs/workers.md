@@ -155,7 +155,8 @@ Start from the starter template: `GET /api/recipes/mcp-server-on-worker/starter.
   lines when `POST …/logs {"enabled": true}` turned them on. Secret-like strings are redacted.
 - **Usage**: `GET …/usage?range=24h|7d|30d` — requests, errors, median CPU and requests per end-user key.
 - The Cloudflare token needs **Account · Account Analytics: Read** for usage/error counts and
-  **Account · Workers Observability: Read** for log lines; the admin Settings page checks every permission
+  **Account · Workers Observability: Edit (API: Write)** for log lines (*Read* alone is refused with 403 by the logs
+  query); the admin Settings page checks every permission
   with read-only probes and shows green/red/grey lights.
 
 ## Run & observe

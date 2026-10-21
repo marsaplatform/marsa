@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.16.1] - 2026-10-21
+
+### Fixed
+- The Workers Logs permission is now named **Account · Workers Observability: Edit (API: Write)**:
+  Edit in Cloudflare's token editor, Write in its API docs. *Read* alone is refused with 403 by the logs query.
+  The permission checklist, the Logs tab hints (EN/AR), the docs, the Worker recipe and llms.txt are
+  corrected, and a 403 on this check now explains why and what to change.
+
 ## [0.16.0] - 2026-10-21
 
 ### Added (0.16.0a: safety)
