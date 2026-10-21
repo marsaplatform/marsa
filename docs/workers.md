@@ -131,17 +131,26 @@ Start from the starter template: `GET /api/recipes/mcp-server-on-worker/starter.
 
 ## Variables & secrets, health, logs and usage (0.15.2)
 
-- **Variables & secrets** tab: names, kinds, Cloudflare types and status (set / empty / missing) for every
+- **Variables & secrets** tab: names, kinds, Cloudflare types and status (set / empty / missing / unset) for every
   var, secret and binding, read live from Cloudflare. Values are never shown or returned. Set or rotate one
   secret with `PUT /api/teams/<team>/workers/<name>/secrets/<NAME>` `{"value":"…"}` (write-only, no
   redeploy; agent keys need `workers:secrets` or `workers:deploy`), remove it with `DELETE`. Plain vars:
   `PUT|DELETE …/vars/<NAME>` (redeploys the newest stored code). Declare what the code needs with
-  `"requiredEnv": ["API_KEY", …]` on deploy; missing names (declared, or seen as `env.X` in the code) are
-  flagged. `GET …/env` returns the same view.
-- **Health**: Spaces checks every Worker every 5 minutes (GET of the URL, or MCP `initialize` for MCP
-  servers without their own auth). Two failures in a row = down: one notification (bell + webhooks) when it
-  goes down and one when it recovers. `GET|POST …/health` (`{"enabled": false}` turns it off,
-  `{"check": true}` checks now). The admin sets the interval in Settings.
+  `"requiredEnv": ["API_KEY", …]` on deploy. Since 0.16.0 only **declared** names that are not set are
+  `missing` (a warning). Names the code reads without a default (`env.X`, not `env.X ?? …` or
+  `env.X || …`) that are neither declared nor set are listed as `unset`: a muted info row, not a warning.
+  `GET …/env` (MCP: `worker_env`) returns the same view: `{entries, missing, unset, requiredEnv, source}`.
+- **Health**: Spaces checks every Worker every 5 minutes. Two failures in a row = down: one notification
+  (bell + webhooks) when it goes down and one when it recovers. `GET|POST …/health` (`{"enabled": false}`
+  turns it off, `{"check": true}` checks now). The admin sets the interval in Settings. What counts as up
+  (0.16.0):
+  - web Workers: a GET of the URL that answers **below 400** (a 404 at `/` is down);
+  - MCP servers: MCP `initialize` (2xx, or 401/403 for servers with their own auth), or a GET below 500;
+  - your own rule: declare `"meta": {"healthPath": "/health", "healthExpect": "2xx"}` on deploy, with
+    `POST …/links`, with `POST …/health {"healthPath": "/health", "healthExpect": "200-399"}`, or in the
+    Health tab. `healthExpect` takes `2xx`, `200-299`, `200,404` or `<400`, comma-separated. Empty = default.
+  - Workers that answered 4xx at `/` before 0.16.0 keep the old "below 500" rule (marked in the Health
+    tab) until you declare a path or expected status, so the upgrade raises no false alarms.
 - **Logs**: `GET …/logs` — error counts by hour and status from Cloudflare analytics, plus Workers Logs
   lines when `POST …/logs {"enabled": true}` turned them on. Secret-like strings are redacted.
 - **Usage**: `GET …/usage?range=24h|7d|30d` — requests, errors, median CPU and requests per end-user key.
@@ -149,9 +158,34 @@ Start from the starter template: `GET /api/recipes/mcp-server-on-worker/starter.
   **Account · Workers Observability: Read** for log lines; the admin Settings page checks every permission
   with read-only probes and shows green/red/grey lights.
 
+## Run & observe
+
+Once a Worker is live, an agent (or you) can run it without a Cloudflare key:
+
+1. **Declare what it needs**: `requiredEnv` on deploy. The Variables & secrets tab and `GET …/env`
+   (`worker_env`) show what is set, `missing` (declared, not set) and `unset` (used in code, info only).
+2. **Set secrets** with `PUT …/secrets/<NAME>` or `set_worker_secret` (scope `workers:secrets`). Values are
+   write-only and never returned.
+3. **Check it**: `GET …/health` and `GET …/usage` (MCP: `worker_status` returns health, usage and
+   recent errors in one call). `GET …/logs` for error lines (turn on Workers Logs first).
+4. **Fix and redeploy**: `redeploy_worker` / `rollback_worker`. Every step is in the team's activity log
+   (`GET /api/teams/<team>/activity`, team key).
+
 ## MCP tools
 
-When Workers are on for the team, a space's MCP server (see [MCP per space](mcp.md)) also offers `list_workers`, `list_worker_versions` and `get_worker_version` (read-only tokens) and `deploy_worker`, `redeploy_worker`, `rollback_worker` and `delete_worker` (read-write tokens), with the same rules as the API.
+When Workers are on for the team, a space's MCP server (see [MCP per space](mcp.md)) also offers these tools, with the same rules as the API:
+
+| Tool | Token | What it does |
+| --- | --- | --- |
+| `list_workers` | ro | The team's Workers (names, URLs, status, versions) |
+| `list_worker_versions` / `get_worker_version` | ro | Stored versions, and one version's code |
+| `worker_env` | ro | Names, types and status of vars, secrets and bindings; `missing` and `unset` names. Never values |
+| `worker_status` | ro | Health (uptime, latency), usage (requests, errors, CPU; `range` 24h/7d/30d) and recent errors |
+| `deploy_worker` / `redeploy_worker` / `rollback_worker` / `delete_worker` | rw | Deploy, redeploy the newest version, roll back, delete |
+| `set_worker_secret` | rw | Set, rotate or remove one secret (write-only) |
+| `set_worker_runtime` | rw | Compatibility flags and service bindings |
+| `set_worker_links` | rw | Declared type, language, repo link, Space page, health path |
+| `list_user_keys` / `create_user_key` / `revoke_user_key` | ro / rw | API keys for the Worker's own users |
 
 ## API keys for your Worker's users (0.14.0)
 

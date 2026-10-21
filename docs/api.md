@@ -149,3 +149,20 @@ see [Teams](teams.md).
 - `PUT|DELETE /api/teams/<team>/recipes/<slug>`: team recipes (team key, or an agent key with `spaces:write`). Body: `{"title_en","title_ar","summary_en","summary_ar","body_en","body_ar","tags"}`.
 - `GET|POST /api/teams/<team>/workers/<name>/keys`, `PUT …/keys/settings`, `DELETE …/keys/<id>`: end-user API keys for a Worker (see [Workers](workers.md)).
 - `POST /api/keys/verify` (Bearer = the Worker's `MARSA_KEYS_SECRET`) and `GET /api/keys/helper.v2.js` (`/api/keys/helper.js` redirects there): used by the Worker.
+
+## Activity and team export (0.16.0)
+
+- `GET /api/teams/<team>/activity` (team key only; agent keys get `403 TEAM_KEY_REQUIRED`): the team's activity log, newest first, as `{entries, count}`. Filters: `since` / `until` (ISO time or epoch ms), `action` (exact, or a prefix ending in `-`, e.g. `worker-`), `site`, `limit` (default 500, max 5000). `format=csv` or `format=jsonl` downloads the same rows.
+- `GET /api/admin/activity?team=<id>|platform` (admin): one team's log, the platform log, or every log without `team`. Same filters and formats; rows carry `team` (the team name).
+- `GET /api/teams/<team>/export` (team key only): a zip with the team's sites and files, Workers and versions, KV and uploads, members, agent keys, recipes, notes, notifications and the activity log. No key, token or secret value is included. The admin's `GET /api/admin/teams/<id>/export` returns the same zip.
+
+```bash
+curl -s "https://marsa.example.com/api/teams/sanad/activity?action=worker-&format=csv" \
+  -H "X-Team-Key: $MARSA_TEAM_KEY" -o activity.csv
+```
+
+## Everything else
+
+The full list of routes, including the admin API, webhooks, notifications, Worker operations
+(`…/env`, `…/secrets/<NAME>`, `…/health`, `…/logs`, `…/usage`, `…/versions/<n>`) and agent keys, is in
+[`/openapi.json`](https://marsa.example.com/openapi.json). A test keeps it in sync with the server.
