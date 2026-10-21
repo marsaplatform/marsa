@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
 import type { Context, Hono, MiddlewareHandler } from "hono";
+import {
+  ACTIVITY_MAX,
+  activityRow,
+  queryActivity,
+  readActivityQuery,
+  sendActivity,
+} from "./activity-export.js";
 import { AgentKeyError, type AgentKeyStore } from "./agent-keys.js";
 import { NoteError, type NoteStore } from "./agent-notes.js";
 import { probeBackend } from "./backend/health.js";
@@ -87,7 +94,13 @@ import {
   workerDetailHtml,
 } from "./ui-detail.js";
 import { type InsightRow, IX, mcpServersHtml } from "./ui-insight.js";
-import { backupsSection, lifecycleText, signOutAllSection, trashSection } from "./ui-lifecycle.js";
+import {
+  backupsSection,
+  lifecycleText,
+  signOutAllSection,
+  teamExportSection,
+  trashSection,
+} from "./ui-lifecycle.js";
 import { NX, notesHtml } from "./ui-notes.js";
 import { intervalForm, OX, permsSection } from "./ui-ops.js";
 import type { UserKeyOps } from "./user-key-routes.js";
@@ -767,6 +780,21 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       );
     });
 
+    app.get(`${prefix}/team/activity/export`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { query, format } = readActivityQuery((k) => c.req.query(k));
+      const rows = queryActivity(members, [ts.team.id], { ...query, limit: ACTIVITY_MAX }).map(
+        (e) => activityRow(e),
+      );
+      return sendActivity(
+        c,
+        rows,
+        format === "json" ? "csv" : format,
+        `activity-${ts.team.slug ?? ts.team.id}`,
+      );
+    });
+
     app.get(`${prefix}/team/activity`, async (c) => {
       const ts = needTeam(c);
       if (ts instanceof Response) return ts;
@@ -812,7 +840,8 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           workers: workersSummary(team),
           extra:
             ts.role === "owner"
-              ? signOutAllSection(
+              ? teamExportSection(lang, href("/team/settings/export")) +
+                signOutAllSection(
                   lang,
                   href("/team/settings/signout-everyone"),
                   sessions.csrfFor(s),
@@ -1303,15 +1332,28 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
 
     teamPost(
       "/team/account/signout-all",
-      async (c, { s, team, member }) => {
+      async (c, { s, team, member, actor }) => {
         if (!member) return done(c, s, settingsBack, { kind: "err", text: t.members.keyAccount });
         const fresh = await members.endSessions(member.id);
         if (!fresh) return done(c, s, settingsBack, { kind: "err", text: t.notFound });
         const ns = sessions.start(c, "team", memberFp(fresh), team.id, fresh.id);
+        await d.audit({ teamId: team.id, actor, action: "signout-all" });
         return done(c, ns, settingsBack, { kind: "ok", text: t.members.signedOutAll });
       },
       "viewer",
     );
+
+    app.get(`${prefix}/team/settings/export`, async (c) => {
+      const ts = needTeam(c, "owner");
+      if (ts instanceof Response) return ts;
+      if (!d.lifecycle) return c.notFound();
+      const ex = await d.lifecycle.exportTeam(ts.team);
+      await d.audit({ teamId: ts.team.id, actor: ts.actor, action: "team-export" });
+      c.header("Content-Type", "application/zip");
+      c.header("Content-Disposition", `attachment; filename="${ex.file}"`);
+      c.header("Cache-Control", "no-store");
+      return c.body(new Uint8Array(ex.zip));
+    });
 
     teamPost("/team/settings/signout-everyone", async (c, { s, team, actor }) => {
       sessions.endAll(`team:${team.id}`);
@@ -2282,11 +2324,29 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       const name = cleanTeamName(field(form, "name"));
       if (!name) return done(c, s, href("/admin"), { kind: "err", text: t.badRequest });
       const backendOn = field(form, "backend") === "1";
-      const { key } = await teams.create(name, backendOn, now(), field(form, "directory") === "1", {
-        // Permanent links follow backend access unless the admin says otherwise.
-        permanent: form.has("permanent") ? field(form, "permanent") === "1" : backendOn,
-      });
+      const { team: created, key } = await teams.create(
+        name,
+        backendOn,
+        now(),
+        field(form, "directory") === "1",
+        {
+          // Permanent links follow backend access unless the admin says otherwise.
+          permanent: form.has("permanent") ? field(form, "permanent") === "1" : backendOn,
+        },
+      );
       d.invalidateDirectory();
+      await d.audit({
+        teamId: created.id,
+        actor: ADMIN_ACTOR,
+        action: "team-create",
+        detail: name,
+      });
+      await d.audit({
+        teamId: PLATFORM_AUDIT,
+        actor: ADMIN_ACTOR,
+        action: "team-create",
+        detail: name,
+      });
       return done(c, s, href("/admin"), keyFlash(t.admin.created, key));
     });
 
@@ -2314,6 +2374,12 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       const team = await teams.update(c.req.param("id") ?? "", patch, now());
       if (!team) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
       d.invalidateDirectory();
+      await d.audit({
+        teamId: team.id,
+        actor: ADMIN_ACTOR,
+        action: "team-update",
+        detail: patchDetail(patch),
+      });
       return done(c, s, href("/admin"), { kind: "ok", text: t.admin.saved });
     });
 
@@ -2739,6 +2805,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     );
     adminPost("/admin/notifications/webhook/delete", async (c, { s }) => {
       await d.notify.clearHook(PLATFORM);
+      await d.audit({ teamId: PLATFORM_AUDIT, actor: ADMIN_ACTOR, action: "webhook-clear" });
       return done(c, s, aAlerts, { kind: "ok", text: v14.hookRemoved });
     });
 
@@ -2800,6 +2867,12 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           },
           "admin",
         );
+        await d.audit({
+          teamId: PLATFORM_AUDIT,
+          actor: ADMIN_ACTOR,
+          action: "recipe-save",
+          detail: `${r.slug} v${r.version}`,
+        });
         return done(c, s, href(`/admin/recipes/${r.slug}`), {
           kind: "ok",
           text: R14[lang].saved(r.version),
@@ -2812,6 +2885,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     adminPost("/admin/recipes/:slug/delete", async (c, { s }) => {
       await d.recipes.ready();
       const ok = await d.recipes.remove(null, c.req.param("slug") ?? "");
+      if (ok)
+        await d.audit({
+          teamId: PLATFORM_AUDIT,
+          actor: ADMIN_ACTOR,
+          action: "recipe-delete",
+          detail: c.req.param("slug") ?? "",
+        });
       return done(
         c,
         s,
@@ -2842,7 +2922,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       const back = localBack(form, href("/admin/notes"));
       if (!d.notes) return done(c, s, back, { kind: "err", text: t.notFound });
       try {
-        await d.notes.update(
+        const n = await d.notes.update(
           c.req.param("id") ?? "",
           {
             ...(form.has("status") ? { status: field(form, "status") } : {}),
@@ -2850,6 +2930,12 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           },
           "admin",
         );
+        await d.audit({
+          teamId: n.teamId,
+          actor: ADMIN_ACTOR,
+          action: "note-update",
+          detail: n.status,
+        });
       } catch (e) {
         if (e instanceof NoteError) return done(c, s, back, { kind: "err", text: e.message });
         throw e;
@@ -3013,10 +3099,16 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     wPost(
       "/admin/settings/permissions",
       async (c, { s }) => {
-        await Promise.all([
+        const reps = await Promise.all([
           d.ops?.workersPermissions(true).catch(() => null),
           d.ops?.backendPermissions(true).catch(() => null),
         ]);
+        await d.audit({
+          teamId: PLATFORM_AUDIT,
+          actor: ADMIN_ACTOR,
+          action: "permissions-recheck",
+          detail: permDetail(reps),
+        });
         return done(c, s, `${sBack}#permissions`, { kind: "ok", text: IX[lang].refreshed });
       },
       sBack,
@@ -3025,7 +3117,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       "/admin/settings/health-interval",
       async (c, { s, form }) => {
         try {
-          await d.ops?.health.setInterval(Number(field(form, "intervalSec")));
+          const sec = await d.ops?.health.setInterval(Number(field(form, "intervalSec")));
+          await d.audit({
+            teamId: PLATFORM_AUDIT,
+            actor: ADMIN_ACTOR,
+            action: "health-interval",
+            detail: `${sec}s`,
+          });
         } catch (e) {
           if (e instanceof RangeError) return done(c, s, sBack, { kind: "err", text: e.message });
           throw e;
@@ -3039,6 +3137,24 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       if (!rec) return done(c, s, wBack, { kind: "err", text: t.notFound });
       await d.workers.remove(rec, ADMIN_ACTOR);
       return done(c, s, wBack, { kind: "ok", text: WS[lang].deleted });
+    });
+
+    app.get(`${prefix}/admin/activity/export`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      const raw = c.req.query("team") ?? "";
+      const ids =
+        raw === "platform"
+          ? [PLATFORM_AUDIT]
+          : raw && teams.get(raw)
+            ? [raw]
+            : [PLATFORM_AUDIT, ...teams.list().map((x) => x.id)];
+      const { query, format } = readActivityQuery((k) => c.req.query(k));
+      const name = (id: string) => (id === PLATFORM_AUDIT ? null : (teams.get(id)?.name ?? null));
+      const rows = queryActivity(members, ids, { ...query, limit: ACTIVITY_MAX }).map((e) =>
+        activityRow(e, name),
+      );
+      return sendActivity(c, rows, format === "json" ? "csv" : format, `activity-${raw || "all"}`);
     });
 
     app.get(`${prefix}/admin/activity`, async (c) => {
@@ -3209,6 +3325,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       const on = field(form, "permanent") === "1";
       if (on && !teams.get(m.teamId)) return done(c, s, back, { kind: "err", text: t.badRequest });
       await d.setPermanent(m, on);
+      await d.audit({
+        teamId: m.teamId,
+        siteId: m.id,
+        actor: ADMIN_ACTOR,
+        action: on ? "permanent" : "permanent-off",
+        detail: m.title,
+      });
       return done(c, s, back, { kind: "ok", text: on ? t.team.madePermanent : t.admin.revoked });
     });
 
@@ -3216,11 +3339,41 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       const owner = ownerFilter(field(form, "owner"));
       const back = href(`/admin/sites${owner === "all" ? "" : `?owner=${owner}`}`);
       const id = c.req.param("id") ?? "";
-      if (!(await store.exists(id))) return done(c, s, back, { kind: "err", text: t.notFound });
+      const gone = await store.get(id);
+      if (!gone) return done(c, s, back, { kind: "err", text: t.notFound });
       await d.deleteSite(id);
+      await d.audit({
+        teamId: teams.get(gone.teamId) ? gone.teamId : PLATFORM_AUDIT,
+        siteId: id,
+        actor: ADMIN_ACTOR,
+        action: "delete",
+        detail: gone.title || id,
+      });
       return done(c, s, back, { kind: "ok", text: t.admin.siteDeleted });
     });
   }
+}
+
+/** 0.16.0: "backend on, maxSites 10" for a team update's audit entry. */
+function patchDetail(p: object): string {
+  return Object.entries(p)
+    .map(([k, v]) => (typeof v === "boolean" ? `${k} ${v ? "on" : "off"}` : `${k} ${v ?? "-"}`))
+    .join(", ")
+    .slice(0, 300);
+}
+
+/** 0.16.0: "workers ok, backend 1 missing" for a permissions recheck's audit entry. */
+function permDetail(
+  reps: (
+    | { token: string; configured: boolean; granted: number; required: number }
+    | null
+    | undefined
+  )[],
+): string {
+  return reps
+    .filter((r): r is NonNullable<typeof r> => !!r)
+    .map((r) => (r.configured ? `${r.token} ${r.granted}/${r.required}` : `${r.token} not set`))
+    .join(", ");
 }
 
 /** A "back" field limited to this app's own dashboard pages (no open redirects). */

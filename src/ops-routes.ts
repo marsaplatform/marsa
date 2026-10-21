@@ -20,6 +20,8 @@ export interface OpsRouteDeps {
   ops: WorkerOps;
   limiter: RateLimiter;
   teamAuth: TeamAuth;
+  /** 0.16.0: platform/team audit log writer (admin actions). */
+  audit?: (e: { teamId: string; actor: Actor; action: string; detail?: string }) => Promise<void>;
 }
 
 const err = (c: Context, status: number, code: string, message: string) =>
@@ -241,7 +243,14 @@ export function mountOpsRoutes(app: Hono, d: OpsRouteDeps): void {
   app.put("/api/admin/workers/health-settings", small, async (c) => {
     const b = ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
     try {
-      return c.json({ intervalSec: await ops.health.setInterval(b.intervalSec) });
+      const intervalSec = await ops.health.setInterval(b.intervalSec);
+      await d.audit?.({
+        teamId: "_platform",
+        actor: { kind: "admin", label: "admin" },
+        action: "health-interval",
+        detail: `${intervalSec}s`,
+      });
+      return c.json({ intervalSec });
     } catch (e) {
       return fail(c, e);
     }

@@ -1117,7 +1117,7 @@ export function teamActivityHtml(
     <label><span>${esc(d.search)}</span><input type="search" name="q" value="${esc(o.q)}" placeholder="${esc(d.searchPh)}"></label>
     <label><span>${esc(d.who)}</span><select name="kind"><option value="">${esc(d.everyone)}</option>${kinds.map((k) => `<option value="${k}"${o.kind === k ? " selected" : ""}>${esc(t.members.actorKinds[k])}</option>`).join("")}</select></label>
     <button class="button small" type="submit">${esc(d.filter)}</button>${o.q || o.kind ? `<a class="text-link" href="${href("/team/activity")}">${esc(d.reset)}</a>` : ""}
-  </form>`;
+  </form>${activityDownloads(lang, href("/team/activity/export"))}`;
   const body = `<div class="page-wide">
   ${teamHead(lang, o, d.activitySub, "activity")}
   ${flashBox(lang, o.flash)}
@@ -2542,6 +2542,16 @@ export function adminSettingsHtml(lang: Lang, c: Config, o: AdminSettingsOpts): 
   });
 }
 
+/** 0.16.0: download the whole log (CSV for spreadsheets, JSONL for scripts). */
+function activityDownloads(lang: Lang, base: string): string {
+  const sep = base.includes("?") ? "&" : "?";
+  const l =
+    lang === "ar"
+      ? { dl: "تنزيل السجل", csv: "CSV", jsonl: "JSONL" }
+      : { dl: "Download the log", csv: "CSV", jsonl: "JSONL" };
+  return `<p class="meta activity-dl">${icon("download")} ${esc(l.dl)}: <a class="text-link" href="${esc(`${base}${sep}format=csv`)}" download>${l.csv}</a> · <a class="text-link" href="${esc(`${base}${sep}format=jsonl`)}" download>${l.jsonl}</a></p>`;
+}
+
 export function adminActivityHtml(
   lang: Lang,
   c: Config,
@@ -2566,7 +2576,7 @@ export function adminActivityHtml(
     <label><span>${esc(d.pickTeam)}</span><select name="team">${opt("", d.allTeams, o.team)}${opt("platform", d.platform, o.team)}${o.teams.map((x) => opt(x.id, x.name, o.team)).join("")}</select></label>
     <label><span>${esc(d.who)}</span><select name="kind">${opt("", d.everyone, o.kind)}${kinds.map((k) => opt(k, t.members.actorKinds[k], o.kind)).join("")}</select></label>
     <button class="button small" type="submit">${esc(d.filter)}</button>${o.q || o.kind || o.team ? `<a class="text-link" href="${href("/admin/activity")}">${esc(d.reset)}</a>` : ""}
-  </form>`;
+  </form>${activityDownloads(lang, href(`/admin/activity/export${o.team ? `?team=${encodeURIComponent(o.team)}` : ""}`))}`;
   const table = dataTable({
     lang,
     id: "activity-table",

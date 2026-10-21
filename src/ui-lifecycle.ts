@@ -276,3 +276,13 @@ export function teamDeleteRows(
       <button class="button small danger" type="submit">${icon("trash")}${esc(x.deleteTeam)}</button></form>`,
   )}`;
 }
+
+/** Team Settings (owners): download everything the team has on Spaces. */
+export function teamExportSection(lang: Lang, action: string): string {
+  const x = L[lang];
+  return `<section class="card-block" aria-labelledby="tx-title">
+  <h2 id="tx-title" class="h3">${icon("download")} ${esc(x.exportTeam)}</h2>
+  <p class="meta">${esc(x.exportHelp)}</p>
+  <a class="button small ghost" href="${esc(action)}" download>${icon("download")}${esc(x.exportTeam)}</a>
+</section>`;
+}

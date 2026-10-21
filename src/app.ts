@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { open, readFile } from "node:fs/promises";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { activityRow, queryActivity, readActivityQuery, sendActivity } from "./activity-export.js";
 import { AgentKeyStore } from "./agent-keys.js";
 import { NoteStore } from "./agent-notes.js";
 import { mountAgentInviteRoutes, mountAgentRoutes } from "./agent-routes.js";
@@ -272,8 +273,16 @@ export function createApp({
   });
   /** Record an action on a team's site (or the team) in its audit log. */
   const audit = async (e: Omit<AuditEntry, "at" | "teamId"> & { teamId?: string }) => {
-    if (e.teamId && teams.get(e.teamId)) await members.log({ ...e, teamId: e.teamId });
+    if (e.teamId && (e.teamId === PLATFORM_AUDIT || teams.get(e.teamId)))
+      await members.log({ ...e, teamId: e.teamId });
   };
+  /** 0.16.0: a short "what changed" for team updates ("backend on, maxSites 10"). */
+  const flagDetail = (f: object) =>
+    Object.entries(f)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => (typeof v === "boolean" ? `${k} ${v ? "on" : "off"}` : `${k} ${String(v)}`))
+      .join(", ")
+      .slice(0, 300);
   /** Who is calling the API: the team key, or a site's edit token. */
   const apiActor = (c: Context): Actor =>
     credOf.get(c)?.actor ??
@@ -828,6 +837,40 @@ export function createApp({
     return c.json({ ...view(meta), editToken: token }, 201);
   });
 
+  /** 0.16.0: a team's activity log (team key only: it says who did what). */
+  const teamKeyOnly = async (c: Context) => {
+    const cred = await teamAuth(c);
+    if (!cred || cred === "invalid") return apiError(c, 401, "UNAUTHORIZED", "send the team key");
+    const want = c.req.param("team");
+    if (want !== cred.team.id && want !== cred.team.slug)
+      return apiError(c, 404, "NOT_FOUND", "this key does not belong to that team");
+    if (cred.kind !== "team")
+      return apiError(c, 403, "TEAM_KEY_REQUIRED", "this needs the team key, not an agent key");
+    return cred.team;
+  };
+  app.get("/api/teams/:team/activity", async (c) => {
+    const team = await teamKeyOnly(c);
+    if (team instanceof Response) return team;
+    const { query, format } = readActivityQuery((k) => c.req.query(k));
+    const rows = queryActivity(members, [team.id], query).map((e) => activityRow(e));
+    return sendActivity(c, rows, format, `activity-${team.slug ?? team.id}`);
+  });
+  /** 0.16.0: the team's own export (zip), with the team key. */
+  app.get("/api/teams/:team/export", async (c) => {
+    const team = await teamKeyOnly(c);
+    if (team instanceof Response) return team;
+    const ex = await lifecycle.exportTeam(team);
+    await members.log({
+      teamId: team.id,
+      actor: { kind: "key", label: "team key" },
+      action: "team-export",
+    });
+    c.header("Content-Type", "application/zip");
+    c.header("Content-Disposition", `attachment; filename="${ex.file}"`);
+    c.header("Cache-Control", "no-store");
+    return c.body(new Uint8Array(ex.zip));
+  });
+
   /** 0.14.0: a team's live sites, for the team key or an agent key with spaces:read. */
   app.get("/api/teams/:team/sites", async (c) => {
     const cred = await teamAuth(c);
@@ -985,10 +1028,10 @@ export function createApp({
       return !!m && m.teamId === teamId;
     },
   });
-  mountOpsRoutes(app, { teams, workers: workerSvc, ops: workerOps, limiter, teamAuth });
+  mountOpsRoutes(app, { teams, workers: workerSvc, ops: workerOps, limiter, teamAuth, audit });
   mountAgentRoutes(app, agentDeps);
   mountAdminRecipeRoutes(app, recipeDeps);
-  const noteDeps = { teams, notes: agentNotes, notify: notices, limiter, teamAuth };
+  const noteDeps = { teams, notes: agentNotes, notify: notices, limiter, teamAuth, audit };
   mountNoteRoutes(app, noteDeps);
   mountAdminNoteRoutes(app, noteDeps);
   app.get("/api/admin/backend/check", async (c) =>
@@ -1009,8 +1052,16 @@ export function createApp({
   app.delete("/api/admin/sites/:id", async (c) => {
     const id = c.req.param("id");
     if (!(await store.exists(id))) return apiError(c, 404, "NOT_FOUND", "site not found");
+    const meta = await store.get(id);
     await removeSite(store, backend, id);
     invalidateDirectory();
+    await audit({
+      teamId: meta?.teamId && teams.get(meta.teamId) ? meta.teamId : PLATFORM_AUDIT,
+      siteId: id,
+      actor: ADMIN_ACTOR,
+      action: "delete",
+      detail: meta?.title || id,
+    });
     return c.body(null, 204);
   });
   /** Admin: make a team site permanent, or revoke it ({ "permanent": true | false }). */
@@ -1027,11 +1078,24 @@ export function createApp({
       return apiError(c, 403, "PERMANENT_NOT_ALLOWED", "guest sites cannot be permanent");
     }
     const { files: _files, ...rest } = view(await setPermanent(meta, body.permanent));
+    await audit({
+      teamId: meta.teamId,
+      siteId: meta.id,
+      actor: ADMIN_ACTOR,
+      action: body.permanent ? "permanent" : "permanent-off",
+      detail: meta.title,
+    });
     return c.json(rest);
   });
   app.post("/api/admin/sweep", async (c) => {
     const removed = await sweepExpired(store, backend, now());
     invalidateDirectory();
+    await audit({
+      teamId: PLATFORM_AUDIT,
+      actor: ADMIN_ACTOR,
+      action: "sweep",
+      detail: `${removed.length} expired`,
+    });
     return c.json({ removed });
   });
 
@@ -1106,6 +1170,13 @@ export function createApp({
       },
     );
     invalidateDirectory();
+    await audit({ teamId: team.id, actor: ADMIN_ACTOR, action: "team-create", detail: team.name });
+    await audit({
+      teamId: PLATFORM_AUDIT,
+      actor: ADMIN_ACTOR,
+      action: "team-create",
+      detail: team.name,
+    });
     return c.json({ team: teamView(team), key }, 201);
   });
   app.patch("/api/admin/teams/:id", async (c) => {
@@ -1114,6 +1185,12 @@ export function createApp({
     const team = await teams.update(c.req.param("id"), f, now());
     if (!team) return apiError(c, 404, "NOT_FOUND", "team not found");
     invalidateDirectory();
+    await audit({
+      teamId: team.id,
+      actor: ADMIN_ACTOR,
+      action: "team-update",
+      detail: flagDetail(f),
+    });
     return c.json({ team: teamView(team) });
   });
   app.post("/api/admin/teams/:id/rotate", async (c) => {
@@ -1158,6 +1235,12 @@ export function createApp({
     const inv = members.listInvites(c.req.param("id")).find((i) => i.id === c.req.param("iid"));
     if (!inv) return apiError(c, 404, "NOT_FOUND", "invite not found");
     await members.revokeInvite(inv.id);
+    await audit({
+      teamId: c.req.param("id"),
+      actor: ADMIN_ACTOR,
+      action: "invite-revoke",
+      detail: inv.role,
+    });
     return c.body(null, 204);
   });
   app.delete("/api/admin/teams/:id/members/:mid", async (c) => {
@@ -1262,6 +1345,24 @@ export function createApp({
   });
 
   // ---- 0.16.0: backups and sessions -----------------------------------------------------
+  /** 0.16.0: the activity log of every team (or one, or the platform log). */
+  app.get("/api/admin/activity", (c) => {
+    const raw = c.req.query("team") ?? "";
+    const ids =
+      raw === "platform"
+        ? [PLATFORM_AUDIT]
+        : raw
+          ? teams.get(raw)
+            ? [raw]
+            : null
+          : [PLATFORM_AUDIT, ...teams.list().map((t) => t.id)];
+    if (!ids) return apiError(c, 404, "NOT_FOUND", "team not found");
+    const { query, format } = readActivityQuery((k) => c.req.query(k));
+    const name = (id: string) => (id === PLATFORM_AUDIT ? null : (teams.get(id)?.name ?? null));
+    const rows = queryActivity(members, ids, query).map((e) => activityRow(e, name));
+    return sendActivity(c, rows, format, `activity-${raw || "all"}`);
+  });
+
   app.get("/api/admin/backups", async (c) => c.json({ backups: await backups.status() }));
   app.post("/api/admin/backups/run", async (c) => {
     const run = await backups.run("manual");
