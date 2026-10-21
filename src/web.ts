@@ -33,6 +33,7 @@ import {
   type AuditView,
   adminSitesHtml,
   adminTeamsHtml,
+  adminWorkersHtml,
   type Flash,
   joinHtml,
   localePath,
@@ -42,8 +43,17 @@ import {
   type TeamSiteRow,
   teamHtml,
   teamSiteHtml,
+  teamWorkersHtml,
+  WS,
 } from "./ui.js";
 import type { VisitCounter, VisitSummary } from "./visits.js";
+import { PLATFORM_AUDIT, WorkerError, type WorkerService, workerView } from "./workers.js";
+import {
+  ADMIN_ACTOR,
+  applyTeamWorkers,
+  readTeamWorkers,
+  teamWorkersInfo,
+} from "./workers-routes.js";
 
 export interface WebDeps {
   config: Config;
@@ -75,6 +85,20 @@ export interface WebDeps {
   siteUrl: (id: string) => string;
   invalidateDirectory: () => void;
   siteCounts: () => Promise<Map<string, number>>;
+  workers: WorkerService;
+}
+
+/** "NAME=value" lines into an object (blank lines and # comments skipped). */
+function envLines(raw: string): Record<string, string> | string {
+  const out: Record<string, string> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const l = line.trim();
+    if (!l || l.startsWith("#")) continue;
+    const i = l.indexOf("=");
+    if (i < 1) return l.slice(0, 40);
+    out[l.slice(0, i).trim()] = l.slice(i + 1);
+  }
+  return out;
 }
 
 const LOGIN_WINDOW = 15 * 60_000;
@@ -823,6 +847,81 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       "viewer",
     );
 
+    // ---- team Workers (0.12.0) -------------------------------------------------------
+    const workersBack = href("/team/workers");
+    app.get(`${prefix}/team/workers`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const info = teamWorkersInfo(d.workers, team);
+      return page(
+        c,
+        teamWorkersHtml(lang, config, {
+          ...(await teamInfo(team)),
+          backendConfigured: !!backend,
+          sites: [],
+          me: meOf(ts),
+          info,
+          zone: d.workers.settingsView().zoneName,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+    const workerPost = (
+      path: string,
+      fn: (c: Context, ctx: TeamCtx & { form: FormData }) => Promise<Response>,
+    ) => {
+      app.post(`${prefix}${path}`, async (c) => {
+        const ts = needTeam(c, "editor");
+        if (ts instanceof Response) return ts;
+        const form = await guardPost(c, ts.s, lang, workersBack);
+        if (form instanceof Response) return form;
+        return fn(c, { ...ts, form });
+      });
+    };
+    workerPost("/team/workers/deploy", async (c, { s, team, form, actor }) => {
+      const f = form.get("file");
+      let code = field(form, "code");
+      if (f && typeof f !== "string" && f.size > 0) code = await f.text();
+      const varsRaw = field(form, "vars").trim();
+      const vars = varsRaw ? envLines(varsRaw) : undefined;
+      const secretsRaw = envLines(field(form, "secrets"));
+      if (typeof vars === "string" || typeof secretsRaw === "string") {
+        return done(c, s, workersBack, { kind: "err", text: t.badRequest });
+      }
+      const secrets: Record<string, string | null> = {};
+      for (const [k, v] of Object.entries(secretsRaw)) secrets[k] = v === "" ? null : v;
+      try {
+        const w = await d.workers.deploy(
+          team,
+          { name: field(form, "name"), code, ...(vars ? { vars } : {}), secrets },
+          actor,
+        );
+        return done(c, s, workersBack, {
+          kind: "ok",
+          text: WS[lang].deployed1,
+          ...(w.url ? { link: w.url } : {}),
+        });
+      } catch (e) {
+        if (e instanceof WorkerError)
+          return done(c, s, workersBack, { kind: "err", text: e.message });
+        throw e;
+      }
+    });
+    workerPost("/team/workers/:name/delete", async (c, { s, team, actor }) => {
+      const rec = d.workers.find(team.id, c.req.param("name") ?? "");
+      if (!rec) return done(c, s, workersBack, { kind: "err", text: t.notFound });
+      try {
+        await d.workers.remove(rec, actor);
+      } catch (e) {
+        if (e instanceof WorkerError)
+          return done(c, s, workersBack, { kind: "err", text: e.message });
+        throw e;
+      }
+      return done(c, s, workersBack, { kind: "ok", text: WS[lang].deleted });
+    });
+
     // ---- joining with an invite link -------------------------------------------------
     const joinInvalid = (c: Context) =>
       page(
@@ -1074,6 +1173,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     adminPost("/admin/teams/:id/delete", async (c, { s, form }) => {
       const id = c.req.param("id") ?? "";
       if (!teams.get(id)) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
+      try {
+        await d.workers.teardownTeam(id, ADMIN_ACTOR);
+      } catch (e) {
+        if (e instanceof WorkerError)
+          return done(c, s, href("/admin"), { kind: "err", text: e.message });
+        throw e;
+      }
       if (field(form, "sites") === "delete") {
         for (const m of await store.list()) if (m.teamId === id) await d.deleteSite(m.id);
       }
@@ -1081,6 +1187,120 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       await members.purgeTeam(id);
       d.invalidateDirectory();
       return done(c, s, href("/admin"), { kind: "ok", text: t.admin.deleted });
+    });
+
+    // ---- admin: Workers (0.12.0) ------------------------------------------------------
+    const wBack = href("/admin/workers");
+    app.get(`${prefix}/admin/workers`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      return page(
+        c,
+        adminWorkersHtml(lang, config, {
+          settings: d.workers.settingsView(),
+          teams: teams.list().map((x) => ({
+            id: x.id,
+            name: x.name,
+            workers: !!x.workers,
+            slug: x.slug ?? null,
+            maxWorkers: x.maxWorkers ?? null,
+            maxWorkerKb: x.maxWorkerKb ?? null,
+            quota: d.workers.quotaOf(x),
+            count: d.workers.list(x.id).length,
+          })),
+          workers: d.workers.list().map((r) => ({
+            ...workerView(r),
+            team: { id: r.teamId, name: teams.get(r.teamId)?.name ?? null },
+          })),
+          audit: members.entries(PLATFORM_AUDIT, undefined, 30).map((e) => auditView(e)),
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+    const wErr = (c: Context, s: Session, e: unknown) => {
+      if (e instanceof WorkerError) return done(c, s, wBack, { kind: "err", text: e.message });
+      throw e;
+    };
+    const wPost = (
+      path: string,
+      fn: (c: Context, ctx: { s: Session; form: FormData }) => Promise<Response>,
+    ) => {
+      app.post(`${prefix}${path}`, async (c) => {
+        const s = needAdmin(c);
+        if (s instanceof Response) return s;
+        const form = await guardPost(c, s, lang, wBack);
+        if (form instanceof Response) return form;
+        try {
+          return await fn(c, { s, form });
+        } catch (e) {
+          return wErr(c, s, e);
+        }
+      });
+    };
+    wPost("/admin/workers/settings", async (c, { s, form }) => {
+      const token = field(form, "token").trim();
+      await d.workers.saveSettings(
+        {
+          ...(token ? { token } : {}),
+          accountId: field(form, "accountId"),
+          zone: field(form, "zone"),
+        },
+        ADMIN_ACTOR,
+      );
+      return done(c, s, wBack, { kind: "ok", text: WS[lang].saved });
+    });
+    wPost("/admin/workers/settings/verify", async (c, { s }) => {
+      const v = await d.workers.verifySettings();
+      return done(c, s, wBack, {
+        kind: v.status === "active" ? "ok" : "err",
+        text: WS[lang].verifiedFlash(v.status ?? "?"),
+      });
+    });
+    wPost("/admin/workers/settings/clear", async (c, { s }) => {
+      await d.workers.clearSettings(ADMIN_ACTOR);
+      return done(c, s, wBack, { kind: "ok", text: WS[lang].cleared });
+    });
+    wPost("/admin/workers/teams/:id", async (c, { s, form }) => {
+      const team = teams.get(c.req.param("id") ?? "");
+      if (!team) return done(c, s, wBack, { kind: "err", text: t.notFound });
+      const num = (k: string) => {
+        const raw = field(form, k).trim();
+        return raw === "" ? null : Number(raw);
+      };
+      const patch = readTeamWorkers(d.workers, team, {
+        enabled: field(form, "enabled") === "1",
+        ...(field(form, "slug").trim() ? { slug: field(form, "slug") } : {}),
+        maxWorkers: num("maxWorkers"),
+        maxWorkerKb: num("maxWorkerKb"),
+      });
+      if (typeof patch === "string") return done(c, s, wBack, { kind: "err", text: patch });
+      await applyTeamWorkers(
+        { teams, workers: d.workers },
+        team,
+        patch,
+        now(),
+        ADMIN_ACTOR,
+        d.audit as never,
+      );
+      return done(c, s, wBack, { kind: "ok", text: WS[lang].teamSaved });
+    });
+    for (const [act, off] of [
+      ["disable", true],
+      ["enable", false],
+    ] as const) {
+      wPost(`/admin/workers/:id/${act}`, async (c, { s }) => {
+        const rec = d.workers.get(c.req.param("id") ?? "");
+        if (!rec) return done(c, s, wBack, { kind: "err", text: t.notFound });
+        await d.workers.setDisabled(rec, off, ADMIN_ACTOR);
+        return done(c, s, wBack, { kind: "ok", text: t.admin.saved });
+      });
+    }
+    wPost("/admin/workers/:id/delete", async (c, { s }) => {
+      const rec = d.workers.get(c.req.param("id") ?? "");
+      if (!rec) return done(c, s, wBack, { kind: "err", text: t.notFound });
+      await d.workers.remove(rec, ADMIN_ACTOR);
+      return done(c, s, wBack, { kind: "ok", text: WS[lang].deleted });
     });
 
     const ownerFilter = (raw: string | undefined) =>

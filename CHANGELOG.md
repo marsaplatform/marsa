@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] - 2026-10-21
+
+### Added
+- **Team Workers.** Teams deploy Cloudflare Workers through Spaces without ever seeing a
+  Cloudflare key:
+  - The admin stores one Cloudflare API token (+ account and zone) under **Admin → Workers**. It is
+    verified, encrypted at rest with AES-256-GCM (`MARSA_SECRETS_KEY`), write-only (only the last 4
+    characters are shown) and never returned by any API or logged.
+  - Per team: Workers on/off, a slug and quotas (`WORKERS_DEFAULT_MAX`=3 Workers, `WORKER_MAX_KB`=1024).
+  - Forced names: script `team-<slug>-<name>`, address `https://<slug>-<name>.<zone>` (proxied
+    `AAAA 100::` + a route), or workers.dev without a zone.
+  - Spaces only modifies or deletes scripts, routes and DNS records it created (tracked in
+    `workers.json`) and refuses names or hostnames that are already in use.
+  - Team API with the team key: `GET/POST /api/teams/<team>/workers`, `GET/PUT/DELETE
+    /api/teams/<team>/workers/<name>` (JSON or a raw `application/javascript` body; plain vars and
+    write-only secrets).
+  - Team dashboard → **Workers** (owners/editors deploy and delete; viewers read).
+  - Space MCP tools `list_workers`, `deploy_worker`, `delete_worker` when Workers are on.
+  - Admin: see all team Workers, disable/enable/delete them; turning Workers off or deleting a team
+    removes its Workers. Activity-log entries in Arabic and English.
+  - Docs: [Team Workers](docs/workers.md) and an Arabic guide section.
+
 ## [0.11.3] - 2026-10-20
 
 ### Fixed

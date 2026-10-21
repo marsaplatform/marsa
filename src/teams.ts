@@ -20,6 +20,14 @@ export interface Team {
   maxSites?: number;
   /** Quota: most bytes across live sites, in MB. Unset = TEAM_MAX_MB. */
   maxMb?: number;
+  /** May this team deploy Cloudflare Workers through Spaces? (0.12.0) */
+  workers?: boolean;
+  /** Short ASCII name used in Worker scripts and hostnames (team-<slug>-<name>). */
+  slug?: string;
+  /** Quota: most Workers. Unset = WORKERS_DEFAULT_MAX. */
+  maxWorkers?: number;
+  /** Quota: largest script, in KB. Unset = WORKER_MAX_KB. */
+  maxWorkerKb?: number;
   createdAt: string;
   updatedAt: string;
   /** SHA-256 of the team key. The key itself is shown once and never stored. */
@@ -36,6 +44,10 @@ export interface TeamPatch {
   permanent?: boolean;
   maxSites?: number | null;
   maxMb?: number | null;
+  workers?: boolean;
+  slug?: string | null;
+  maxWorkers?: number | null;
+  maxWorkerKb?: number | null;
 }
 
 /** What the admin API returns (never the key hash). */
@@ -178,6 +190,10 @@ export class TeamStore {
     // 0 (or null) clears a quota back to the server default.
     if (!next.maxSites) delete next.maxSites;
     if (!next.maxMb) delete next.maxMb;
+    if (!next.maxWorkers) delete next.maxWorkers;
+    if (!next.maxWorkerKb) delete next.maxWorkerKb;
+    if (!next.slug) delete next.slug;
+    if (!next.workers) delete next.workers;
     this.teams.set(id, next);
     await this.persist();
     return next;

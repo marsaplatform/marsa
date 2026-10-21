@@ -7,6 +7,7 @@ import { APP_CSS, APP_JS, fontAsset } from "./assets.js";
 import { mountBackendRoutes } from "./backend/routes.js";
 import type { SiteBackend } from "./backend/types.js";
 import { APP_NAME } from "./brand.js";
+import { CloudflareWorkersApi, type FetchFn } from "./cf-workers.js";
 import { clientIp } from "./client-ip.js";
 import type { Config } from "./config.js";
 import { COVER_MAX_BYTES, type Cover, looksLike, pickCover } from "./cover.js";
@@ -38,6 +39,7 @@ import { type NavAccount, withNavAccount } from "./nav-state.js";
 import { openapi } from "./openapi.js";
 import { RateLimiter } from "./rate-limit.js";
 import { SDK_JS } from "./sdk.js";
+import { SecretBox } from "./secrets.js";
 import { APP_CSP, baseHeaders, SITE_CSP } from "./security.js";
 import { Sessions } from "./session.js";
 import { PERMANENT_EXPIRES, publicMeta, type SiteMeta, type SiteStore } from "./store.js";
@@ -64,6 +66,8 @@ import {
 } from "./ui.js";
 import { VisitCounter } from "./visits.js";
 import { mountWebRoutes } from "./web.js";
+import { PLATFORM_AUDIT, WorkerService } from "./workers.js";
+import { ADMIN_ACTOR, mountWorkerRoutes } from "./workers-routes.js";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -102,6 +106,10 @@ export interface AppDeps {
   visits?: VisitCounter;
   /** Team members, invites and the audit log. Loaded from <dataDir> when omitted. */
   members?: MemberStore;
+  /** Team Workers (0.12.0). Built from config when omitted. */
+  workers?: WorkerService;
+  /** fetch used for the Cloudflare API and Worker probes (tests inject a fake). */
+  cfFetch?: FetchFn;
   now?: () => number;
 }
 
@@ -120,7 +128,22 @@ export function createApp({
   sessions,
   visits = new VisitCounter(config.dataDir, config.visits, now),
   members = new MemberStore(config.dataDir, now),
+  cfFetch,
+  workers,
 }: AppDeps) {
+  const workerSvc =
+    workers ??
+    new WorkerService(config.dataDir, {
+      box: config.secretsKey ? new SecretBox(config.secretsKey) : null,
+      api: new CloudflareWorkersApi(config.workers.apiBase, cfFetch),
+      teams,
+      limits: config.workers,
+      now,
+      probe: cfFetch ?? ((i, init) => fetch(i, init)),
+      audit: async (e) => {
+        if (e.teamId === PLATFORM_AUDIT || teams.get(e.teamId)) await members.log(e);
+      },
+    });
   /** Record an action on a team's site (or the team) in its audit log. */
   const audit = async (e: Omit<AuditEntry, "at" | "teamId"> & { teamId?: string }) => {
     if (e.teamId && teams.get(e.teamId)) await members.log({ ...e, teamId: e.teamId });
@@ -165,6 +188,7 @@ export function createApp({
   app.use("*", async (c, next) => {
     await teams.ready();
     await members.ready();
+    await workerSvc.ready();
     await next();
     baseHeaders(c.res.headers);
   });
@@ -625,6 +649,7 @@ export function createApp({
     siteUrl,
     replaceSite,
     audit,
+    workers: workerSvc,
   });
 
   // ---- optional per-site data/files backend --------------------------------
@@ -639,6 +664,7 @@ export function createApp({
     }
     await next();
   });
+  mountWorkerRoutes(app, { config, teams, members, workers: workerSvc, limiter, now });
   app.get("/api/admin/sites", async (c) => {
     const sites = (await store.list()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return c.json({
@@ -820,6 +846,18 @@ export function createApp({
   app.delete("/api/admin/teams/:id", async (c) => {
     const id = c.req.param("id");
     if (!teams.get(id)) return apiError(c, 404, "NOT_FOUND", "team not found");
+    // A deleted team's Workers go with it (route, DNS record, script).
+    let removedWorkers = 0;
+    try {
+      removedWorkers = await workerSvc.teardownTeam(id, ADMIN_ACTOR);
+    } catch (e) {
+      return apiError(
+        c,
+        502,
+        "CLOUDFLARE_ERROR",
+        `could not remove the team's Workers: ${(e as Error).message}`,
+      );
+    }
     // ?sites=delete also removes the team's sites; otherwise they stay up as
     // ordinary links (no backend, not in the directory) until they expire.
     let removedSites = 0;
@@ -834,7 +872,7 @@ export function createApp({
     await teams.delete(id);
     await members.purgeTeam(id);
     invalidateDirectory();
-    return c.json({ deleted: id, removedSites });
+    return c.json({ deleted: id, removedSites, removedWorkers });
   });
 
   // ---- the app's own UI ---------------------------------------------------
@@ -911,6 +949,7 @@ export function createApp({
     siteUrl,
     invalidateDirectory,
     siteCounts,
+    workers: workerSvc,
   });
   app.get("/docs", (c) => appPage(c, docsIndexHtml("en", config, docs)));
   app.get("/ar/docs", (c) => appPage(c, docsIndexHtml("ar", config, docs)));
