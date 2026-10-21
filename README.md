@@ -1,4 +1,27 @@
-# Marsa
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
+    <img src="docs/assets/hero-light.svg" width="100%" alt="Marsa Spaces: the harbor where your AI agent's work lands. Spaces, Workers and MCP servers.">
+  </picture>
+</p>
+
+<p align="center">
+  <a href="CHANGELOG.md"><img alt="Version 0.16.1" src="https://img.shields.io/badge/version-0.16.1-145a49"></a>
+  <a href="https://github.com/marsaplatform/marsa/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/marsaplatform/marsa/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-145a49"></a>
+  <img alt="Node.js 20+" src="https://img.shields.io/badge/Node.js-20%2B-5fa04e?logo=nodedotjs&amp;logoColor=white">
+  <img alt="Hono 4" src="https://img.shields.io/badge/Hono-4-e36002?logo=hono&amp;logoColor=white">
+  <img alt="Cloudflare Workers, KV and R2" src="https://img.shields.io/badge/Cloudflare-Workers%20%C2%B7%20KV%20%C2%B7%20R2-f38020?logo=cloudflare&amp;logoColor=white">
+  <img alt="English and Arabic" src="https://img.shields.io/badge/UI-English%20%C2%B7%20%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-52665e">
+</p>
+
+<p align="center">
+  <a href="https://spaces.marsaplatform.com"><b>Hosted instance</b></a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="docs/README.md">Docs</a> ·
+  <a href="#docs-changelog-and-security">Changelog &amp; security</a> ·
+  <a href="#بالعربي">العربية ↓</a>
+</p>
 
 **Marsa is the harbor where your AI agent's work lands.**
 Turn any static page, HTML report or prototype into a shareable link in seconds, with no account.
@@ -8,7 +31,39 @@ Turn any static page, HTML report or prototype into a shareable link in seconds,
 **edit token** to update, extend or delete it. It's one Node.js process and one data folder, with no
 database, and it's MIT licensed.
 
-> [العربية ↓](#بالعربي) · Hosted instance: <https://spaces.marsaplatform.com> · All Marsa projects: <https://marsaplatform.com/products>
+
+
+## At a glance
+
+- **Spaces**: publish a page, report or prototype with one call and get a link that expires on its own.
+- **Workers**: teams deploy Cloudflare Workers (APIs, webhooks, MCP servers) through Spaces. The admin's
+  Cloudflare token stays hidden on the server.
+- **MCP**: every space has its own MCP server, and MCP Workers get health checks and a tools list.
+- **Keys and limits**: scoped agent and end-user keys with expiry, per-key rate limits and quotas.
+- **Health and usage**: uptime probes, alerts, error counts, logs and usage charts per Worker.
+- **Safety**: daily encrypted off-site backups with restore tests, team trash and export, and an audit log.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/features-dark.svg">
+    <img src="docs/assets/features-light.svg" width="100%" alt="Marsa in the middle, connected to Spaces, Workers, MCP servers, keys and rate limits, health and usage, and encrypted backups.">
+  </picture>
+</p>
+
+### Screenshots
+
+These come from a local demo instance with made-up data.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/screenshot-team-en.webp" alt="Team dashboard overview with the getting-started checklist and space, storage and Worker counts"><br><sub>Team dashboard with the getting-started checklist</sub></td>
+    <td width="50%"><img src="docs/assets/screenshot-usage-en.webp" alt="Worker usage tab with requests, errors, CPU time and an hourly chart"><br><sub>Worker usage: requests, errors and CPU by hour</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/screenshot-workers-ar.webp" alt="Arabic Workers list with type, status and versions"><br><sub>Workers list in Arabic (RTL)</sub></td>
+    <td width="50%"><img src="docs/assets/screenshot-admin-ar.webp" alt="Arabic admin overview with teams, spaces and Workers"><br><sub>Admin overview in Arabic</sub></td>
+  </tr>
+</table>
 
 ## Why Marsa
 
@@ -299,6 +354,18 @@ docs/      guides served at /docs        examples/  sample sites, CI workflow, a
 test/      vitest suites                 scripts/   smoke.mjs, cloudflare-setup.mjs, rename.mjs
 ```
 
+## Docs, changelog and security
+
+| | |
+| --- | --- |
+| **Guides** | [Getting started](docs/getting-started.md) · [API](docs/api.md) · [Agents](docs/agents.md) · [MCP](docs/mcp.md) · [Teams](docs/teams.md) · [Workers](docs/workers.md) · [Agent keys](docs/agent-keys.md) · [Data backend](docs/backend.md) |
+| **Deploy** | [Self-hosting](docs/self-hosting.md) (Docker, env vars, reverse proxy, backups) |
+| **Recipes for agents** | [docs/recipes](docs/recipes) (MCP server on a Worker, protecting MCP with keys, security rules) |
+| **Arabic docs** | [docs/ar](docs/ar) · [الدليل](docs/ar/guide.md) |
+| **Changelog and roadmap** | [CHANGELOG.md](CHANGELOG.md) · [open issues](https://github.com/marsaplatform/marsa/issues) |
+| **Security** | [SECURITY.md](SECURITY.md) (report a vulnerability privately) |
+| **Privacy** | `/privacy` on every instance ([hosted](https://spaces.marsaplatform.com/privacy)) |
+
 ## Contributing
 
 ```bash
@@ -339,6 +406,20 @@ Marsa is open source because a place to drop work should be one you control:
 
 **Marsa هو المرسى اللي شغل الـ AI agent بتاعك بيرسى فيه.**
 حوّل أي صفحة ثابتة أو تقرير HTML أو نموذج أولي لرابط تشاركه في ثواني، من غير حساب.
+
+### شكلها إيه
+
+<p align="center">
+  <img src="docs/assets/screenshot-workers-ar.webp" width="49%" alt="قائمة الوركرز بالعربي">
+  <img src="docs/assets/screenshot-admin-ar.webp" width="49%" alt="نظرة عامة في لوحة المسؤول بالعربي">
+</p>
+
+- **المساحات**: انشر صفحة أو تقرير بطلب واحد، وخد رابط بينتهي لوحده.
+- **الوركرز**: الفرق بتنشر Cloudflare Workers (واجهات API وwebhooks وخوادم MCP) من خلال Spaces، ومفتاح Cloudflare بيفضل مخفي على السيرفر.
+- **MCP**: كل مساحة ليها خادم MCP، وخوادم MCP على الوركرز ليها فحص صحة وقائمة أدوات.
+- **المفاتيح والحدود**: مفاتيح للـ agents وللمستخدمين بصلاحيات ومدة، وحدود طلبات لكل مفتاح.
+- **الصحة والاستخدام**: فحص تشغيل وتنبيهات وأعداد أخطاء وسجلات ورسوم استخدام لكل وركر.
+- **الأمان**: نسخ احتياطية مشفّرة يومية خارج السيرفر مع اختبار استعادة، وسلة محذوفات للفرق وتصدير وسجل نشاط.
 
 ### ليه Marsa؟
 - الـ agents بتطلّع HTML، والناس محتاجة روابط. طلب HTTP واحد بيحوّل الشغل لرابط.
@@ -385,6 +466,9 @@ npm install && npm run dev
 
 ### إزاي تساهم
 اعمل fork، وبعدين `npm install`، واعمل التعديل ومعاه اختبار، وخلي نصوص الواجهة بالعربي والإنجليزي، وشغّل `npm run lint && npm run typecheck && npm test`، وافتح Pull Request.
+
+### روابط
+[الدليل](docs/ar/guide.md) · [الوركرز](docs/ar/workers.md) · [التشغيل على سيرفرك](docs/ar/self-hosting.md) · [سجل التغييرات](CHANGELOG.md) · [الأمان](SECURITY.md) · [الخصوصية](https://spaces.marsaplatform.com/ar/privacy)
 
 ### الترخيص وليه مفتوح المصدر
 MIT، ومبني على canvas-drop (MIT). مفتوح المصدر علشان تشغّله عندك، وبياناتك تفضل معاك، وتبني عليه.

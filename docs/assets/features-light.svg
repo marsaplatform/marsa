@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="t d">
+<title id="t">What Marsa Spaces does</title><desc id="d">A hub connected to six features: Spaces, Workers, MCP servers, keys and rate limits, health and usage, and encrypted backups.</desc>
+<style>
+text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Tahoma,Arial,'Noto Sans','Noto Sans Arabic',sans-serif}
+.ct{font-size:19px;font-weight:700;fill:#152e29}
+.cs{font-size:14px;fill:#52665e}
+.hub{font-size:24px;font-weight:800;fill:#f5f8f5}
+.hubs{font-size:11.5px;fill:#f5f8f5;opacity:.85}
+.flow{stroke:#145a49;stroke-width:2;stroke-dasharray:6 10;fill:none;opacity:.6;animation:flow 2.6s linear infinite}
+.ring{transform-origin:600px 280px;animation:ring 4s ease-in-out infinite}
+.bob{animation:bob 7s ease-in-out infinite}
+.blink{animation:blink 2.4s ease-in-out infinite}
+@keyframes flow{to{stroke-dashoffset:-64}}
+@keyframes ring{0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(1.08);opacity:.5}}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion: reduce){.w1,.w2,.bob,.blink,.beam,.flow,.ring{animation:none}}
+</style>
+<rect width="1200" height="560" rx="24" fill="#f5f8f5" stroke="#cedbd2"/>
+<path d="M600 280 L170 110" class="flow" style="animation-delay:-0.0s"/><path d="M600 280 L600 70" class="flow" style="animation-delay:-0.4s"/><path d="M600 280 L1030 110" class="flow" style="animation-delay:-0.8s"/><path d="M600 280 L170 450" class="flow" style="animation-delay:-1.2000000000000002s"/><path d="M600 280 L600 490" class="flow" style="animation-delay:-1.6s"/><path d="M600 280 L1030 450" class="flow" style="animation-delay:-2.0s"/><g><circle cx="600" cy="280" r="78" fill="#dceccf" class="ring"/><circle cx="600" cy="280" r="62" fill="#145a49"/>
+<text x="600" y="276" text-anchor="middle" class="hub">Marsa</text><text x="600" y="300" text-anchor="middle" class="hubs">one process</text></g><g class="bob" style="animation-delay:-0.0s"><rect x="30" y="66" width="280" height="88" rx="16" fill="#fbfcfa" stroke="#cedbd2"/>
+<circle cx="54" cy="94" r="7" fill="#145a49" class="blink" style="animation-delay:-0.0s"/>
+<text x="70" y="100" class="ct">Spaces</text><text x="50" y="124" class="cs">Upload a folder, get a link</text><text x="50" y="142" class="cs">that expires on its own</text></g><g class="bob" style="animation-delay:-0.9s"><rect x="460" y="26" width="280" height="88" rx="16" fill="#fbfcfa" stroke="#cedbd2"/>
+<circle cx="484" cy="54" r="7" fill="#145a49" class="blink" style="animation-delay:-0.5s"/>
+<text x="500" y="60" class="ct">Workers</text><text x="480" y="84" class="cs">Deploy to Cloudflare through</text><text x="480" y="102" class="cs">Spaces, no key for the team</text></g><g class="bob" style="animation-delay:-1.8s"><rect x="890" y="66" width="280" height="88" rx="16" fill="#fbfcfa" stroke="#cedbd2"/>
+<circle cx="914" cy="94" r="7" fill="#145a49" class="blink" style="animation-delay:-1.0s"/>
+<text x="930" y="100" class="ct">MCP servers</text><text x="910" y="124" class="cs">One per space, plus</text><text x="910" y="142" class="cs">MCP Workers with health</text></g><g class="bob" style="animation-delay:-2.7s"><rect x="30" y="406" width="280" height="88" rx="16" fill="#fbfcfa" stroke="#cedbd2"/>
+<circle cx="54" cy="434" r="7" fill="#145a49" class="blink" style="animation-delay:-1.5s"/>
+<text x="70" y="440" class="ct">Keys &amp; rate limits</text><text x="50" y="464" class="cs">Agent and user keys,</text><text x="50" y="482" class="cs">scopes, per-key quotas</text></g><g class="bob" style="animation-delay:-3.6s"><rect x="460" y="446" width="280" height="88" rx="16" fill="#fbfcfa" stroke="#cedbd2"/>
+<circle cx="484" cy="474" r="7" fill="#145a49" class="blink" style="animation-delay:-2.0s"/>
+<text x="500" y="480" class="ct">Health &amp; usage</text><text x="480" y="504" class="cs">Probes, alerts, error</text><text x="480" y="522" class="cs">counts and usage charts</text></g><g class="bob" style="animation-delay:-4.5s"><rect x="890" y="406" width="280" height="88" rx="16" fill="#fbfcfa" stroke="#cedbd2"/>
+<circle cx="914" cy="434" r="7" fill="#145a49" class="blink" style="animation-delay:-2.5s"/>
+<text x="930" y="440" class="ct">Encrypted backups</text><text x="910" y="464" class="cs">Daily AES-256-GCM, off-site</text><text x="910" y="482" class="cs">on R2, restore-tested</text></g>
+</svg>
