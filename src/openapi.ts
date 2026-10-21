@@ -50,7 +50,7 @@ export function openapi(config: Config) {
     openapi: "3.1.0",
     info: {
       title: `${APP_NAME} API`,
-      version: "0.14.1",
+      version: "0.15.0",
       description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site. Teams can also sign in in a browser at /login (team key) to manage their sites; the admin signs in at /admin/login. Those browser routes use session cookies and are not part of this API. Each site also has an MCP server (Streamable HTTP, JSON-RPC) at /mcp/s/{siteId} with per-site bearer tokens; see /docs/mcp.`,
       license: { name: "MIT", identifier: "MIT" },
     },
@@ -264,7 +264,7 @@ export function openapi(config: Config) {
           summary: "Create or redeploy a Worker",
           operationId: "putWorker",
           description:
-            'JSON {"code","vars"?,"secrets"?} or the raw script as application/javascript. Omitted vars are kept; secrets are write-only (null removes one).',
+            'JSON {"code","vars"?,"secrets"?,"compatibilityDate"?,"compatibilityFlags"?,"bindings"?} or the raw script as application/javascript. Omitted vars and runtime settings are kept; secrets are write-only (null removes one). compatibilityFlags is allowlisted (global_fetch_strictly_public, nodejs_compat, nodejs_als). bindings are service bindings to Workers of the same team only: [{"name":"NEWS","worker":"news"}]; 409 WORKER_BOUND when deleting a Worker another one binds to.',
           security: [{ teamKey: [] }],
           parameters: [
             { name: "team", in: "path", required: true, schema: { type: "string" } },
@@ -317,6 +317,23 @@ export function openapi(config: Config) {
             { name: "n", in: "path", required: true, schema: { type: "integer" } },
           ],
           responses: { "200": { description: "The script (text/javascript)" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/runtime": {
+        post: {
+          summary: "Set compatibility date/flags and same-team service bindings",
+          operationId: "setWorkerRuntime",
+          description:
+            'JSON {"compatibilityDate"?: "YYYY-MM-DD"|null, "compatibilityFlags"?: [..], "bindings"?: [{"name","worker"}]}. Redeploys the newest stored code with them (a new version); the bound Workers are not changed. 409 NO_STORED_VERSION when nothing is stored yet.',
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: {
+            "200": { description: "Redeployed" },
+            "400": { description: "Invalid flag, date or binding" },
+          },
         },
       },
       "/api/teams/{team}/workers/{name}/redeploy": {

@@ -48,7 +48,7 @@ async function setup(app: App, flags: Record<string, unknown> = {}, scope = "ro"
   const res = await b.post(`${page}/mcp`, { _csrf: csrf, name: "Laptop", scope });
   expect(res.status).toBe(303);
   const loc = res.headers.get("location") ?? "";
-  expect(loc).toMatch(/\?f=[^#]+#mcp$/);
+  expect(loc).toMatch(/\?tab=mcp&f=[^#]+$/);
   const html = await (await b.get(new URL(loc, BASE).pathname + new URL(loc, BASE).search)).text();
   const secret = /marsa_mcp_[A-Za-z0-9_-]{20,}/.exec(html)?.[0];
   if (!secret) throw new Error("no token shown");
@@ -59,7 +59,7 @@ describe("MCP per space", () => {
   it("creates tokens on the site page, shows them once and stores only a hash", async () => {
     t = await makeApp();
     const { site, b, page, secret } = await setup(t);
-    const again = await (await b.get(page)).text();
+    const again = await (await b.get(`${page}?tab=mcp`)).text();
     expect(again).not.toContain(secret);
     expect(again).toContain("Laptop");
     expect(again).toContain(`${BASE}/mcp/s/${site.id}`);
@@ -203,7 +203,7 @@ describe("MCP per space", () => {
     ).toBe(405);
 
     // Revoke from the site page: the token stops working at once.
-    const html = await (await b.get(page)).text();
+    const html = await (await b.get(`${page}?tab=mcp`)).text();
     const tid = /\/mcp\/([a-z0-9]+)\/delete/.exec(html)?.[1];
     expect(tid).toBeTruthy();
     const csrf = await b.csrf(page);

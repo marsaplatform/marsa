@@ -313,9 +313,10 @@ describe("team dashboard", () => {
     expect(await (await app.request("/")).text()).toContain(`/s/${id}/`);
 
     // site page
-    const page = await (await b.get(`/team/sites/${id}`)).text();
+    const page = await (await b.get(`/team/sites/${id}?tab=files`)).text();
     expect(page).toContain("index.html");
-    expect(page).toContain("Data and files are not available");
+    const data = await (await b.get(`/team/sites/${id}?tab=data`)).text();
+    expect(data).toContain("Data and files are not available");
 
     // delete
     const del = await b.post(`/team/sites/${id}/delete`, { _csrf: csrf });
@@ -409,7 +410,7 @@ describe("team dashboard", () => {
     );
 
     const { b } = await signIn(key);
-    const page = await (await b.get(`/team/sites/${id}`)).text();
+    const page = await (await b.get(`/team/sites/${id}?tab=data`)).text();
     expect(page).toContain("status");
     expect(page).toContain("نعم");
     expect(page).toContain("readme.txt");
@@ -438,8 +439,8 @@ describe("single-site view layout", () => {
       await backend.kvSet(id, `record:${String(i).padStart(2, "0")}`, JSON.stringify(long));
     }
     const { b } = await signIn(key);
-    for (const path of [`/team/sites/${id}`, `/ar/team/sites/${id}`]) {
-      const html = await (await b.get(path)).text();
+    for (const base of [`/team/sites/${id}`, `/ar/team/sites/${id}`]) {
+      const html = await (await b.get(`${base}?tab=data`)).text();
       // one row per shown key, value collapsed into <details>, pretty-printed when opened
       expect(html.match(/<details class="kv-value">/g)?.length).toBe(20);
       expect(html).toContain("&#34;title&#34;: &#34;دليل الخدمات&#34;");
@@ -449,18 +450,20 @@ describe("single-site view layout", () => {
       expect(html).toContain("record:24");
       // shared components, no inline script, actions intact
       for (const cls of [
-        "page-heading with-aside",
-        "site-summary panel",
-        "status-list compact",
-        "file-list",
-        "team-upload compact",
-        'class="data stack kv-table"',
+        "detail-head",
+        'class="tabs"',
+        'aria-current="page"',
+        'class="data stack dt kv-dt"',
       ]) {
         expect(html, cls).toContain(cls);
       }
+      expect(html).toContain(`${base}/kv/delete`.replace(/^\/ar/, "/ar"));
       expect(html).not.toMatch(/<script(?![^>]*src=)[^>]*>[^<]/);
-      for (const a of ["/extend", "/listing", "/delete", "/replace", "/kv/delete"])
-        expect(html).toContain(`/team/sites/${id}${a}`);
+      const over = await (await b.get(base)).text();
+      for (const a of ["/extend", "/listing"]) expect(over).toContain(`${base}${a}`);
+      const set = await (await b.get(`${base}?tab=settings`)).text();
+      expect(set).toContain("team-upload compact");
+      for (const a of ["/delete", "/replace", "/token"]) expect(set).toContain(`${base}${a}`);
     }
   });
 });
@@ -567,7 +570,7 @@ describe("admin console", () => {
       for (const cls of [
         "page-heading with-aside",
         "status-list",
-        'class="data stack"',
+        'class="data stack',
         "head-tools",
       ]) {
         expect(html, `${path} ${cls}`).toContain(cls);
@@ -579,10 +582,13 @@ describe("admin console", () => {
       expect(html).not.toMatch(/<script>(?!<\/script>)|<script(?![^>]*src=)[^>]*>[^<]/);
       expect(html).toMatch(/<td data-label="[^"]+"/);
     }
-    // Each flag is a badge with the state plus one form that flips it.
-    const html = await (await b.get("/admin")).text();
+    // Flags show as badges on the overview; the team page's settings tab changes them.
+    const ov = await (await b.get("/admin")).text();
+    expect(ov).toContain('data-href="/admin/teams/');
+    const tid = /data-href="\/admin\/teams\/([^"?]+)"/.exec(ov)?.[1];
+    const html = await (await b.get(`/admin/teams/${tid}?tab=settings`)).text();
     expect(html).toMatch(/name="backend" value="1"/);
-    expect(html).toMatch(/name="directory" value="0"/);
+    expect(html).toContain('name="features" value="1"');
     expect(html).toContain('name="sites" value="delete"');
   });
 

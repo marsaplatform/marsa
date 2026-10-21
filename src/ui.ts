@@ -11,9 +11,20 @@ import { currentNavAccount } from "./nav-state.js";
 import { type Notice, noticeText, noticeTone, type WebhookView } from "./notify.js";
 import type { Recipe, RecipeSummary } from "./recipes.js";
 import { isPermanentIso } from "./store.js";
-import type { UserKeyView } from "./user-keys.js";
+import {
+  agentKeyCols,
+  agentKeyRows,
+  keyStateFilter,
+  memberCols,
+  memberRows,
+  roleFilter,
+  siteStatusFilter,
+  siteRows as siteTableRows,
+  workerRows,
+  workerStatusFilter,
+} from "./ui-detail.js";
+import { dataTable, relTime as relTimeTag } from "./ui-table.js";
 import type { VisitSummary } from "./visits.js";
-import type { VersionMeta } from "./worker-versions.js";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
@@ -68,7 +79,7 @@ export interface Flash {
 }
 
 /** A server-rendered UTC time; the page script swaps in the visitor's local time. */
-function timeTag(lang: Lang, iso: string): string {
+export function timeTag(lang: Lang, iso: string): string {
   if (isPermanentIso(iso)) {
     return `<span class="badge on perm">${esc(STRINGS[lang].team.permanent)}</span>`;
   }
@@ -81,8 +92,8 @@ function timeTag(lang: Lang, iso: string): string {
   return `<time datetime="${esc(d.toISOString())}" data-local>${esc(text)} UTC</time>`;
 }
 
-const ltr = (s: string) => `<span dir="ltr" class="ltr">${esc(s)}</span>`;
-const hostless = (url: string) => url.replace(/^https?:\/\//, "");
+export const ltr = (s: string) => `<span dir="ltr" class="ltr">${esc(s)}</span>`;
+export const hostless = (url: string) => url.replace(/^https?:\/\//, "");
 
 /** "Expires <time>", or just "Permanent". */
 function expiryLine(lang: Lang, iso: string): string {
@@ -91,7 +102,7 @@ function expiryLine(lang: Lang, iso: string): string {
     : `${esc(STRINGS[lang].directory.expires)} ${timeTag(lang, iso)}`;
 }
 
-function ttlOptions(
+export function ttlOptions(
   lang: Lang,
   c: Config,
   selected = c.defaultTtlHours,
@@ -229,7 +240,7 @@ ${o.body}
 
 // ---- shared pieces ---------------------------------------------------------------
 
-function flashBox(lang: Lang, f?: Flash | null): string {
+export function flashBox(lang: Lang, f?: Flash | null): string {
   if (!f) return "";
   const t = STRINGS[lang];
   const secret = f.secret
@@ -241,9 +252,10 @@ function flashBox(lang: Lang, f?: Flash | null): string {
   return `<div class="flash ${f.kind}" role="${f.kind === "err" ? "alert" : "status"}" tabindex="-1" id="flash"><p>${esc(f.text)}</p>${link}${secret}</div>`;
 }
 
-const csrfField = (token: string) => `<input type="hidden" name="_csrf" value="${esc(token)}">`;
+export const csrfField = (token: string) =>
+  `<input type="hidden" name="_csrf" value="${esc(token)}">`;
 
-function postForm(
+export function postForm(
   action: string,
   csrf: string,
   inner: string,
@@ -252,14 +264,14 @@ function postForm(
   return `<form method="post" action="${esc(action)}" class="${opts.cls ?? "inline-form"}"${opts.confirm ? ` data-confirm="${esc(opts.confirm)}"` : ""}>${csrfField(csrf)}${inner}</form>`;
 }
 
-function pageHead(eyebrow: string, title: string, sub: string, aside = ""): string {
+export function pageHead(eyebrow: string, title: string, sub: string, aside = ""): string {
   return `<div class="page-heading${aside ? " with-aside" : ""}"><div><p class="eyebrow">${esc(eyebrow)}</p><h1>${title}</h1>${sub ? `<p>${esc(sub)}</p>` : ""}</div>${aside}</div>`;
 }
 
-const td = (label: string, inner: string, cls = "") =>
+export const td = (label: string, inner: string, cls = "") =>
   `<td data-label="${esc(label)}"${cls ? ` class="${cls}"` : ""}>${inner}</td>`;
 
-function emptyState(title: string, sub: string, action = ""): string {
+export function emptyState(title: string, sub: string, action = ""): string {
   return `<div class="empty-state"><svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><rect x="10" y="14" width="44" height="36" rx="6" class="stroke"/><path d="M10 24h44M20 34h16M20 41h24" class="stroke"/></svg><h2 class="h3">${esc(title)}</h2><p>${esc(sub)}</p>${action}</div>`;
 }
 
@@ -387,7 +399,7 @@ function featuredSection(lang: Lang, dir: Directory): string {
   return "";
 }
 
-const fmt = (lang: Lang, n: number) =>
+export const fmt = (lang: Lang, n: number) =>
   new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-GB").format(n);
 
 function heroStats(lang: Lang, c: Config, dir: Directory): string {
@@ -701,13 +713,13 @@ function sparkline(lang: Lang, v: VisitSummary): string {
   return `<svg class="spark" dir="ltr" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(t.visits.chart(fmt(lang, v.views30)))}" focusable="false"><polygon class="spark-area" points="0,${H} ${pts} ${W},${H}"/><polyline class="spark-line" points="${pts}"/></svg>`;
 }
 
-function visitsCell(lang: Lang, v: VisitSummary | undefined): string {
+export function visitsCell(lang: Lang, v: VisitSummary | undefined): string {
   if (!v) return `<span class="meta">–</span>`;
   const t = STRINGS[lang];
   return `<div class="visits-cell">${sparkline(lang, v)}<span class="meta">${esc(t.visits.short(fmt(lang, v.views7), fmt(lang, v.views30)))}</span></div>`;
 }
 
-function visitsSection(lang: Lang, v: VisitSummary | undefined): string {
+export function visitsSection(lang: Lang, v: VisitSummary | undefined): string {
   const t = STRINGS[lang];
   if (!v) {
     return `<section class="block visits-block" aria-labelledby="visits-title"><h2 id="visits-title">${esc(t.visits.title)}</h2><p class="meta">${esc(t.visits.off)}</p></section>`;
@@ -758,9 +770,14 @@ export interface AuditView {
   site?: { id: string; title: string } | null;
 }
 
-const canEdit = (me?: MeView) => (me?.role ?? "owner") !== "viewer";
+export const canEdit = (me?: MeView) => (me?.role ?? "owner") !== "viewer";
 
-function auditTable(lang: Lang, rows: AuditView[], withSite: boolean, labelId: string): string {
+export function auditTable(
+  lang: Lang,
+  rows: AuditView[],
+  withSite: boolean,
+  labelId: string,
+): string {
   const t = STRINGS[lang];
   if (!rows.length) return `<p class="meta">${esc(t.members.auditNone)}</p>`;
   const body = rows
@@ -808,7 +825,7 @@ function teamHead(
 }
 
 /** Sidebar context for a team page: the team name and who is signed in. */
-function teamCtx(lang: Lang, o: { team: { name: string }; me?: MeView }): DashCtx {
+export function teamCtx(lang: Lang, o: { team: { name: string }; me?: MeView }): DashCtx {
   const t = STRINGS[lang];
   return {
     name: o.team.name,
@@ -840,7 +857,7 @@ function statusList(lang: Lang, o: TeamPageOpts): string {
   </ul>`;
 }
 
-function teamUploader(
+export function teamUploader(
   lang: Lang,
   c: Config,
   csrf: string,
@@ -876,64 +893,60 @@ function teamUploader(
   </form>`;
 }
 
-/** Rows of the team's spaces table. */
-function siteRows(lang: Lang, o: TeamPageOpts, sites: TeamSiteRow[]): string {
-  const t = STRINGS[lang];
-  const href = (p: string) => localePath(lang, p);
-  return sites
-    .map((s) => {
-      const listing = !o.team.directory
-        ? `<span class="badge muted">${esc(t.team.hidden)}</span>`
-        : `<span class="badge ${s.listed ? "on" : "muted"}">${esc(s.listed ? t.team.listed : t.team.hidden)}</span>`;
-      const exp = isPermanentIso(s.expiresAt) ? "9999" : s.expiresAt;
-      return `<tr>
-        <th scope="row" data-v="${esc(s.title.toLowerCase())}"><a href="${href(`/team/sites/${s.id}`)}"><bdi>${esc(s.title)}</bdi></a></th>
-        ${td(t.common.link, `<span class="copy-cell"><a id="u-${esc(s.id)}" href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a><button type="button" class="icon-btn js-only" data-copy="#u-${esc(s.id)}" data-copied="${esc(t.common.copied)}" aria-label="${esc(`${t.common.copy}: ${s.title}`)}">${icon("copy")}</button></span>`)}
-        <td data-label="${esc(t.common.expires)}" data-v="${esc(exp)}">${timeTag(lang, s.expiresAt)}</td>
-        <td data-label="${esc(t.common.size)}" data-v="${s.totalBytes}">${esc(bytesLabel(lang, s.totalBytes))}</td>
-        ${td(t.admin.directory, listing)}
-        <td data-label="${esc(t.visits.column)}" data-v="${s.visits?.views30 ?? 0}">${visitsCell(lang, s.visits)}</td>
-        <td class="cell-actions"><div class="acts"><a class="button small ghost" href="${href(`/team/sites/${s.id}`)}">${esc(t.team.manage)}</a>${
-          canEdit(o.me)
-            ? postForm(
-                href(`/team/sites/${s.id}/delete`),
-                o.csrf,
-                `<button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
-                { confirm: t.team.confirmDelete },
-              )
-            : ""
-        }</div></td>
-      </tr>`;
-    })
-    .join("");
-}
-
 function sitesTable(lang: Lang, o: TeamPageOpts, sites: TeamSiteRow[], id: string, tools: boolean) {
   const t = STRINGS[lang];
-  return `${tools && sites.length > 3 ? tableTools(lang, id) : ""}<div class="table-wrap"><table class="data stack" id="${id}">
-      <caption class="sr-only">${esc(t.team.sites)}</caption>
-      <thead><tr>${sortTh(t.common.title)}<th scope="col">${esc(t.common.link)}</th>${sortTh(t.common.expires, "date")}${sortTh(t.common.size, "num")}<th scope="col">${esc(t.admin.directory)}</th>${sortTh(t.visits.column, "num")}<th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
-      <tbody>${siteRows(lang, o, sites)}</tbody></table></div>`;
+  const href = (p: string) => localePath(lang, p);
+  const { rows, cols } = siteTableRows(lang, sites, {
+    detail: (s) => href(`/team/sites/${s.id}`),
+    canEdit: canEdit(o.me),
+    deleteAction: (s) => href(`/team/sites/${s.id}/delete`),
+    showListing: o.team.directory,
+  });
+  return dataTable({
+    lang,
+    id,
+    caption: t.team.sites,
+    headLabel: t.common.title,
+    cols,
+    rows,
+    csrf: o.csrf,
+    empty: t.team.sites,
+    filters: [siteStatusFilter(lang)],
+    search: tools && sites.length > 3,
+  });
 }
 
 /** Compact list of the newest spaces for the overview (title + address, expiry, visits). */
 function recentTable(lang: Lang, sites: TeamSiteRow[]): string {
   const t = STRINGS[lang];
   const href = (p: string) => localePath(lang, p);
-  const rows = sites
-    .map(
-      (s) => `<tr>
-        <th scope="row"><a href="${href(`/team/sites/${s.id}`)}"><bdi>${esc(s.title)}</bdi></a><div class="meta">${ltr(hostless(s.url))}</div></th>
-        ${td(t.common.expires, timeTag(lang, s.expiresAt))}
-        ${td(t.visits.column, visitsCell(lang, s.visits))}
-        <td class="cell-actions"><a class="button small ghost" href="${href(`/team/sites/${s.id}`)}">${esc(t.team.manage)}</a></td>
-      </tr>`,
-    )
-    .join("");
-  return `<div class="table-wrap"><table class="data stack recent-table">
-      <caption class="sr-only">${esc(t.team.sites)}</caption>
-      <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.visits.column)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`;
+  return dataTable({
+    lang,
+    id: "recent-spaces",
+    caption: t.team.sites,
+    headLabel: t.common.title,
+    cols: [
+      { label: t.common.expires, sort: "date" },
+      { label: t.visits.column, sort: "num" },
+    ],
+    rows: sites.map((s) => ({
+      label: s.title,
+      href: href(`/team/sites/${s.id}`),
+      head: `<a class="row-link" href="${href(`/team/sites/${s.id}`)}"><bdi>${esc(s.title)}</bdi></a><div class="meta">${ltr(hostless(s.url))}</div>`,
+      cells: [
+        { html: timeTag(lang, s.expiresAt), v: isPermanentIso(s.expiresAt) ? "9999" : s.expiresAt },
+        { html: visitsCell(lang, s.visits), v: s.visits?.views30 ?? 0 },
+      ],
+      actions: [
+        { kind: "link", label: t.team.manage, href: href(`/team/sites/${s.id}`), primary: true },
+        { kind: "copy", label: t.common.copy, value: s.url, primary: true },
+        { kind: "link", label: t.team.openSite, href: s.url, external: true },
+      ],
+    })),
+    empty: t.team.sites,
+    search: false,
+    cls: "recent-table",
+  });
 }
 
 const agentPublishSnippet = (
@@ -1244,177 +1257,7 @@ export interface TeamSitePageOpts extends TeamPageOpts {
       };
 }
 
-export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string {
-  const t = STRINGS[lang];
-  const href = (p: string) => localePath(lang, p);
-  const s = o.site;
-  const base = `/team/sites/${s.id}`;
-  const listed = o.team.directory && s.listed;
-  const listingForm = o.team.directory
-    ? postForm(
-        href(`${base}/listing`),
-        o.csrf,
-        `<input type="hidden" name="listed" value="${s.unlisted ? "1" : "0"}"><button class="button small ghost" type="submit">${esc(s.unlisted ? t.team.show : t.team.hide)}</button>`,
-      )
-    : "";
-  const files = s.files
-    .slice(0, 200)
-    .map(
-      ([p, size]) =>
-        `<li><span class="file-path" dir="ltr">${esc(p)}</span><span class="file-size">${esc(bytesLabel(lang, size))}</span></li>`,
-    )
-    .join("");
-
-  const bb = o.backendBrowser;
-  let backendHtml: string;
-  let backendStatus = "";
-  if (bb.state === "off") {
-    backendHtml = `<p class="notice">${esc(bb.reason ?? t.team.backendBrowserOff)}</p>`;
-  } else {
-    backendStatus = `<ul class="status-list compact">
-      <li><span class="dot-status ${bb.totalKeys ? "on" : "off"}" aria-hidden="true"></span><strong>${esc(t.team.kvTitle)}:</strong> ${esc(t.team.kvCount(bb.totalKeys))}</li>
-      <li><span class="dot-status ${bb.files.length ? "on" : "off"}" aria-hidden="true"></span><strong>${esc(t.team.backendFilesTitle)}:</strong> ${esc(t.team.backendFilesCount(bb.files.length))}</li>
-    </ul>`;
-    const kvRows = bb.kv
-      .map((k) => {
-        const value =
-          k.full === undefined
-            ? `<span class="meta">…</span>`
-            : `<details class="kv-value"><summary><code dir="ltr">${esc(k.preview ?? "")}</code></summary><pre dir="ltr">${esc(k.full)}</pre>${k.truncated ? `<p class="meta">${esc(t.team.valueTruncated)}</p>` : ""}</details>`;
-        return `<tr><th scope="row"><code class="kv-key" dir="ltr">${esc(k.key)}</code>${k.bytes !== undefined ? `<div class="meta">${esc(bytesLabel(lang, k.bytes))}</div>` : ""}</th>${td(t.team.value, value, "cell-value")}<td class="cell-actions">${
-          !canEdit(o.me)
-            ? ""
-            : postForm(
-                href(`${base}/kv/delete`),
-                o.csrf,
-                `<input type="hidden" name="key" value="${esc(k.key)}"><button class="button small danger" type="submit" aria-label="${esc(`${t.common.del}: ${k.key}`)}">${esc(t.common.del)}</button>`,
-                { confirm: t.common.confirm },
-              )
-        }</td></tr>`;
-      })
-      .join("");
-    const more = bb.otherKeys.length
-      ? `<details class="more-keys"><summary>${esc(t.team.moreKeys(bb.otherKeys.length))}</summary><ul class="key-chips">${bb.otherKeys.map((k) => `<li><code dir="ltr">${esc(k)}</code></li>`).join("")}</ul></details>`
-      : bb.moreKeys
-        ? `<p class="meta">${esc(t.team.moreKeys(bb.moreKeys))}</p>`
-        : "";
-    const fileRows = bb.files
-      .map(
-        (f) =>
-          `<tr><th scope="row"><a href="${esc(f.url)}" target="_blank" rel="noopener" dir="ltr">${esc(f.name)}</a></th>${td(t.common.size, esc(bytesLabel(lang, f.size)))}${td(t.common.created, timeTag(lang, f.createdAt))}<td class="cell-actions">${
-            !canEdit(o.me)
-              ? ""
-              : postForm(
-                  href(`${base}/files/delete`),
-                  o.csrf,
-                  `<input type="hidden" name="fileId" value="${esc(f.id)}"><button class="button small danger" type="submit" aria-label="${esc(`${t.common.del}: ${f.name}`)}">${esc(t.common.del)}</button>`,
-                  { confirm: t.common.confirm },
-                )
-          }</td></tr>`,
-      )
-      .join("");
-    backendHtml = `${bb.error ? `<p class="flash err" role="alert">${esc(bb.error)}</p>` : ""}
-    <h3 id="kv-title">${esc(t.team.kvTitle)}</h3>
-    ${
-      bb.kv.length
-        ? `<div class="table-wrap"><table class="data stack kv-table" aria-labelledby="kv-title"><thead><tr><th scope="col">${esc(t.team.key)}</th><th scope="col">${esc(t.team.value)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${kvRows}</tbody></table></div>${more}`
-        : `<p class="meta">${esc(t.team.kvEmpty)}</p>`
-    }
-    <h3 id="bfiles-title">${esc(t.team.backendFilesTitle)}</h3>
-    ${
-      bb.files.length
-        ? `<div class="table-wrap"><table class="data stack" aria-labelledby="bfiles-title"><thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(t.common.created)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${fileRows}</tbody></table></div>`
-        : `<p class="meta">${esc(t.team.backendFilesEmpty)}</p>`
-    }`;
-  }
-  const tools = `<div class="head-tools"><a class="button small" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(t.team.openSite)} <span class="arrow" aria-hidden="true"></span></a><button type="button" class="button small ghost" data-copy="#siteUrl" data-copied="${esc(t.common.copied)}">${esc(t.common.copy)}</button></div>`;
-  const body = `<div class="page-wide">
-  ${pageHead(DS[lang].nav.sites ?? "", `<bdi>${esc(s.title)}</bdi>`, "", tools)}
-  ${flashBox(lang, o.flash)}
-  <section aria-labelledby="settings-title">
-    <div class="site-summary panel">
-      <h2 class="h3" id="settings-title">${esc(t.team.settingsTitle)}</h2>
-      <dl class="facts">
-        <div class="fact-wide"><dt>${esc(t.common.link)}</dt><dd><a id="siteUrl" class="strong-link" href="${esc(s.url)}" target="_blank" rel="noopener" dir="ltr">${esc(hostless(s.url))}</a></dd></div>
-        <div><dt>${esc(t.common.expires)}</dt><dd>${timeTag(lang, s.expiresAt)}</dd></div>
-        <div><dt>${esc(t.common.created)}</dt><dd>${timeTag(lang, s.createdAt)}</dd></div>
-        <div><dt>${esc(t.common.size)}</dt><dd>${esc(bytesLabel(lang, s.totalBytes))} · ${esc(t.common.files(s.fileCount))}</dd></div>
-        <div><dt>${esc(t.admin.directory)}</dt><dd><span class="badge ${listed ? "on" : "muted"}">${esc(listed ? t.team.listed : t.team.hidden)}</span></dd></div>
-      </dl>
-      ${
-        canEdit(o.me)
-          ? `<div class="actions site-actions">
-        ${postForm(
-          href(`${base}/extend`),
-          o.csrf,
-          `<label class="ttl"><span>${esc(t.team.extendTo)}</span> <select name="ttlHours">${ttlOptions(lang, c, c.defaultTtlHours, false)}</select></label> <button class="button small" type="submit">${esc(t.team.extend)}</button>`,
-          { cls: "inline-form extend-form" },
-        )}
-        ${
-          o.team.permanent && !s.permanent
-            ? postForm(
-                href(`${base}/permanent`),
-                o.csrf,
-                `<button class="button small ghost" type="submit">${esc(t.team.makePermanent)}</button>`,
-              )
-            : ""
-        }
-        ${listingForm}
-        ${postForm(
-          href(`${base}/delete`),
-          o.csrf,
-          `<button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
-          { confirm: t.team.confirmDelete, cls: "inline-form push-end" },
-        )}
-      </div>`
-          : ""
-      }
-      <p class="meta">${s.permanent ? esc(t.team.permanentNote) : `${esc(t.team.capped)} (${timeTag(lang, s.ceiling)})`}</p>
-    </div>
-  </section>
-  ${visitsSection(lang, s.visits)}
-  ${
-    canEdit(o.me)
-      ? `<section class="block" aria-label="${esc(t.team.replace)}">
-    ${teamUploader(lang, c, o.csrf, href(`${base}/replace`), t.team.replace, t.team.replaceHelp, t.team.replace, false, true)}
-  </section>`
-      : ""
-  }
-  <section class="block" aria-labelledby="files-title">
-    <h2 id="files-title">${esc(t.team.filesTitle)} <span class="count">${esc(t.common.files(s.fileCount))}</span></h2>
-    <ul class="file-list">${files}</ul>
-  </section>
-  <section class="block backend-block" aria-labelledby="backend-title">
-    <h2 id="backend-title">${esc(t.team.backend)}</h2>
-    ${backendStatus}
-    ${backendHtml}
-  </section>
-  ${o.mcp ? mcpSection(lang, o.mcp, o.csrf, href(base), s.id, canEdit(o.me)) : ""}
-  ${
-    o.audit
-      ? `<section class="block audit-block" aria-labelledby="audit-title">
-    <h2 id="audit-title">${esc(t.members.auditSiteTitle)}</h2>
-    ${auditTable(lang, o.audit, false, "audit-title")}
-  </section>`
-      : ""
-  }
-</div>`;
-  return dashLayout({
-    lang,
-    config: c,
-    kind: "team",
-    active: "sites",
-    title: `${s.title} · ${o.team.name} · ${t.product}`,
-    description: t.team.eyebrow,
-    path: base,
-    body,
-    csrf: o.csrf,
-    ctx: teamCtx(lang, o),
-    crumbs: [{ label: s.title }],
-  });
-}
-
-function mcpSection(
+export function mcpSection(
   lang: Lang,
   m: McpPanel,
   csrf: string,
@@ -1523,33 +1366,22 @@ export function membersHtml(lang: Lang, c: Config, o: MembersPageOpts): string {
   const tm = t.members;
   const href = (p: string) => localePath(lang, p);
   const owner = (o.me?.role ?? "owner") === "owner";
-  const rows = o.members
-    .map((m) => {
-      const self = m.id === o.meId;
-      const roleCell =
-        owner && !self
-          ? postForm(
-              href(`/team/members/${m.id}/role`),
-              o.csrf,
-              `<label class="sr-only" for="role-${m.id}">${esc(`${tm.role} · ${m.name}`)}</label><select id="role-${m.id}" name="role">${roleOptions(lang, m.role)}</select><button type="submit" class="button small ghost">${esc(tm.save)}</button>`,
-              { cls: "inline-form role-form" },
-            )
-          : `<span class="badge ${m.role === "owner" ? "on" : "muted"}">${esc(tm.roles[m.role])}</span>`;
-      return `<tr><th scope="row"><bdi>${esc(m.name)}</bdi>${self ? ` <span class="badge on">✓</span>` : ""}<div class="meta ltr">${esc(m.username)}</div></th>${td(tm.role, roleCell)}${td(tm.joined, timeTag(lang, m.createdAt))}${td(tm.lastSeen, m.lastLoginAt ? timeTag(lang, m.lastLoginAt) : `<span class="meta">${esc(tm.never)}</span>`)}<td class="cell-actions">${
-        owner && !self
-          ? postForm(
-              href(`/team/members/${m.id}/delete`),
-              o.csrf,
-              `<button class="button small danger" type="submit" aria-label="${esc(`${tm.remove}: ${m.name}`)}">${esc(tm.remove)}</button>`,
-              { confirm: tm.confirmRemove },
-            )
-          : ""
-      }</td></tr>`;
-    })
-    .join("");
-  const people = o.members.length
-    ? `<div class="table-wrap"><table class="data stack" aria-labelledby="people-title"><thead><tr><th scope="col">${esc(tm.nameCol)}</th><th scope="col">${esc(tm.role)}</th><th scope="col">${esc(tm.joined)}</th><th scope="col">${esc(tm.lastSeen)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
-    : `<p class="meta">${esc(tm.none)}</p>`;
+  const people = dataTable({
+    lang,
+    id: "members-table",
+    caption: tm.listTitle,
+    headLabel: tm.nameCol,
+    cols: memberCols(lang),
+    rows: memberRows(lang, o.members, {
+      canManage: owner,
+      selfId: o.meId ?? null,
+      roleAction: (m) => href(`/team/members/${m.id}/role`),
+      removeAction: (m) => href(`/team/members/${m.id}/delete`),
+    }),
+    csrf: o.csrf,
+    empty: tm.none,
+    filters: [roleFilter(lang)],
+  });
   const inviteRows = o.invites
     .map(
       (i) =>
@@ -1674,7 +1506,7 @@ export interface AdminTeamRow {
 }
 
 /** Page-level actions in the heading (navigation and sign-out live in the sidebar). */
-function adminTools(
+export function adminTools(
   _lang: Lang,
   _active: "teams" | "sites" | "workers" | "activity" | "settings",
   _csrf: string,
@@ -1683,7 +1515,7 @@ function adminTools(
   return `<div class="head-tools">${actions}</div>`;
 }
 
-const ADMIN_CTX = (_lang: Lang): DashCtx => ({ name: null, sub: "" });
+export const ADMIN_CTX = (_lang: Lang): DashCtx => ({ name: null, sub: "" });
 
 export interface AdminStats {
   sites: number;
@@ -1714,78 +1546,114 @@ export function adminTeamsHtml(
   const href = (p: string) => localePath(lang, p);
   const live = o.teams.reduce((n, x) => n + x.liveSites, 0);
   const st = o.stats;
-  const rows = o.teams
-    .map((tm) => {
-      const base = `/admin/teams/${tm.id}`;
-      // A badge with the state and one button that flips it.
-      const toggle = (field: "backend" | "directory" | "permanent", label: string) =>
-        `<div class="acts">${postForm(
-          href(`${base}/update`),
-          o.csrf,
-          `<input type="hidden" name="${field}" value="${tm[field] ? "0" : "1"}"><button type="submit" class="pill-toggle${tm[field] ? " on" : ""}" aria-pressed="${tm[field] ? "true" : "false"}" aria-label="${esc(`${label} · ${tm.name}: ${tm[field] ? t.admin.turnOff : t.admin.turnOn}`)}"><span class="knob" aria-hidden="true"></span>${esc(tm[field] ? t.common.on : t.common.off)}</button>`,
-        )}</div>`;
-      const wk =
-        tm.workers === undefined
-          ? ""
-          : td(
-              d.workersCol,
-              tm.slug && o.cfConfigured
-                ? `<div class="acts wk-cell">${postForm(
-                    href(`/admin/workers/teams/${tm.id}`),
-                    o.csrf,
-                    `<input type="hidden" name="back" value="admin">${tm.workers ? "" : `<input type="hidden" name="enabled" value="1">`}<button type="submit" class="pill-toggle${tm.workers ? " on" : ""}" aria-pressed="${tm.workers ? "true" : "false"}" aria-label="${esc(`${d.workersCol} · ${tm.name}: ${tm.workers ? t.admin.turnOff : t.admin.turnOn}`)}"><span class="knob" aria-hidden="true"></span>${esc(tm.workers ? t.common.on : t.common.off)}</button>`,
-                    tm.workers && tm.workerCount ? { confirm: WS[lang].turnOffConfirm } : {},
-                  )}${tm.workers ? `<span class="badge muted wk-count" title="${esc(d.stats.workers)}"><span class="sr-only">${esc(d.stats.workers)}: </span>${esc(String(tm.workerCount ?? 0))}</span>` : ""}</div>`
-                : `<a class="text-link" href="${href("/admin/workers")}">${esc(tm.workers ? t.common.on : d.manage)}</a>`,
-            );
-      return `<tr>
-        <th scope="row" data-v="${esc(tm.name.toLowerCase())}"><bdi>${esc(tm.name)}</bdi><div class="meta ltr">${esc(tm.id)}</div></th>
-        ${td(t.admin.backend, toggle("backend", t.admin.backend))}
-        ${td(t.admin.directory, toggle("directory", t.admin.directory))}
-        ${td(t.admin.permanent, toggle("permanent", t.admin.permanent))}
-        ${wk}
-        ${td(
-          t.admin.quota,
-          postForm(
-            href(`${base}/update`),
-            o.csrf,
-            `<label class="quota-field"><span class="sr-only">${esc(`${t.admin.quotaSites} · ${tm.name}`)}</span><input name="maxSites" type="number" min="0" max="100000" inputmode="numeric" placeholder="${tm.quotaSites}" value="${tm.customQuota ? tm.quotaSites : ""}" aria-describedby="quota-help" title="${esc(t.admin.quotaSites)}"></label><label class="quota-field"><span class="sr-only">${esc(`${t.admin.quotaMb} · ${tm.name}`)}</span><input name="maxMb" type="number" min="0" max="100000" inputmode="numeric" placeholder="${tm.quotaMb}" value="${tm.customQuota ? tm.quotaMb : ""}" aria-describedby="quota-help" title="${esc(t.admin.quotaMb)}"></label><button type="submit" class="button small ghost">${esc(t.common.save)}</button>`,
-            { cls: "inline-form quota-form" },
-          ),
-        )}
-        <td data-label="${esc(t.admin.liveSites)}" data-v="${tm.liveSites}"><a class="text-link" href="${href(`/admin/sites?owner=${tm.id}`)}">${esc(String(tm.liveSites))}</a></td>
-        <td data-label="${esc(t.members.title)}" data-v="${tm.members}">${esc(t.members.count(tm.members))}</td>
-        ${td(
-          t.common.actions,
-          `<details class="row-more"><summary class="button small ghost">${esc(d.more)}</summary><div class="more-panel">
-          <p class="meta">${esc(t.admin.key)}: <code class="ltr">${esc(tm.keyPrefix)}…</code></p>
-          ${postForm(
-            href(`${base}/invite`),
-            o.csrf,
-            `<label class="sr-only" for="inv-${esc(tm.id)}">${esc(`${t.members.role} · ${tm.name}`)}</label><select id="inv-${esc(tm.id)}" name="role">${(["owner", "editor", "viewer"] as const).map((r) => `<option value="${r}">${esc(t.members.roles[r])}</option>`).join("")}</select><button type="submit" class="button small ghost">${esc(t.members.invite)}</button>`,
-            { cls: "inline-form invite-form" },
-          )}
-          <div class="danger-box"><p class="h4">${esc(d.dangerZone)}</p>
-          <p class="meta">${esc(d.rotateWarn)}</p>
-          ${postForm(href(`${base}/rotate`), o.csrf, `<button class="button small ghost warn" type="submit">${esc(t.admin.rotate)}</button>`, { confirm: d.rotateConfirm })}
-          ${postForm(
-            href(`${base}/delete`),
-            o.csrf,
-            `<label class="check small"><input type="checkbox" name="sites" value="delete"> ${esc(t.admin.alsoDeleteSites)}</label><button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
-            { confirm: t.admin.confirmDelete, cls: "inline-form" },
-          )}</div></div></details>`,
-          "cell-actions",
-        )}
-      </tr>`;
-    })
-    .join("");
+  const on = (v: boolean | undefined, label: string) =>
+    `<span class="badge ${v ? "on" : "muted"}" title="${esc(label)}">${esc(v ? t.common.on : d.off)}</span>`;
   const table = o.teams.length
-    ? `${o.teams.length > 3 ? tableTools(lang, "teams-table") : ""}<div class="table-wrap"><table class="data stack" id="teams-table">
-      <caption class="sr-only">${esc(t.admin.teams)}</caption>
-      <thead><tr>${sortTh(t.admin.name)}<th scope="col">${esc(t.admin.backend)}</th><th scope="col">${esc(t.admin.directory)}</th><th scope="col">${esc(t.admin.permanent)}</th>${o.teams.some((x) => x.workers !== undefined) ? `<th scope="col">${esc(d.workersCol)}</th>` : ""}<th scope="col">${esc(t.admin.quota)}</th>${sortTh(t.admin.liveSites, "num")}${sortTh(t.members.title, "num")}<th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>
-      <p class="meta table-note">${esc(t.admin.keyHelp)}</p>
-      <p class="meta table-note" id="quota-help">${esc(`${t.admin.quotaSites} / ${t.admin.quotaMb}: ${t.admin.quotaHelp}`)}</p>`
+    ? `${dataTable({
+        lang,
+        id: "teams-table",
+        caption: t.admin.teams,
+        headLabel: t.admin.name,
+        cols: [
+          { label: t.admin.liveSites, sort: "num" },
+          { label: t.members.title, sort: "num" },
+          { label: d.workersCol, sort: "num" },
+          { label: t.admin.quota },
+          { label: t.admin.backend, sort: "text" },
+          { label: t.admin.directory, sort: "text" },
+          { label: t.admin.permanent, sort: "text" },
+          { label: t.common.created, sort: "date" },
+        ],
+        rows: o.teams.map((tm) => {
+          const base = `/admin/teams/${tm.id}`;
+          return {
+            label: tm.name,
+            href: href(base),
+            head: `<a class="row-link" href="${href(base)}"><bdi>${esc(tm.name)}</bdi></a><div class="meta ltr">${esc(tm.id)}</div>`,
+            headV: tm.name,
+            cells: [
+              {
+                html: `<a class="text-link" href="${href(`${base}?tab=spaces`)}">${esc(fmt(lang, tm.liveSites))}</a>`,
+                v: tm.liveSites,
+                cls: "num",
+              },
+              {
+                html: `<a class="text-link" href="${href(`${base}?tab=members`)}">${esc(fmt(lang, tm.members))}</a>`,
+                v: tm.members,
+                cls: "num",
+              },
+              {
+                html: tm.workers
+                  ? `<span class="badge on">${esc(t.common.on)}</span> <span class="meta">${esc(fmt(lang, tm.workerCount ?? 0))}</span>`
+                  : `<span class="badge muted">${esc(d.off)}</span>`,
+                v: tm.workers ? (tm.workerCount ?? 0) + 1 : 0,
+              },
+              {
+                html: `${esc(fmt(lang, tm.quotaSites))} · ${esc(`${fmt(lang, tm.quotaMb)} MB`)}${tm.customQuota ? " ✱" : ""}`,
+              },
+              { html: on(tm.backend, t.admin.backend), v: tm.backend ? "1" : "0" },
+              { html: on(tm.directory, t.admin.directory), v: tm.directory ? "1" : "0" },
+              { html: on(tm.permanent, t.admin.permanent), v: tm.permanent ? "1" : "0" },
+              { html: relTimeTag(tm.createdAt, lang), v: tm.createdAt },
+            ],
+            actions: [
+              { kind: "link" as const, label: DS[lang].manage, href: href(base), primary: true },
+              {
+                kind: "link" as const,
+                label: t.members.title,
+                href: href(`${base}?tab=members`),
+                icon: "members",
+              },
+              {
+                kind: "link" as const,
+                label: d.stats.spaces,
+                href: href(`${base}?tab=spaces`),
+                icon: "sites",
+              },
+              {
+                kind: "link" as const,
+                label: d.stats.workers,
+                href: href(`${base}?tab=workers`),
+                icon: "workers",
+              },
+              {
+                kind: "link" as const,
+                label: d.settings,
+                href: href(`${base}?tab=settings`),
+                icon: "settings",
+              },
+              {
+                kind: "post" as const,
+                label: t.admin.rotate,
+                action: href(`${base}/rotate`),
+                icon: "rotate",
+                confirm: d.rotateConfirm,
+              },
+              {
+                kind: "post" as const,
+                label: t.common.del,
+                action: href(`${base}/delete`),
+                danger: true,
+                confirm: t.admin.confirmDelete,
+              },
+            ],
+            filters: { workers: tm.workers ? "on" : "off" },
+          };
+        }),
+        csrf: o.csrf,
+        empty: t.admin.none,
+        filters: [
+          {
+            key: "workers",
+            label: d.workersCol,
+            options: [
+              ["on", `${d.workersCol}: ${t.common.on}`],
+              ["off", `${d.workersCol}: ${d.off}`],
+            ],
+          },
+        ],
+      })}
+      <p class="meta table-note">${esc(t.admin.keyHelp)}</p>`
     : emptyState(
         t.admin.none,
         t.admin.createSub,
@@ -1865,6 +1733,7 @@ export interface AdminSiteRow {
   createdAt: string;
   expiresAt: string;
   totalBytes: number;
+  fileCount?: number;
   permanent: boolean;
   visits?: VisitSummary;
 }
@@ -1889,36 +1758,51 @@ export function adminSitesHtml(
   const perms = o.sites.filter((s) => s.permanent).length;
   const views30 = o.sites.reduce((n, s) => n + (s.visits?.views30 ?? 0), 0);
   const counting = o.sites.some((s) => s.visits);
-  const rows = o.sites
-    .map(
-      (s) => `<tr>
-      <th scope="row" data-v="${esc(s.title.toLowerCase())}"><bdi>${esc(s.title)}</bdi></th>
-      <td data-label="${esc(t.admin.owner)}" data-v="${esc((s.owner ?? "").toLowerCase())}">${s.owner ? `<a class="text-link" href="${href(`/admin/sites?owner=${s.ownerId}`)}"><bdi>${esc(s.owner)}</bdi></a>` : `<span class="badge muted">${esc(t.common.guest)}</span>`}</td>
-      ${td(t.common.link, `<span class="copy-cell"><a id="au-${esc(s.id)}" href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a><button type="button" class="icon-btn js-only" data-copy="#au-${esc(s.id)}" data-copied="${esc(t.common.copied)}" aria-label="${esc(`${t.common.copy}: ${s.title}`)}">${icon("copy")}</button></span>`)}
-      <td data-label="${esc(t.common.expires)}" data-v="${esc(isPermanentIso(s.expiresAt) ? "9999" : s.expiresAt)}">${timeTag(lang, s.expiresAt)}</td>
-      <td data-label="${esc(t.common.size)}" data-v="${s.totalBytes}">${esc(bytesLabel(lang, s.totalBytes))}</td>
-      <td data-label="${esc(t.visits.column)}" data-v="${s.visits?.views30 ?? 0}">${visitsCell(lang, s.visits)}</td>
-      ${td(
-        t.common.actions,
-        `<div class="acts">${postForm(
-          href(`/admin/sites/${s.id}/delete`),
-          o.csrf,
-          `<input type="hidden" name="owner" value="${esc(o.owner)}"><button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
-          { confirm: t.team.confirmDelete },
-        )}${
-          s.permanent
-            ? postForm(
-                href(`/admin/sites/${s.id}/permanent`),
-                o.csrf,
-                `<input type="hidden" name="owner" value="${esc(o.owner)}"><input type="hidden" name="permanent" value="0"><button class="button small ghost" type="submit">${esc(t.admin.revoke)}</button>`,
-                { confirm: t.common.confirm },
-              )
-            : ""
-        }</div>`,
-        "cell-actions",
-      )}</tr>`,
-    )
-    .join("");
+  const back = href(
+    `/admin/sites${o.owner && o.owner !== "all" ? `?owner=${encodeURIComponent(o.owner)}` : ""}`,
+  );
+  const { rows, cols } = siteTableRows(
+    lang,
+    o.sites.map((s) => ({
+      id: s.id,
+      title: s.title,
+      url: s.url,
+      createdAt: s.createdAt,
+      expiresAt: s.expiresAt,
+      totalBytes: s.totalBytes,
+      fileCount: s.fileCount ?? 0,
+      listed: false,
+      unlisted: false,
+      permanent: s.permanent,
+      ...(s.visits ? { visits: s.visits } : {}),
+      owner: s.ownerId ? { id: s.ownerId, name: s.owner ?? s.ownerId } : null,
+    })),
+    {
+      detail: (s) => href(`/admin/sites/${s.id}`),
+      canEdit: true,
+      deleteAction: (s) => href(`/admin/sites/${s.id}/delete`),
+      showOwner: true,
+      ownerHref: (s) => href(`/admin/teams/${s.owner?.id ?? ""}?tab=spaces`),
+      back,
+    },
+  );
+  const ownerOpts: [string, string][] = [
+    ...o.teams
+      .filter((x) => o.sites.some((s) => s.ownerId === x.id))
+      .map((x) => [x.id, x.name] as [string, string]),
+    ...(o.sites.some((s) => !s.ownerId) ? [["guest", t.admin.guests] as [string, string]] : []),
+  ];
+  const table = dataTable({
+    lang,
+    id: "admin-sites",
+    caption: t.admin.sitesTitle,
+    headLabel: t.common.title,
+    cols,
+    rows,
+    csrf: o.csrf,
+    empty: t.admin.noSites,
+    filters: [siteStatusFilter(lang), { key: "team", label: t.admin.owner, options: ownerOpts }],
+  });
   const body = `<div class="page-wide">
   ${pageHead(t.admin.eyebrow, esc(t.admin.sitesTitle), t.admin.sitesSub, adminTools(lang, "sites", o.csrf))}
   ${flashBox(lang, o.flash)}
@@ -1938,14 +1822,7 @@ export function adminSitesHtml(
         <button class="button small" type="submit">${esc(t.admin.apply)}</button>
       </div>
     </form>
-    ${
-      o.sites.length
-        ? `${o.sites.length > 3 ? tableTools(lang, "admin-sites") : ""}<div class="table-wrap"><table class="data stack" id="admin-sites">
-      <caption class="sr-only">${esc(t.admin.sitesTitle)}</caption>
-      <thead><tr>${sortTh(t.common.title)}${sortTh(t.admin.owner)}<th scope="col">${esc(t.common.link)}</th>${sortTh(t.common.expires, "date")}${sortTh(t.common.size, "num")}${sortTh(t.visits.column, "num")}<th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`
-        : emptyState(t.admin.noSites, t.admin.sitesSub)
-    }
+    ${o.sites.length ? table : emptyState(t.admin.noSites, t.admin.sitesSub)}
   </section>
 </div>`;
   return dashLayout({
@@ -2243,18 +2120,10 @@ export interface WorkerRowView {
   deployedBy: string;
   lastError: string | null;
   team?: { id: string; name: string | null };
-}
-
-function workerStatus(lang: Lang, st: string): string {
-  const w = WS[lang];
-  const cls = st === "active" ? "on" : st === "disabled" ? "muted" : "warn";
-  return `<span class="badge ${cls}">${esc(w.statuses[st] ?? st)}</span>`;
-}
-
-function workerEnvCell(x: WorkerRowView): string {
-  const vars = Object.keys(x.vars).map((k) => `<code class="ltr">${esc(k)}</code>`);
-  const secrets = x.secrets.map((k) => `<code class="ltr">${esc(k)}</code> 🔒`);
-  return [...vars, ...secrets].join(" ") || "—";
+  /** 0.15.0 list columns. */
+  keysOn?: boolean;
+  keysCount?: number;
+  requests7?: number | null;
 }
 
 export interface TeamWorkersOpts extends TeamPageOpts {
@@ -2281,46 +2150,23 @@ export function teamWorkersHtml(
   const i = o.info;
   const canDeploy = i.enabled && i.configured && edit;
   const redeploy = o.redeploy && i.workers.some((x) => x.name === o.redeploy) ? o.redeploy : "";
-  const cards = i.workers
-    .map((x) => {
-      const by = t.members.actorLabels[x.deployedBy] ?? x.deployedBy;
-      return `<article class="worker-card" aria-labelledby="wk-${esc(x.id)}">
-      <div class="worker-head"><h3 id="wk-${esc(x.id)}"><code class="ltr">${esc(x.name)}</code></h3>${workerStatus(lang, x.status)}</div>
-      ${
-        x.url
-          ? `<div class="copy-row"><a id="wu-${esc(x.id)}" class="strong-link" href="${esc(x.url)}" target="_blank" rel="noopener" dir="ltr">${esc(hostless(x.url))}</a><button type="button" class="icon-btn js-only" data-copy="#wu-${esc(x.id)}" data-copied="${esc(t.common.copied)}" aria-label="${esc(`${t.common.copy}: ${x.name}`)}">${icon("copy")}</button></div>`
-          : ""
-      }
-      ${x.lastError ? `<p class="flash err">${esc(x.lastError)}</p>` : ""}
-      <dl class="facts compact">
-        <div><dt>${esc(d.lastDeploy)}</dt><dd>${x.deployedAt ? `${timeTag(lang, x.deployedAt)} <span class="meta">${esc(d.by)} <bdi>${esc(by)}</bdi></span>` : "—"}</dd></div>
-        <div><dt>${esc(w.size)}</dt><dd>${esc(bytesLabel(lang, x.bytes))}</dd></div>
-        <div class="fact-wide"><dt>${esc(w.env)}</dt><dd>${workerEnvCell(x)}</dd></div>
-        <div><dt>${esc(V14[lang].version)}</dt><dd>${x.version ? `<span class="badge on">v${esc(String(x.version))}</span>` : `<span class="meta">${esc(V14[lang].noVersion)}</span>`}</dd></div>
-      </dl>
-      ${
-        edit
-          ? `<div class="acts">${
-              canDeploy && x.version
-                ? postForm(
-                    href(`/team/workers/${x.name}/redeploy`),
-                    o.csrf,
-                    `<button class="button small" type="submit" data-busy aria-label="${esc(`${d.redeploy}: ${x.name}`)}">${esc(d.redeploy)}</button>`,
-                  )
-                : ""
-            }<a class="button small ghost" href="${href(`/team/workers/${x.name}/versions`)}">${esc(V14[lang].versions)}</a><a class="button small ghost" href="${href(`/team/workers/${x.name}/keys`)}">${esc(K14[lang].apiKeys)}</a>${canDeploy ? `<a class="button small ghost" href="${href(`/team/workers?redeploy=${encodeURIComponent(x.name)}#deploy`)}">${esc(V14[lang].newCode)}</a>` : ""}${postForm(
-              href(`/team/workers/${x.name}/delete`),
-              o.csrf,
-              `<button class="button small danger" type="submit" aria-label="${esc(`${w.del}: ${x.name}`)}">${esc(w.del)}</button>`,
-              { confirm: w.confirmDelete },
-            )}</div>`
-          : ""
-      }
-    </article>`;
-    })
-    .join("");
+  const { rows, cols } = workerRows(lang, i.workers, {
+    detail: (x) => href(`/team/workers/${x.name}`),
+    admin: false,
+    canEdit: edit && canDeploy,
+  });
   const list = i.workers.length
-    ? `<div class="worker-grid">${cards}</div>`
+    ? dataTable({
+        lang,
+        id: "workers-table",
+        caption: w.title,
+        headLabel: w.name,
+        cols,
+        rows,
+        csrf: o.csrf,
+        empty: w.none,
+        filters: [workerStatusFilter(lang, i.workers)],
+      })
     : emptyState(
         w.none,
         w.noneSub,
@@ -2442,51 +2288,98 @@ export function adminWorkersHtml(lang: Lang, c: Config, o: AdminWorkersOpts): st
     </ul>
     <p class="meta">${esc(DS[lang].cfOnSettings)} <a class="text-link" href="${href("/admin/settings")}">${esc(DS[lang].openSettings)}</a></p>
   </section>`;
-  const teamRows = o.teams
-    .map(
-      (x) =>
-        `<tr><th scope="row"><bdi>${esc(x.name)}</bdi><div class="meta ltr">${esc(x.id)}</div></th><td colspan="5">${postForm(
-          href(`/admin/workers/teams/${x.id}`),
-          o.csrf,
-          `<label class="check small"><input type="checkbox" name="enabled" value="1"${x.workers ? " checked" : ""}> ${esc(w.enabled)}</label>
-          <label class="quota-field"><span class="sr-only">${esc(`${w.slug} · ${x.name}`)}</span><input name="slug" type="text" dir="ltr" maxlength="20" placeholder="${esc(w.slug)}" value="${esc(x.slug ?? "")}" title="${esc(w.slugHelp)}"${x.count ? " readonly" : ""}></label>
-          <label class="quota-field"><span class="sr-only">${esc(`${w.maxWorkers} · ${x.name}`)}</span><input name="maxWorkers" type="number" min="0" max="100" placeholder="${x.quota.workers}" value="${x.maxWorkers ?? ""}" title="${esc(w.maxWorkers)}"></label>
-          <label class="quota-field"><span class="sr-only">${esc(`${w.maxKb} · ${x.name}`)}</span><input name="maxWorkerKb" type="number" min="0" max="10240" placeholder="${x.quota.kb}" value="${x.maxWorkerKb ?? ""}" title="${esc(w.maxKb)}"></label>
-          <span class="meta">${esc(`${w.count}: ${x.count}`)}</span>
-          <button type="submit" class="button small ghost">${esc(t.common.save)}</button>`,
-          {
-            cls: "inline-form quota-form",
-            ...(x.workers && x.count ? { confirm: w.turnOffConfirm } : {}),
-          },
-        )}</td></tr>`,
-    )
-    .join("");
   const teams = `<section class="block" aria-labelledby="wteams-title">
     <h2 id="wteams-title">${esc(w.teamsTitle)}</h2>
-    <div class="table-wrap"><table class="data stack" aria-labelledby="wteams-title"><thead><tr><th scope="col">${esc(t.admin.name)}</th><th scope="col" colspan="5">${esc(`${w.enabled} · ${w.slug} · ${w.maxWorkers} · ${w.maxKb}`)}</th></tr></thead><tbody>${teamRows}</tbody></table></div>
+    ${dataTable({
+      lang,
+      id: "wteams-table",
+      caption: w.teamsTitle,
+      headLabel: t.admin.name,
+      cols: [
+        { label: w.enabled, sort: "text" },
+        { label: w.count, sort: "num" },
+        { label: `${w.enabled} · ${w.slug} · ${w.maxWorkers} · ${w.maxKb}` },
+      ],
+      rows: o.teams.map((x) => ({
+        label: x.name,
+        href: href(`/admin/teams/${x.id}?tab=workers`),
+        head: `<a class="row-link" href="${href(`/admin/teams/${x.id}?tab=workers`)}"><bdi>${esc(x.name)}</bdi></a><div class="meta ltr">${esc(x.id)}</div>`,
+        headV: x.name,
+        cells: [
+          {
+            html: `<span class="badge ${x.workers ? "on" : "muted"}">${esc(x.workers ? t.common.on : DS[lang].off)}</span>`,
+            v: x.workers ? "1" : "0",
+          },
+          { html: esc(fmt(lang, x.count)), v: x.count, cls: "num" },
+          {
+            html: postForm(
+              href(`/admin/workers/teams/${x.id}`),
+              o.csrf,
+              `<label class="check small"><input type="checkbox" name="enabled" value="1"${x.workers ? " checked" : ""}> ${esc(w.enabled)}</label>
+          <label class="quota-field"><span class="sr-only">${esc(`${w.slug} · ${x.name}`)}</span><input name="slug" type="text" dir="ltr" maxlength="20" placeholder="${esc(w.slug)}" value="${esc(x.slug ?? "")}"${x.count ? " readonly" : ""}></label>
+          <label class="quota-field"><span class="sr-only">${esc(`${w.maxWorkers} · ${x.name}`)}</span><input name="maxWorkers" type="number" min="0" max="100" placeholder="${x.quota.workers}" value="${x.maxWorkers ?? ""}"></label>
+          <label class="quota-field"><span class="sr-only">${esc(`${w.maxKb} · ${x.name}`)}</span><input name="maxWorkerKb" type="number" min="0" max="10240" placeholder="${x.quota.kb}" value="${x.maxWorkerKb ?? ""}"></label>
+          <button type="submit" class="button small ghost">${esc(t.common.save)}</button>`,
+              {
+                cls: "inline-form quota-form",
+                ...(x.workers && x.count ? { confirm: w.turnOffConfirm } : {}),
+              },
+            ),
+          },
+        ],
+        actions: [
+          {
+            kind: "link" as const,
+            label: DS[lang].manage,
+            href: href(`/admin/teams/${x.id}?tab=workers`),
+            primary: true,
+          },
+          {
+            kind: "link" as const,
+            label: DS[lang].settings,
+            href: href(`/admin/teams/${x.id}?tab=settings`),
+            icon: "settings",
+          },
+        ],
+        filters: { status: x.workers ? "on" : "off" },
+      })),
+      csrf: o.csrf,
+      empty: t.admin.none,
+    })}
     <p class="meta table-note">${esc(w.slugHelp)}</p>
   </section>`;
-  const wRows = o.workers
-    .map((x) => {
-      const base = `/admin/workers/${x.id}`;
-      const toggle =
-        x.status === "disabled"
-          ? postForm(
-              href(`${base}/enable`),
-              o.csrf,
-              `<button class="button small ghost" type="submit">${esc(w.enable)}</button>`,
-            )
-          : postForm(
-              href(`${base}/disable`),
-              o.csrf,
-              `<button class="button small ghost" type="submit">${esc(w.disable)}</button>`,
-            );
-      return `<tr><th scope="row"><code class="ltr">${esc(x.name)}</code></th>${td(w.team, `<bdi>${esc(x.team?.name ?? "—")}</bdi>`)}${td(w.url, x.url ? `<a class="text-link" href="${esc(x.url)}" target="_blank" rel="noopener" dir="ltr">${esc(hostless(x.url))}</a>` : "—")}${td(w.status, `${workerStatus(lang, x.status)}${x.lastError ? `<div class="meta">${esc(x.lastError)}</div>` : ""}`)}${td(w.size, esc(bytesLabel(lang, x.bytes)))}${td(w.deployed, x.deployedAt ? timeTag(lang, x.deployedAt) : "—")}<td class="cell-actions"><div class="acts">${toggle}${postForm(href(`${base}/delete`), o.csrf, `<button class="button small danger" type="submit">${esc(w.del)}</button>`, { confirm: w.confirmDelete })}</div></td></tr>`;
-    })
-    .join("");
+  const { rows: wRows, cols: wCols } = workerRows(lang, o.workers, {
+    detail: (x) => href(`/admin/teams/${x.team?.id ?? "-"}/workers/${x.name}`),
+    admin: true,
+    canEdit: true,
+    showTeam: true,
+    teamHref: (x) => href(`/admin/teams/${x.team?.id ?? "-"}`),
+  });
+  const teamOpts = [
+    ...new Map(
+      o.workers.filter((x) => x.team).map((x) => [x.team?.id ?? "", x.team?.name ?? ""]),
+    ).entries(),
+  ];
   const all = `<section class="block" aria-labelledby="wall-title">
     <h2 id="wall-title">${esc(w.allTitle)} <span class="count">${esc(String(o.workers.length))}</span></h2>
-    ${o.workers.length ? `<div class="table-wrap"><table class="data stack" aria-labelledby="wall-title"><thead><tr><th scope="col">${esc(w.name)}</th><th scope="col">${esc(w.team)}</th><th scope="col">${esc(w.url)}</th><th scope="col">${esc(w.status)}</th><th scope="col">${esc(w.size)}</th><th scope="col">${esc(w.deployed)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${wRows}</tbody></table></div>` : `<p class="meta">${esc(w.none)}</p>`}
+    ${dataTable({
+      lang,
+      id: "workers-table",
+      caption: w.allTitle,
+      headLabel: w.name,
+      cols: wCols,
+      rows: wRows,
+      csrf: o.csrf,
+      empty: w.none,
+      filters: [
+        workerStatusFilter(lang, o.workers),
+        {
+          key: "team",
+          label: w.team,
+          options: teamOpts.map(([id, name]) => [id, name || id] as [string, string]),
+        },
+      ],
+    })}
   </section>`;
   const body = `<div class="page-wide">
   ${pageHead(t.admin.eyebrow, esc(w.adminTitle), w.adminSub, adminTools(lang, "workers", o.csrf))}
@@ -2640,15 +2533,55 @@ export function adminActivityHtml(
     <label><span>${esc(d.who)}</span><select name="kind">${opt("", d.everyone, o.kind)}${kinds.map((k) => opt(k, t.members.actorKinds[k], o.kind)).join("")}</select></label>
     <button class="button small" type="submit">${esc(d.filter)}</button>${o.q || o.kind || o.team ? `<a class="text-link" href="${href("/admin/activity")}">${esc(d.reset)}</a>` : ""}
   </form>`;
-  const rows = o.audit
-    .map((e) => {
+  const table = dataTable({
+    lang,
+    id: "activity-table",
+    caption: d.activity,
+    headLabel: t.members.when,
+    headSort: false,
+    cols: [
+      { label: d.pickTeam, sort: "text" },
+      { label: d.who, sort: "text" },
+      { label: t.members.what },
+    ],
+    rows: o.audit.map((e) => {
       const what =
         t.members.actions[e.action] ??
         (e.action.startsWith("mcp:") ? `MCP · ${e.action.slice(4)}` : e.action);
       const who = e.kind === "member" ? e.who : (t.members.actorLabels[e.who] ?? e.who);
-      return `<tr><td data-label="${esc(t.members.when)}">${timeTag(lang, e.at)}</td>${td(d.pickTeam, e.team ? `<a class="text-link" href="${href(`/admin/activity?team=${encodeURIComponent(e.team.id)}`)}"><bdi>${esc(e.team.name)}</bdi></a>` : `<span class="badge muted">${esc(d.platform)}</span>`)}${td(d.who, `<span class="badge k-${esc(e.kind)}">${esc(t.members.actorKinds[e.kind as (typeof kinds)[number]] ?? e.kind)}</span> <bdi>${esc(who)}</bdi>`)}${td(t.members.what, `${esc(what)}${e.detail ? ` <span class="meta"><bdi>${esc(e.detail)}</bdi></span>` : ""}${e.site ? ` · <bdi>${esc(e.site.title)}</bdi>` : ""}`)}</tr>`;
-    })
-    .join("");
+      const target = e.site
+        ? href(`/admin/sites/${e.site.id}`)
+        : e.team
+          ? href(`/admin/teams/${e.team.id}?tab=activity`)
+          : undefined;
+      return {
+        label: `${what} · ${e.team?.name ?? d.platform}`,
+        ...(target ? { href: target } : {}),
+        head: timeTag(lang, e.at),
+        headV: e.at,
+        cells: [
+          {
+            html: e.team
+              ? `<a class="text-link" href="${href(`/admin/teams/${encodeURIComponent(e.team.id)}`)}"><bdi>${esc(e.team.name)}</bdi></a>`
+              : `<span class="badge muted">${esc(d.platform)}</span>`,
+            v: (e.team?.name ?? "").toLowerCase(),
+          },
+          {
+            html: `<span class="badge k-${esc(e.kind)}">${esc(t.members.actorKinds[e.kind as (typeof kinds)[number]] ?? e.kind)}</span> <bdi>${esc(who)}</bdi>`,
+            v: who.toLowerCase(),
+          },
+          {
+            html: `${esc(what)}${e.detail ? ` <span class="meta"><bdi>${esc(e.detail)}</bdi></span>` : ""}${e.site ? ` · <a class="text-link" href="${href(`/admin/sites/${e.site.id}`)}"><bdi>${esc(e.site.title)}</bdi></a>` : ""}`,
+          },
+        ],
+        filters: { kind: e.kind },
+      };
+    }),
+    empty: d.noActivity,
+    search: false,
+    pageSize: 50,
+    cls: "audit-table",
+  });
   const body = `<div class="page-wide">
   ${pageHead(t.admin.eyebrow, esc(d.activity), d.adminActivitySub, adminTools(lang, "activity", o.csrf))}
   ${flashBox(lang, o.flash)}
@@ -2656,11 +2589,7 @@ export function adminActivityHtml(
     <h2 id="pa-title" class="sr-only">${esc(d.activity)}</h2>
     ${filter}
     <p class="meta">${esc(d.shown(o.audit.length))}</p>
-    ${
-      o.audit.length
-        ? `<div class="table-wrap"><table class="data stack audit-table" aria-labelledby="pa-title"><thead><tr><th scope="col">${esc(t.members.when)}</th><th scope="col">${esc(d.pickTeam)}</th><th scope="col">${esc(d.who)}</th><th scope="col">${esc(t.members.what)}</th></tr></thead><tbody>${rows}</tbody></table></div>`
-        : `<p class="meta">${esc(d.noActivity)}</p>`
-    }
+    ${table}
   </section>
 </div>`;
   return dashLayout({
@@ -2947,6 +2876,15 @@ const ICONS: Record<string, string> = {
   shield: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/>',
   recipes: '<path d="M6 3h10l4 4v14H6zM16 3v4h4M9 11h8M9 15h8M9 19h5"/>',
   key: '<path d="M14 10a4 4 0 1 0-3.5 4l1.5 1.5h2v2h2v2h3v-3l-5.1-5.1A4 4 0 0 0 14 10zM9.5 9.5h.01"/>',
+  more: '<path d="M12 5.5h.01M12 12h.01M12 18.5h.01" stroke-width="3"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
+  open: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  redeploy: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/>',
+  power: '<path d="M12 3v9M6.4 6.4a8 8 0 1 0 11.2 0"/>',
+  download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  filter: '<path d="M4 5h16l-6 8v5l-4 2v-7z"/>',
+  rotate: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5"/>',
+  health: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
 };
 export const icon = (name: string, cls = "icon") =>
   `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name] ?? ""}</svg>`;
@@ -2958,7 +2896,7 @@ export interface DashCtx {
   sub: string;
 }
 
-interface DashOpts {
+export interface DashOpts {
   lang: Lang;
   config: Config;
   kind: "team" | "admin";
@@ -2995,7 +2933,7 @@ const ADMIN_NAV = [
 ] as const;
 
 /** The signed-in app shell: top bar, sidebar navigation (a drawer on phones), breadcrumbs. */
-function dashLayout(o: DashOpts): string {
+export function dashLayout(o: DashOpts): string {
   const t = STRINGS[o.lang];
   const d = DS[o.lang];
   const other: Lang = o.lang === "en" ? "ar" : "en";
@@ -3093,7 +3031,7 @@ function dashLayout(o: DashOpts): string {
 }
 
 /** A stat card: label, big value, optional sub line and progress bar. */
-function statCard(
+export function statCard(
   ic: string,
   label: string,
   value: string,
@@ -3111,18 +3049,12 @@ function statCard(
     : `<div class="stat-card">${inner}</div>`;
 }
 
-/** A search box (and optional select) that filters the rows of a table client-side. */
-function tableTools(lang: Lang, tableId: string, extra = ""): string {
-  const d = DS[lang];
-  return `<div class="table-tools js-only-block" data-table-tools="${esc(tableId)}"><label class="search-field"><span class="sr-only">${esc(d.search)}</span><input type="search" data-filter placeholder="${esc(d.searchPh)}" autocomplete="off"></label>${extra}<span class="meta" data-count aria-live="polite"></span></div><p class="meta no-match" data-no-match hidden>${esc(d.noMatch)}</p>`;
-}
-
 /** Sortable header cell (the script adds the button behaviour). */
-const sortTh = (label: string, kind: "text" | "num" | "date" = "text") =>
+export const sortTh = (label: string, kind: "text" | "num" | "date" = "text") =>
   `<th scope="col" data-sort="${kind}">${esc(label)}</th>`;
 
 /** A compact activity feed (newest first). */
-function activityFeed(lang: Lang, rows: AuditView[], withSite = true): string {
+export function activityFeed(lang: Lang, rows: AuditView[], withSite = true): string {
   const t = STRINGS[lang];
   if (!rows.length) return `<p class="meta">${esc(DS[lang].noActivity)}</p>`;
   return `<ol class="feed">${rows
@@ -3367,80 +3299,6 @@ export function bellHtml(lang: Lang, kind: "team" | "admin", unread: number): st
   return `<a class="bell${unread ? " has-unread" : ""}" href="${to}" aria-label="${esc(v.bell(unread))}">${icon("alerts")}${unread ? `<span class="bell-count" aria-hidden="true">${esc(n)}</span>` : ""}</a>`;
 }
 
-const shortSha = (h: string) => `${h.slice(0, 12)}…`;
-
-export interface WorkerVersionsOpts extends TeamPageOpts {
-  worker: WorkerRowView;
-  versions: VersionMeta[];
-  canDeploy: boolean;
-}
-
-export function workerVersionsHtml(lang: Lang, c: Config, o: WorkerVersionsOpts): string {
-  const t = STRINGS[lang];
-  const v = V14[lang];
-  const d = DS[lang];
-  const href = (p: string) => localePath(lang, p);
-  const w = o.worker;
-  const edit = canEdit(o.me);
-  const base = `/team/workers/${w.name}`;
-  const rows = o.versions
-    .map((x) => {
-      const isCur = x.n === w.version;
-      const env = [
-        ...x.varNames.map((k) => `<code class="ltr">${esc(k)}</code>`),
-        ...x.secretNames.map((k) => `<code class="ltr">${esc(k)}</code> 🔒`),
-      ].join(" ");
-      const acts = [
-        edit
-          ? `<a class="button small ghost" href="${href(`${base}/versions/${x.n}/code`)}" download>${esc(v.download)}</a>`
-          : "",
-        o.canDeploy && !isCur
-          ? postForm(
-              href(`${base}/rollback`),
-              o.csrf,
-              `<input type="hidden" name="version" value="${x.n}"><button class="button small warn" type="submit" data-busy aria-label="${esc(`${v.rollback}: v${x.n}`)}">${esc(v.rollback)}</button>`,
-              { confirm: v.rollbackConfirm(x.n) },
-            )
-          : "",
-      ].join("");
-      return `<tr${isCur ? ' class="current-row"' : ""}>${td(v.version, `<strong>v${x.n}</strong>${isCur ? ` <span class="badge on">${esc(v.current)}</span>` : ""}`)}${td(v.when, timeTag(lang, x.at))}${td(v.who, `<bdi>${esc(t.members.actorLabels[x.by] ?? x.by)}</bdi>`)}${td(v.action, `${esc(v.actions[x.action] ?? x.action)}${x.from ? ` <span class="meta">${esc(v.rolledFrom(x.from))}</span>` : ""}${x.note ? `<div class="meta"><bdi>${esc(x.note)}</bdi></div>` : ""}`)}${td(v.size, esc(bytesLabel(lang, x.bytes)))}${td(v.sha, `<code class="ltr" title="${esc(x.sha256)}">${esc(shortSha(x.sha256))}</code>`)}${td(v.env, env || "—")}${td("", `<div class="acts">${acts}</div>`, "row-acts")}</tr>`;
-    })
-    .join("");
-  const table = o.versions.length
-    ? `<div class="table-wrap"><table class="data stack versions-table" aria-labelledby="ver-title"><thead><tr><th scope="col">${esc(v.version)}</th><th scope="col">${esc(v.when)}</th><th scope="col">${esc(v.who)}</th><th scope="col">${esc(v.action)}</th><th scope="col">${esc(v.size)}</th><th scope="col">${esc(v.sha)}</th><th scope="col">${esc(v.env)}</th><th scope="col"><span class="sr-only">${esc(v.rowActions)}</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
-    : emptyState(v.noVersion, WS[lang].deploySub);
-  const redeploy =
-    o.canDeploy && w.version
-      ? postForm(
-          href(`${base}/redeploy`),
-          o.csrf,
-          `<button class="button small" type="submit" data-busy>${esc(d.redeploy)}</button>`,
-        )
-      : "";
-  const body = `<div class="page-wide">
-  ${pageHead(t.team.eyebrow, `<code class="ltr">${esc(w.name)}</code> · ${esc(v.versions)}`, v.versionsSub(w.name), `<div class="head-tools">${redeploy}<a class="button small ghost" href="${href("/team/workers")}">${esc(d.nav.workers ?? "Workers")}</a></div>`)}
-  ${flashBox(lang, o.flash)}
-  <section class="block" aria-labelledby="ver-title">
-    <h2 id="ver-title">${esc(v.versions)} <span class="count">${esc(String(o.versions.length))}</span></h2>
-    <p class="meta">${esc(v.secretsNote)}</p>
-    ${table}
-  </section>
-</div>`;
-  return dashLayout({
-    lang,
-    config: c,
-    kind: "team",
-    active: "workers",
-    title: `${w.name} · ${v.versions} · ${o.team.name} · ${t.product}`,
-    description: v.versionsSub(w.name),
-    path: `${base}/versions`,
-    body,
-    csrf: o.csrf,
-    ctx: teamCtx(lang, o),
-    crumbs: [{ label: w.name, href: href("/team/workers") }, { label: v.versions }],
-  });
-}
-
 /** Scope checkboxes + expiry radios for the key and invite forms. */
 function keyFields(lang: Lang, idp: string): string {
   const v = V14[lang];
@@ -3478,25 +3336,22 @@ export function teamAgentsHtml(lang: Lang, c: Config, o: TeamAgentsOpts): string
   const href = (p: string) => localePath(lang, p);
   const scopeTags = (xs: string[]) =>
     xs.map((x) => `<code class="ltr scope">${esc(x)}</code>`).join(" ");
-  const rows = o.keys
-    .map((k) => {
-      const tone = k.state === "active" ? "on" : k.state === "revoked" ? "muted" : "warn";
-      return `<tr>${td(v.keyName, `<strong><bdi>${esc(k.name)}</bdi></strong>${k.description ? `<div class="meta"><bdi>${esc(k.description)}</bdi></div>` : ""}${k.viaInvite ? ` <span class="badge muted">${esc(v.viaInvite)}</span>` : ""}`)}${td(v.prefix, `<code class="ltr">${esc(k.prefix)}…</code>`)}${td(v.scopes, scopeTags(k.scopes))}${td(v.expires, timeTag(lang, k.expiresAt))}${td(v.lastUsed, k.lastUsedAt ? timeTag(lang, k.lastUsedAt) : `<span class="meta">${esc(v.never)}</span>`)}${td(v.status, `<span class="badge ${tone}">${esc(v.state[k.state] ?? k.state)}</span>`)}${td(
-        "",
-        o.isOwner && k.state === "active"
-          ? postForm(
-              href(`/team/agents/${k.id}/revoke`),
-              o.csrf,
-              `<button class="button small danger" type="submit" aria-label="${esc(`${v.revoke}: ${k.name}`)}">${esc(v.revoke)}</button>`,
-              { confirm: v.revokeConfirm },
-            )
-          : "",
-        "row-acts",
-      )}</tr>`;
-    })
-    .join("");
   const table = o.keys.length
-    ? `<div class="table-wrap"><table class="data stack keys-table" aria-labelledby="keys-title"><thead><tr><th scope="col">${esc(v.keyName)}</th><th scope="col">${esc(v.prefix)}</th><th scope="col">${esc(v.scopes)}</th><th scope="col">${esc(v.expires)}</th><th scope="col">${esc(v.lastUsed)}</th><th scope="col">${esc(v.status)}</th><th scope="col"><span class="sr-only">${esc(v.rowActions)}</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
+    ? dataTable({
+        lang,
+        id: "agent-keys",
+        caption: v.keysTitle,
+        headLabel: v.keyName,
+        cols: agentKeyCols(lang),
+        rows: agentKeyRows(lang, o.keys, {
+          ...(o.isOwner
+            ? { revokeAction: (k: AgentKeyView) => href(`/team/agents/${k.id}/revoke`) }
+            : {}),
+        }),
+        csrf: o.csrf,
+        empty: v.noKeys,
+        filters: [keyStateFilter(lang, o.keys)],
+      })
     : emptyState(v.noKeys, v.noKeysSub);
   const invites = o.invites.length
     ? `<section class="block" aria-labelledby="inv-title"><h2 id="inv-title" class="h3">${esc(v.openInvites)} <span class="count">${o.invites.length}</span></h2><ul class="plain-list">${o.invites
@@ -4157,6 +4012,69 @@ export interface DashRecipesOpts {
   skeleton: { en: string; ar: string };
 }
 
+/** Dashboard recipes table: every row opens the recipe; own recipes can be deleted. */
+function recipeTable(lang: Lang, o: DashRecipesOpts, base: string, own: string): string {
+  const r14 = R14[lang];
+  const link = (r: RecipeSummary) =>
+    localePath(lang, r.scope === own ? `${base}/${r.slug}` : `/docs/recipes/${r.slug}`);
+  return dataTable({
+    lang,
+    id: "recipes-table",
+    caption: r14.recipes,
+    headLabel: STRINGS[lang].common.title,
+    cols: [
+      { label: lang === "ar" ? "النوع" : "Type", sort: "text" },
+      { label: lang === "ar" ? "الوسوم" : "Tags" },
+      { label: r14.updated, sort: "date" },
+    ],
+    rows: o.list.map((r) => ({
+      label: r.title || r.slug,
+      href: link(r),
+      head: `<a class="row-link" href="${esc(link(r))}"><bdi>${esc(r.title || r.slug)}</bdi></a><div class="meta"><bdi>${esc(r.summary)}</bdi></div>`,
+      cells: [
+        {
+          html: `<span class="badge ${r.scope === "team" ? "on" : r.scope === "platform" ? "info" : "muted"}">${esc(r14.scope[r.scope] ?? r.scope)}</span> <span class="meta">${esc(r14.version(r.version))}</span>`,
+          v: r.scope,
+        },
+        { html: r.tags.map((x) => `<code class="ltr scope">${esc(x)}</code>`).join(" ") || "—" },
+        { html: relTimeTag(r.updatedAt, lang), v: r.updatedAt },
+      ],
+      actions: [
+        { kind: "link" as const, label: r14.view, href: link(r), primary: true },
+        {
+          kind: "link" as const,
+          label: "/docs",
+          href: localePath(lang, `/docs/recipes/${r.slug}`),
+          external: true,
+        },
+        ...(o.canWrite && r.scope === own
+          ? [
+              {
+                kind: "post" as const,
+                label: r14.del,
+                action: localePath(lang, `${base}/${r.slug}/delete`),
+                danger: true,
+                confirm: r14.delConfirm,
+              },
+            ]
+          : []),
+      ],
+      filters: { scope: r.scope },
+    })),
+    csrf: o.csrf,
+    empty: r14.none,
+    filters: [
+      {
+        key: "scope",
+        label: lang === "ar" ? "النوع" : "Type",
+        options: [...new Set(o.list.map((r) => r.scope))].map(
+          (x) => [x, r14.scope[x] ?? x] as [string, string],
+        ),
+      },
+    ],
+  });
+}
+
 /** Dashboard: /team/recipes and /admin/recipes */
 export function dashRecipesHtml(
   lang: Lang,
@@ -4175,7 +4093,7 @@ export function dashRecipesHtml(
   ${flashBox(lang, o.flash ?? null)}
   <section class="block" aria-labelledby="rc-title">
     <h2 id="rc-title">${esc(r14.recipes)} <span class="count">${o.list.length}</span></h2>
-    ${recipeCards(lang, o.list, (r) => localePath(lang, r.scope === own ? `${base}/${r.slug}` : `/docs/recipes/${r.slug}`))}
+    ${recipeTable(lang, o, base, own)}
     <p class="meta recipe-api"><strong>${esc(r14.apiHint)}:</strong> <code class="ltr">${esc(r14.apiText)}</code></p>
   </section>
   <section class="block" aria-label="${esc(r14.newRecipe)}">${form}</section>
@@ -4340,110 +4258,3 @@ export const K14 = {
     rowActions: "إجراءات",
   },
 };
-
-export interface WorkerKeysOpts extends TeamPageOpts {
-  worker: WorkerRowView;
-  settings: {
-    required: boolean;
-    perMinute: number;
-    perDay: number;
-    verifier: string | null;
-    cacheSeconds: number;
-  };
-  keys: UserKeyView[];
-  verifyUrl: string;
-  helperUrl: string;
-  canManage: boolean;
-}
-
-/** Team dashboard: /team/workers/:name/keys */
-export function workerKeysHtml(lang: Lang, c: Config, o: WorkerKeysOpts): string {
-  const t = STRINGS[lang];
-  const k = K14[lang];
-  const d = DS[lang];
-  const href = (p: string) => localePath(lang, p);
-  const w = o.worker;
-  const base = `/team/workers/${w.name}/keys`;
-  const num = (n: number) => n.toLocaleString(lang === "ar" ? "ar-EG" : "en-US");
-  const rows = o.keys
-    .map((x) => {
-      const tone = x.state === "active" ? "on" : x.state === "revoked" ? "muted" : "warn";
-      const lim = `${x.perMinute ? num(x.perMinute) : "—"} / ${x.perDay ? num(x.perDay) : "—"}`;
-      return `<tr>${td(k.label, `<strong><bdi>${esc(x.label)}</bdi></strong>${x.email ? `<div class="meta"><bdi dir="ltr">${esc(x.email)}</bdi></div>` : ""}${x.tools.length ? `<div>${x.tools.map((tl) => `<code class="ltr scope">${esc(tl)}</code>`).join(" ")}</div>` : ""}`)}${td(k.prefix, `<code class="ltr">${esc(x.prefix)}…</code>`)}${td(`${k.perMinute} / ${k.perDay}`, esc(lim))}${td(k.usage, `<span class="uk-usage"><strong>${num(x.usage.today)}</strong> ${esc(k.today)} · ${num(x.usage.last7d)} ${esc(k.week)}${x.usage.limited7d ? ` · <span class="badge warn">${num(x.usage.limited7d)} ${esc(k.limited)}</span>` : ""}</span>`)}${td(k.lastUsed, x.lastUsedAt ? timeTag(lang, x.lastUsedAt) : `<span class="meta">—</span>`)}${td(k.expiry, x.expiresAt ? timeTag(lang, x.expiresAt) : `<span class="meta">${esc(k.never)}</span>`)}${td(k.status, `<span class="badge ${tone}">${esc(k.state[x.state] ?? x.state)}</span>`)}${td(
-        "",
-        o.canManage && x.state === "active"
-          ? postForm(
-              href(`${base}/${x.id}/revoke`),
-              o.csrf,
-              `<button class="button small danger" type="submit" aria-label="${esc(`${k.revoke}: ${x.label}`)}">${esc(k.revoke)}</button>`,
-              { confirm: k.revokeConfirm },
-            )
-          : "",
-        "row-acts",
-      )}</tr>`;
-    })
-    .join("");
-  const table = o.keys.length
-    ? `<div class="table-wrap"><table class="data stack keys-table" aria-labelledby="uk-title"><thead><tr><th scope="col">${esc(k.label)}</th><th scope="col">${esc(k.prefix)}</th><th scope="col">${esc(`${k.perMinute} / ${k.perDay}`)}</th><th scope="col">${esc(k.usage)}</th><th scope="col">${esc(k.lastUsed)}</th><th scope="col">${esc(k.expiry)}</th><th scope="col">${esc(k.status)}</th><th scope="col"><span class="sr-only">${esc(k.rowActions)}</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
-    : emptyState(k.noKeys, k.noKeysSub);
-  const st = o.settings;
-  const settings = `<form method="post" action="${href(`${base}/settings`)}" class="panel stack-form uk-settings">
-    ${csrfField(o.csrf)}
-    <h2 class="h3">${icon("shield")} ${esc(k.require)} <span class="badge ${st.required ? "on" : "muted"}">${esc(st.required ? k.on : k.off)}</span></h2>
-    <p class="meta">${esc(k.requireHelp)}</p>
-    <label class="check"><input type="checkbox" name="required" value="on"${st.required ? " checked" : ""}${o.canManage ? "" : " disabled"}><span>${esc(k.require)}</span></label>
-    <fieldset class="expiry-set"><legend>${esc(k.defaults)}</legend>
-      <label class="inline-field">${esc(k.perMinute)} <input class="days-input" name="perMinute" type="number" min="1" max="10000" value="${st.perMinute}" inputmode="numeric"${o.canManage ? "" : " disabled"}></label>
-      <label class="inline-field">${esc(k.perDay)} <input class="days-input" name="perDay" type="number" min="1" max="10000000" value="${st.perDay}" inputmode="numeric"${o.canManage ? "" : " disabled"}></label>
-    </fieldset>
-    ${o.canManage ? `<button class="button small" type="submit">${esc(k.saveSettings)}</button>` : ""}
-  </form>`;
-  const exp = [30, 90, 365]
-    .map(
-      (n) =>
-        `<label class="check inline"><input type="radio" name="expiresInDays" value="${n}"${n === 90 ? " checked" : ""}><span>${esc(k.days(n))}</span></label>`,
-    )
-    .join("");
-  const create = o.canManage
-    ? `<form method="post" action="${href(base)}" class="panel stack-form key-form">
-    ${csrfField(o.csrf)}
-    <h2 class="h3">${icon("key")} ${esc(k.create)}</h2>
-    <label for="uk-label">${esc(k.label)}</label><input id="uk-label" name="label" required maxlength="80" autocomplete="off">
-    <label for="uk-email">${esc(k.email)}</label><input id="uk-email" name="email" type="email" maxlength="254" dir="ltr" autocomplete="off">
-    <fieldset class="expiry-set"><legend>${esc(k.expiry)}</legend>${exp}<label class="check inline"><input type="radio" name="expiresInDays" value="never"><span>${esc(k.never)}</span></label></fieldset>
-    <fieldset class="expiry-set"><legend>${esc(k.limits)}</legend>
-      <label class="inline-field">${esc(k.perMinute)} <input class="days-input" name="perMinute" type="number" min="1" max="10000" inputmode="numeric"></label>
-      <label class="inline-field">${esc(k.perDay)} <input class="days-input" name="perDay" type="number" min="1" max="10000000" inputmode="numeric"></label>
-    </fieldset>
-    <label for="uk-tools">${esc(k.tools)}</label><input id="uk-tools" name="tools" maxlength="2000" dir="ltr" placeholder="${esc(k.toolsPh)}" autocomplete="off">
-    <button class="button" type="submit">${esc(k.create)}</button>
-  </form>`
-    : `<p class="notice">${esc(k.readOnly)}</p>`;
-  const helper = `<section class="block panel" aria-labelledby="uk-helper"><h2 id="uk-helper" class="h3">${esc(k.helper)}</h2><p class="meta">${esc(k.helperText)} ${esc(k.cache(st.cacheSeconds))}</p><p>${esc(k.verify)}: <code class="ltr">${esc(o.verifyUrl)}</code></p><pre class="ltr" dir="ltr"><code>curl -s ${esc(o.helperUrl)} &gt; marsa-keys.js
-// in /mcp, before any work:
-const gate = await requireKey(request, env, { tool });
-if (!gate.ok) return gate.response;</code></pre><p><a class="text-link" href="${href("/team/recipes")}">${esc(R14[lang].recipes)}</a> · <a class="text-link" href="${href("/docs/recipes/protect-mcp-with-keys")}">protect-mcp-with-keys</a></p></section>`;
-  const body = `<div class="page-wide">
-  ${pageHead(t.team.eyebrow, `<code class="ltr">${esc(w.name)}</code> · ${esc(k.apiKeys)}`, k.sub(w.name), `<div class="head-tools"><a class="button small ghost" href="${href(`/team/workers/${w.name}/versions`)}">${esc(V14[lang].versions)}</a><a class="button small ghost" href="${href("/team/workers")}">${esc(d.nav.workers ?? "Workers")}</a></div>`)}
-  ${flashBox(lang, o.flash ?? null)}
-  <section class="block" aria-labelledby="uk-title">
-    <h2 id="uk-title">${esc(k.keys)} <span class="count">${o.keys.filter((x) => x.state === "active").length}</span></h2>
-    ${table}
-  </section>
-  <section class="block two-col">${create}${settings}</section>
-  ${helper}
-</div>`;
-  return dashLayout({
-    lang,
-    config: c,
-    kind: "team",
-    active: "workers",
-    title: `${w.name} · ${k.apiKeys} · ${o.team.name} · ${t.product}`,
-    description: k.sub(w.name),
-    path: base,
-    body,
-    csrf: o.csrf,
-    ctx: teamCtx(lang, o),
-    crumbs: [{ label: w.name, href: href("/team/workers") }, { label: k.apiKeys }],
-  });
-}

@@ -277,8 +277,12 @@ describe("team Workers", () => {
     expect(eres.status).toBe(303);
     expect(cf.scripts.get("team-sanad-web")?.secrets.get("API_SECRET")).toBe("s3cr3t-value-xyz");
     const list = await (await editor.get("/team/workers")).text();
-    expect(list).toContain("API_SECRET");
+    expect(list).toContain('data-href="/team/workers/web"');
     expect(list).not.toContain("s3cr3t-value-xyz");
+    const detail = await (await editor.get("/team/workers/web")).text();
+    expect(detail).toContain("API_SECRET");
+    expect(detail).toContain("WHO");
+    expect(detail).not.toContain("s3cr3t-value-xyz");
     expect(await readFile(join(t.dir, "workers.json"), "utf8")).not.toContain("s3cr3t-value-xyz");
   });
 

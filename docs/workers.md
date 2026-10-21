@@ -77,6 +77,30 @@ Every successful deploy is stored as a version on the Spaces server: the code, t
 - Workers deployed before 0.14.0 show "No stored version — the next deploy will be saved".
 - Deploy, redeploy, rollback and delete raise a notification for the team's owners (see [Agent keys and alerts](agent-keys.md)).
 
+## The Worker page (0.15.0)
+
+`/team/workers/<name>` (admins: `/admin/teams/<id>/workers/<name>`) has tabs:
+
+- **Overview**: status, live URL (copy/open), the MCP endpoint when the code serves `/mcp`, the last deploy and who did it, size, SHA-256, var and secret **names**, a health check, and API-key requests in the last 7 days (shown only when the Worker uses Marsa API keys).
+- **Versions**: roll back or download any stored version.
+- **API keys**: keys for the Worker's users.
+- **Settings**: require API keys and limits, edit env vars, set or remove secrets (values are write-only and never shown), disable/enable, delete. Saving vars or secrets redeploys the latest stored code and creates a new version. A Worker disabled by the admin can only be re-enabled by the admin.
+- **Activity**: deploys, rollbacks, settings and key changes for this Worker.
+
+The admin view is read-only for code and settings; admins can disable, enable or delete.
+
+## Compatibility flags and service bindings (0.15.0)
+
+Deploys (`PUT …/workers/<name>`, the `deploy_worker` MCP tool) accept these optional fields:
+
+- `compatibilityDate`: `YYYY-MM-DD`, from 2021-11-03 up to today. `null` sets the platform default (`WORKERS_COMPAT_DATE`).
+- `compatibilityFlags`: from an allowlist: `global_fetch_strictly_public`, `nodejs_compat`, `nodejs_als`. Anything else returns `400`.
+- `bindings`: service bindings to other Workers of the **same team**, `[{"name":"NEWS","worker":"news"}]`. In code, call `env.NEWS.fetch(request)`. `worker` is the short name of one of your team's Workers. Spaces refuses script names, other teams' Workers, non-Spaces scripts, the Worker itself, names that clash with a var or secret, `MARSA_*` names, and any field other than `name`/`worker`.
+
+If you omit a field, the current value is kept. `[]` clears flags or bindings. The settings are stored with each version, so a rollback restores them. `POST …/workers/<name>/runtime` (or `set_worker_runtime`, or the Settings tab) changes only these settings: it redeploys the newest stored code and does not touch the bound Worker. Deleting a Worker that another Worker binds to returns `409 WORKER_BOUND`.
+
+Why this exists: a plain `fetch()` from a Worker to another hostname on the same zone goes to the zone's origin, not to that Worker. A binding makes a direct call. `global_fetch_strictly_public` makes the request go out through the internet instead.
+
 ## MCP tools
 
 When Workers are on for the team, a space's MCP server (see [MCP per space](mcp.md)) also offers `list_workers`, `list_worker_versions` and `get_worker_version` (read-only tokens) and `deploy_worker`, `redeploy_worker`, `rollback_worker` and `delete_worker` (read-write tokens), with the same rules as the API.

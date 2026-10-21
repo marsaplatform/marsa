@@ -208,7 +208,7 @@ describe("team quotas", () => {
     const { b } = await t.signIn(team.key);
     expect(await (await b.get("/team")).text()).toContain("Quota: 1/50");
     const a = await t.adminBrowser();
-    const html = await (await a.get("/admin")).text();
+    const html = await (await a.get(`/admin/teams/${team.team.id}?tab=settings`)).text();
     expect(html).toContain('name="maxSites"');
     expect(html).toContain('placeholder="200"');
   });

@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import type { WorkerRuntime } from "./worker-config.js";
 
 /**
  * Stored versions of team Workers (0.14.0): every successful deploy keeps the code,
@@ -26,6 +27,8 @@ export interface WorkerVersion {
   vars: Record<string, string>;
   secretNames: string[];
   code: string;
+  /** Compatibility date/flags and service bindings used (0.15.0); unset on older versions. */
+  runtime?: WorkerRuntime;
 }
 
 export type VersionMeta = Omit<WorkerVersion, "code" | "vars"> & { varNames: string[] };

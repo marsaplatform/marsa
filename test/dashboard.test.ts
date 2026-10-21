@@ -88,7 +88,8 @@ describe("dashboards (0.13.0)", () => {
     const sites = await (await b.get("/team/sites")).text();
     expect(sites).toContain('data-sort="num"');
     expect(sites).toContain("Agent page");
-    expect(sites).toContain('data-copy="#u-');
+    expect(sites).toContain("data-copy-text=");
+    expect(sites).toMatch(/<tr data-href="\/team\/sites\/[a-z0-9]+"/);
   });
 
   it("filters the team activity log and shows settings without the key", async () => {
@@ -146,7 +147,7 @@ describe("dashboards (0.13.0)", () => {
     expect(d.status).toBe(201);
     const { b } = await t.signIn(team.key);
     const page = await (await b.get("/team/workers")).text();
-    expect(page).toContain('class="worker-card"');
+    expect(page).toContain('data-href="/team/workers/hello"');
     expect(page).toContain("/team/workers?redeploy=hello#deploy");
     expect(page).toContain("/api/teams/crew/workers/hello");
     const re = await (await b.get("/team/workers?redeploy=hello")).text();
@@ -173,8 +174,10 @@ describe("dashboards (0.13.0)", () => {
     }
     const ov = await (await b.get("/admin")).text();
     expect(ov).toContain('class="stat-card"');
-    expect(ov).toContain('class="row-more"');
-    expect(ov).toContain("The old key stops working immediately");
+    expect(ov).toContain('class="kebab"');
+    expect(ov).toContain(`data-href="/admin/teams/${team.team.id}"`);
+    const ts = await (await b.get(`/admin/teams/${team.team.id}?tab=settings`)).text();
+    expect(ts).toContain("The old key stops working immediately");
     const st = await (await b.get("/admin/settings")).text();
     expect(st).toContain(`…${CF_TOKEN.slice(-4)}`);
     expect(st).toContain('action="/admin/workers/settings"');
@@ -182,9 +185,10 @@ describe("dashboards (0.13.0)", () => {
     const act = await (await b.get("/admin/activity")).text();
     expect(act).toContain("Crew");
     const plat = await (await b.get("/admin/activity?team=platform")).text();
-    expect(plat).not.toContain(`team=${team.team.id}`);
+    expect(plat).not.toContain(`href="/admin/teams/${team.team.id}"`);
     const one = await (await b.get(`/admin/activity?team=${team.team.id}`)).text();
-    expect(one).toContain(`team=${team.team.id}`);
+    expect(one).toContain(`href="/admin/teams/${team.team.id}"`);
+    expect(one).toContain(`data-href="/admin/teams/${team.team.id}?tab=activity"`);
     expect((await b.get("/admin/activity?team=nope&kind=x")).status).toBe(200);
     // Verifying from settings returns to settings.
     const csrf = await b.csrf("/admin/settings");
@@ -214,6 +218,9 @@ describe("dashboards (0.13.0)", () => {
     });
     expect(on.headers.get("location")).toMatch(/^\/admin\?f=/);
     const page = await (await b.get("/admin")).text();
-    expect(page).toMatch(/class="pill-toggle on" aria-pressed="true" aria-label="Workers · Crew/);
+    expect(page).toMatch(/<span class="badge on">On<\/span> <span class="meta">0<\/span>/);
+    const detail = await (await b.get(`/admin/teams/${team.team.id}?tab=settings`)).text();
+    expect(detail).toContain('name="enabled" value="1" checked');
+    expect(detail).toContain('name="maxWorkers" type="number" min="0" max="100" placeholder');
   });
 });

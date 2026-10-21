@@ -1,7 +1,7 @@
 ---
 title: MCP server on a Spaces Worker
 summary: Ship a remote MCP server (Streamable HTTP at /mcp) as a team Worker, with secrets, caching and a live check.
-version: 1
+version: 2
 updated: 2026-10-21
 tags: mcp, workers
 order: 1
@@ -106,6 +106,26 @@ export default {
 };
 ```
 
+## Calling another Worker of your team (0.15.0)
+
+A Worker on `marsaplatform.com` cannot simply `fetch("https://<team>-news.marsaplatform.com")`. That host is on the same Cloudflare zone, so by default the request goes to the zone's origin instead of the other Worker. Use one of these two ways:
+
+1. **Service binding (preferred)**: a direct call that never leaves Cloudflare and has no public round trip. You can only bind to Workers of **your own team**; Spaces refuses any other Worker or script.
+   ```json
+   PUT /api/teams/<team>/workers/morassel
+   { "code": "…", "bindings": [{ "name": "NEWS", "worker": "news" }] }
+   ```
+   ```js
+   const res = await env.NEWS.fetch(new Request("https://news/latest?limit=5"));
+   ```
+   The host in the URL is ignored; the path and query reach the other Worker as they are.
+2. **Public URL**: turn on the `global_fetch_strictly_public` flag. `fetch()` then goes out through the internet like any outside client, so it passes the other Worker's API keys and limits.
+   ```json
+   { "code": "…", "compatibilityFlags": ["global_fetch_strictly_public"] }
+   ```
+
+To change only these settings without sending the code again, use `POST /api/teams/<team>/workers/<name>/runtime` with `{"compatibilityFlags": […], "bindings": […]}`. You can also use the MCP tool `set_worker_runtime`, or the Worker's **Settings** tab. Spaces redeploys the newest stored code as a new version and leaves the bound Worker unchanged. Allowed flags are `global_fetch_strictly_public`, `nodejs_compat` and `nodejs_als`. You can set `compatibilityDate` (YYYY-MM-DD). You cannot delete a Worker while another one binds to it (`409 WORKER_BOUND`).
+
 ## Checklist before deploy
 
 - [ ] One module, `export default { fetch }` (object), bundle size under the team limit.
@@ -127,6 +147,7 @@ export default {
 
 ## Common pitfalls
 
+- **`fetch()` to another team Worker returns the wrong thing or 5xx**: on the same zone, a plain fetch goes to the origin. Use a service binding or `global_fetch_strictly_public` (see above), not a VPN detour.
 - **`NOT_A_MODULE`**: the code is a service-worker script (`addEventListener("fetch")`) or the bundle lost `export default`.
 - **A class default export** (`export default class extends WorkerEntrypoint`) cannot receive vars over 5 KB; use an object export.
 - **Var too large** (Sanad news hit the old 5 KB limit): since 0.14.0 a var can be 32 KB (64 KB total). Bigger data belongs in site KV/files or an upstream URL.

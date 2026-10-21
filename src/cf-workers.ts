@@ -43,6 +43,10 @@ export interface ScriptUpload {
   code: string;
   compatibilityDate: string;
   vars: Record<string, string>;
+  /** Allowlisted by the caller (see worker-config.ts). */
+  compatibilityFlags?: string[];
+  /** Service bindings: env name → script name (same team, resolved by the caller). */
+  services?: { name: string; script: string }[];
 }
 
 /** Cloudflare's limit for one plain_text binding. */
@@ -168,7 +172,11 @@ export class CloudflareWorkersApi {
     const metadata = {
       main_module: "worker.js",
       compatibility_date: s.compatibilityDate,
-      bindings: small.map(([name, text]) => ({ type: "plain_text", name, text })),
+      ...(s.compatibilityFlags?.length ? { compatibility_flags: s.compatibilityFlags } : {}),
+      bindings: [
+        ...small.map(([name, text]) => ({ type: "plain_text", name, text })),
+        ...(s.services ?? []).map((b) => ({ type: "service", name: b.name, service: b.script })),
+      ],
       // Secrets are set separately and survive redeploys.
       keep_bindings: ["secret_text"],
       tags: ["marsa-spaces"],

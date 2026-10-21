@@ -507,15 +507,19 @@ describe("0.14.0 pages", () => {
     const { b } = await t.signIn(tk["x-team-key"] as string, "/ar");
     const wk = await (await b.get("/ar/team/workers")).text();
     expect(wk).toContain("/ar/team/workers/api/redeploy");
-    expect(wk).toContain("/ar/team/workers/api/versions");
-    const vp = await (await b.get("/ar/team/workers/api/versions")).text();
+    expect(wk).toContain('data-href="/ar/team/workers/api"');
+    // The old versions URL now opens the detail page's Versions tab.
+    const old = await b.get("/ar/team/workers/api/versions");
+    expect(old.status).toBe(301);
+    expect(old.headers.get("location")).toBe("/ar/team/workers/api?tab=versions");
+    const vp = await (await b.get("/ar/team/workers/api?tab=versions")).text();
     expect(vp).toContain("نزّل الكود");
     expect(vp).not.toMatch(/ style=/);
     // One-click redeploy from the browser.
     const csrf = await b.csrf("/ar/team/workers");
     const rr = await b.post("/ar/team/workers/api/redeploy", { _csrf: csrf });
     expect(rr.status).toBe(303);
-    const vp2 = await (await b.get("/ar/team/workers/api/versions")).text();
+    const vp2 = await (await b.get("/ar/team/workers/api?tab=versions")).text();
     expect(vp2).toContain("v2");
     expect(vp2).toContain("ارجع لهذا الإصدار");
     // Agent key from the browser: shown once.
@@ -538,8 +542,8 @@ describe("0.14.0 pages", () => {
     const admin = await t.adminBrowser();
     const ap = await (await admin.get("/admin/notifications")).text();
     expect(ap).toContain('class="bell');
-    // Admin overview: worker count sits next to the switch.
+    // Admin overview: the Workers column shows the state and the count.
     const ov = await (await admin.get("/admin")).text();
-    expect(ov).toContain("wk-cell");
+    expect(ov).toMatch(/<span class="badge on">[^<]+<\/span> <span class="meta">1<\/span>/);
   });
 });
