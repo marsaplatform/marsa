@@ -663,6 +663,21 @@ pre.tree{max-height:26rem;overflow:auto;font-size:.82rem;line-height:1.5;padding
 #teams-table td{vertical-align:middle}
 #teams-table .quota-form{display:grid;grid-template-columns:repeat(2,72px) auto;align-items:center}
 #teams-table .quota-form .button{grid-column:auto}
+/* 0.16.0: Admin › Workers team form: a row on wide screens, stacked with visible labels on phones. */
+#wteams-table .quota-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+#wteams-table .quota-form .quota-field input[name=slug]{width:120px}
+#wteams-table .quota-form .quota-field input[type=number]{width:84px}
+@media (max-width:600px){
+  #wteams-table .quota-form,#teams-table .quota-form{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;width:100%}
+  #wteams-table .quota-form .quota-field input[name=slug],#wteams-table .quota-form .quota-field input[type=number],.quota-form .quota-field input{width:100%;min-height:44px}
+  .quota-form .quota-field .sr-only{position:static;width:auto;height:auto;margin:0 0 4px;overflow:visible;clip:auto;white-space:normal;display:block;font-size:13px;color:var(--muted)}
+  .quota-form .button{width:100%;justify-self:stretch}
+  table.data.stack td.cell-actions,table.data.stack td{min-width:0;max-width:100%}
+}
+/* 0.16.0: health check target form. */
+.health-target{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;align-items:end}
+.health-target .field{margin:0}
+.health-target .button{justify-self:start}
 #teams-table td.cell-actions{min-width:120px}
 /* workers */
 .worker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
@@ -828,6 +843,7 @@ html:not(.js) .kebab-menu{position:static;margin-top:6px}
 .chart{margin:0 0 16px;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:10px}
 .chart svg{width:100%;height:180px;display:block;direction:ltr}
 .chart .axis{stroke:var(--line);stroke-width:1}
+.chart .grid{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4;opacity:.7}
 .chart .tick{fill:var(--muted);font-size:11px;font-family:var(--mono)}
 .chart .bar-req{fill:color-mix(in srgb,var(--accent) 55%,transparent)}
 .chart .bar-err{fill:var(--danger)}
@@ -1008,6 +1024,19 @@ if (drop) {
 for (const el of document.querySelectorAll("time[data-local]")) {
   const d = new Date(el.getAttribute("datetime"));
   if (!isNaN(d)) el.textContent = d.toLocaleString(lang === "ar" ? "ar-EG" : undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+// 0.16.0: chart labels and tooltips in the visitor's time zone (the server used DISPLAY_TZ).
+const TFMT = {
+  hour: { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" },
+  day: { day: "numeric", month: "short" },
+  hm: { hour: "2-digit", minute: "2-digit", hourCycle: "h23" },
+};
+for (const el of document.querySelectorAll("[data-t]")) {
+  const d = new Date(Number(el.getAttribute("data-t")));
+  const f = TFMT[el.getAttribute("data-tf")] || TFMT.hour;
+  if (isNaN(d)) continue;
+  const s = new Intl.DateTimeFormat(lang === "ar" ? "ar-EG" : "en-GB", f).format(d);
+  el.textContent = s + (el.getAttribute("data-tsuf") || "");
 }
 
 // ---- team dashboard: drag-and-drop / folder uploads with the CSRF token ----------

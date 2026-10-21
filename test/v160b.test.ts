@@ -402,3 +402,33 @@ describe("0.16.0 accessibility of rendered Markdown", () => {
     );
   });
 });
+
+describe("0.16.0 times and charts in the user's time zone", () => {
+  it("renders in Asia/Dubai by default with data-t hooks for the browser zone", async () => {
+    const { timeTag, fmtTime, setDisplayTimeZone } = await import("../src/ui.js");
+    const { usageChart } = await import("../src/ui-ops.js");
+    setDisplayTimeZone("Asia/Dubai");
+    const tag = timeTag("en", "2026-10-14T09:26:00.000Z");
+    expect(tag).toContain("13:26");
+    expect(tag).toContain("GMT+4");
+    expect(tag).not.toContain("UTC");
+    expect(fmtTime("ar", Date.parse("2026-10-14T09:00:00Z"), "hm")).toBe("١٣:٠٠");
+    const points = Array.from({ length: 24 }, (_, i) => ({
+      t: new Date(Date.parse("2026-10-14T00:00:00Z") + i * 3_600_000).toISOString(),
+      requests: i,
+      errors: 0,
+      cpuMs: null,
+    }));
+    const svg = usageChart(
+      "ar",
+      { range: "24h", points, total: { requests: 276, errors: 0 } } as never,
+      "x",
+    );
+    expect(svg).toMatch(/data-t="\d+" data-tf="hour"/);
+    expect(svg).toContain('class="grid"');
+    expect(svg).not.toContain("UTC");
+    expect(svg).not.toMatch(/>10-14 \d\d</);
+    setDisplayTimeZone("Nope/Zone");
+    expect(timeTag("en", "2026-10-14T09:26:00.000Z")).toContain("13:26");
+  });
+});

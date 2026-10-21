@@ -89,6 +89,7 @@ import {
   privacyHtml,
   recipePageHtml,
   recipesIndexHtml,
+  setDisplayTimeZone,
 } from "./ui.js";
 import { mountUserKeyRoutes, userKeyOps } from "./user-key-routes.js";
 import { UserKeyStore } from "./user-keys.js";
@@ -290,6 +291,7 @@ export function createApp({
       ? { kind: "api", label: "team key" }
       : { kind: "api", label: "edit token" });
   store.onDelete((id) => visits.purge(id));
+  setDisplayTimeZone(config.displayTz);
   const session = sessions ?? new Sessions(config, now);
   const app = new Hono();
   /** Language for pages outside the /ar tree: Arabic if the browser prefers it. */

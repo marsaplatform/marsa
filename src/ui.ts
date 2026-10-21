@@ -89,18 +89,52 @@ export interface Flash {
   link?: string;
 }
 
-/** A server-rendered UTC time; the page script swaps in the visitor's local time. */
+/**
+ * 0.16.0: times render in the instance's display time zone (DISPLAY_TZ, default
+ * Asia/Dubai) with the zone named; the page script then swaps in the visitor's own zone.
+ */
+let displayTz = "Asia/Dubai";
+export function setDisplayTimeZone(tz: string): void {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: tz });
+    displayTz = tz;
+  } catch {
+    // keep the default
+  }
+}
+export const displayTimeZone = () => displayTz;
+
+export type TimeFmt = "full" | "hour" | "day" | "hm";
+/** A time in the display zone: "full" date+time, "hour" (14 Oct 13:00), "day", "hm" (13:05). */
+export function fmtTime(lang: Lang, t: string | number, f: TimeFmt = "full"): string {
+  const opts: Intl.DateTimeFormatOptions =
+    f === "full"
+      ? { dateStyle: "medium", timeStyle: "short" }
+      : f === "hour"
+        ? { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }
+        : f === "day"
+          ? { day: "numeric", month: "short" }
+          : { hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
+  return new Intl.DateTimeFormat(lang === "ar" ? "ar-EG" : "en-GB", {
+    ...opts,
+    timeZone: displayTz,
+  }).format(new Date(t));
+}
+/** The display zone's short name at that moment ("GMT+4"). */
+export function tzName(lang: Lang, t: string | number): string {
+  const parts = new Intl.DateTimeFormat(lang === "ar" ? "ar-EG" : "en-GB", {
+    timeZone: displayTz,
+    timeZoneName: "shortOffset",
+  }).formatToParts(new Date(t));
+  return parts.find((p) => p.type === "timeZoneName")?.value ?? displayTz;
+}
+
 export function timeTag(lang: Lang, iso: string): string {
   if (isPermanentIso(iso)) {
     return `<span class="badge on perm">${esc(STRINGS[lang].team.permanent)}</span>`;
   }
   const d = new Date(iso);
-  const text = new Intl.DateTimeFormat(lang === "ar" ? "ar-EG" : "en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(d);
-  return `<time datetime="${esc(d.toISOString())}" data-local>${esc(text)} UTC</time>`;
+  return `<time datetime="${esc(d.toISOString())}" data-local>${esc(fmtTime(lang, d.getTime()))} ${esc(tzName(lang, d.getTime()))}</time>`;
 }
 
 export const ltr = (s: string) => `<span dir="ltr" class="ltr">${esc(s)}</span>`;

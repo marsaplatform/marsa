@@ -5,7 +5,7 @@
  */
 import type { PermCheck, PermReport } from "./cf-permissions.js";
 import { actorText, type Lang } from "./i18n.js";
-import { csrfField, esc, icon, postForm, timeTag } from "./ui.js";
+import { csrfField, esc, fmtTime, icon, postForm, type TimeFmt, timeTag } from "./ui.js";
 import { badge, type DtRow, dataTable, relTime } from "./ui-table.js";
 import type { LogsResult, UsageRange, UsageSeries } from "./worker-analytics.js";
 import type { EnvView } from "./worker-env.js";
@@ -358,11 +358,14 @@ export function usageChart(lang: Lang, s: UsageSeries, title: string): string {
   const max = Math.max(1, ...s.points.map((p) => p.requests));
   const cpuMax = Math.max(0.001, ...s.points.map((p) => p.cpuMs ?? 0));
   const y = (v: number) => H - P - (v / max) * (H - P * 2);
+  const tf: TimeFmt = s.range === "30d" ? "day" : "hour";
   const bars = s.points
     .map((p, i) => {
       const x = P + i * bw;
-      const tip = `${p.t.slice(0, s.range === "30d" ? 10 : 13).replace("T", " ")}${s.range === "30d" ? "" : ":00"} · ${fmtN(lang, p.requests)} / ${fmtN(lang, p.errors)}${p.cpuMs !== null ? ` · ${p.cpuMs} ms` : ""}`;
-      return `<g><title>${esc(tip)}</title><rect class="bar-req" x="${(x + 0.5).toFixed(1)}" y="${y(p.requests).toFixed(1)}" width="${Math.max(1, bw - 1).toFixed(1)}" height="${(H - P - y(p.requests)).toFixed(1)}"/>${p.errors ? `<rect class="bar-err" x="${(x + 0.5).toFixed(1)}" y="${y(p.errors).toFixed(1)}" width="${Math.max(1, bw - 1).toFixed(1)}" height="${(H - P - y(p.errors)).toFixed(1)}"/>` : ""}</g>`;
+      const ms = Date.parse(p.t);
+      const suf = ` · ${fmtN(lang, p.requests)} / ${fmtN(lang, p.errors)}${p.cpuMs !== null ? ` · ${fmtN(lang, p.cpuMs)} ms` : ""}`;
+      const tip = `<title data-t="${ms}" data-tf="${tf}" data-tsuf="${esc(suf)}">${esc(fmtTime(lang, ms, tf))}${esc(suf)}</title>`;
+      return `<g>${tip}<rect class="bar-req" x="${(x + 0.5).toFixed(1)}" y="${y(p.requests).toFixed(1)}" width="${Math.max(1, bw - 1).toFixed(1)}" height="${(H - P - y(p.requests)).toFixed(1)}"/>${p.errors ? `<rect class="bar-err" x="${(x + 0.5).toFixed(1)}" y="${y(p.errors).toFixed(1)}" width="${Math.max(1, bw - 1).toFixed(1)}" height="${(H - P - y(p.errors)).toFixed(1)}"/>` : ""}</g>`;
     })
     .join("");
   const cpuPts = s.points
@@ -372,15 +375,24 @@ export function usageChart(lang: Lang, s: UsageSeries, title: string): string {
         : `${(P + i * bw + bw / 2).toFixed(1)},${(H - P - (p.cpuMs / cpuMax) * (H - P * 2)).toFixed(1)}`,
     )
     .filter(Boolean);
-  const first = s.points[0]?.t ?? "";
-  const last = s.points.at(-1)?.t ?? "";
-  const lab = (t: string) =>
-    s.range === "30d" ? t.slice(5, 10) : t.slice(5, 13).replace("T", " ");
+  const tick = (t: string | undefined, x: number, anchor: string) => {
+    if (!t) return "";
+    const ms = Date.parse(t);
+    return `<text class="tick" text-anchor="${anchor}" x="${x}" y="${H - 8}" data-t="${ms}" data-tf="${tf}">${esc(fmtTime(lang, ms, tf))}</text>`;
+  };
+  const mid = s.points[Math.floor(s.points.length / 2)]?.t;
+  // y gridlines at half and full scale, labelled.
+  const grid = [0.5, 1]
+    .map((f) => {
+      const yy = y(max * f).toFixed(1);
+      return `<line class="grid" x1="${P}" y1="${yy}" x2="${W - P}" y2="${yy}"/><text class="tick" x="${W - P}" text-anchor="end" y="${(Number(yy) - 4).toFixed(1)}">${esc(fmtN(lang, Math.round(max * f)))}</text>`;
+    })
+    .join("");
   return `<figure class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)}" preserveAspectRatio="none">
 <line class="axis" x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}"/>
-<text class="tick" x="${P}" y="${P - 8}">${esc(fmtN(lang, max))}</text>
+${grid}
 ${bars}${cpuPts.length > 1 ? `<polyline class="cpu-line" fill="none" points="${cpuPts.join(" ")}"/>` : ""}
-<text class="tick" x="${P}" y="${H - 8}">${esc(lab(first))}</text><text class="tick" text-anchor="end" x="${W - P}" y="${H - 8}">${esc(lab(last))}</text>
+${tick(s.points[0]?.t, P, "start")}${s.points.length > 4 ? tick(mid, W / 2, "middle") : ""}${tick(s.points.at(-1)?.t, W - P, "end")}
 </svg><figcaption class="chart-legend"><span class="lg req"></span>${esc(OX[lang].requests)} <span class="lg err"></span>${esc(OX[lang].errors)} <span class="lg cpu"></span>${esc(OX[lang].cpu)}</figcaption></figure>`;
 }
 
@@ -400,11 +412,12 @@ export function latencyChart(lang: Lang, h: HealthView): string {
     .filter((c) => !c.ok)
     .map(
       (c) =>
-        `<line class="fail-tick" x1="${x(c.t).toFixed(1)}" y1="${P}" x2="${x(c.t).toFixed(1)}" y2="${H - P}"><title>${esc(`${new Date(c.t).toISOString().slice(11, 16)} UTC · ${c.s || "—"}`)}</title></line>`,
+        `<line class="fail-tick" x1="${x(c.t).toFixed(1)}" y1="${P}" x2="${x(c.t).toFixed(1)}" y2="${H - P}"><title data-t="${c.t}" data-tf="hm" data-tsuf="${esc(` · ${c.s ? `HTTP ${c.s}` : "—"}`)}">${esc(`${fmtTime(lang, c.t, "hm")} · ${c.s ? `HTTP ${c.s}` : "—"}`)}</title></line>`,
     )
     .join("");
   return `<figure class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(OX[lang].latencyChart)}" preserveAspectRatio="none">
-<line class="axis" x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}"/><text class="tick" x="${P}" y="${P - 6}">${esc(`${fmtN(lang, max)} ms`)}</text>
+<line class="axis" x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}"/><line class="grid" x1="${P}" y1="${y(max / 2).toFixed(1)}" x2="${W - P}" y2="${y(max / 2).toFixed(1)}"/><line class="grid" x1="${P}" y1="${y(max).toFixed(1)}" x2="${W - P}" y2="${y(max).toFixed(1)}"/><text class="tick" x="${P}" y="${P - 6}">${esc(`${fmtN(lang, max)} ms`)}</text><text class="tick" x="${P}" y="${(y(max / 2) - 4).toFixed(1)}">${esc(`${fmtN(lang, Math.round(max / 2))} ms`)}</text>
+<text class="tick" x="${P}" y="${H - 6}" data-t="${t0}" data-tf="hm">${esc(fmtTime(lang, t0, "hm"))}</text><text class="tick" text-anchor="end" x="${W - P}" y="${H - 6}" data-t="${t0 + 86_400_000}" data-tf="hm">${esc(fmtTime(lang, t0 + 86_400_000, "hm"))}</text>
 ${bad}${ok.length > 1 ? `<polyline class="lat-line" fill="none" points="${ok.join(" ")}"/>` : ""}
 </svg><figcaption class="chart-legend">${esc(OX[lang].latencyChart)}</figcaption></figure>`;
 }
