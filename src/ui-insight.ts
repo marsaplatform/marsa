@@ -56,6 +56,7 @@ export const IX = {
     } as Record<string, string>,
     tools: "MCP tools",
     toolsUnknown: "—",
+    ownAuth: "Own auth (401)",
     endpoint: "MCP endpoint",
     protected: "Spaces keys",
     yes: "Yes",
@@ -120,6 +121,7 @@ export const IX = {
     } as Record<string, string>,
     tools: "أدوات MCP",
     toolsUnknown: "—",
+    ownAuth: "مصادقة خاصة (401)",
     endpoint: "عنوان MCP",
     protected: "مفاتيح مساحات",
     yes: "نعم",
@@ -190,7 +192,9 @@ export function toolsCell(lang: Lang, i: InsightRow): string {
   if (i.kind !== "mcp") return `<span class="meta">—</span>`;
   const n =
     i.toolsCount === null
-      ? `<span class="meta">${esc(IX[lang].toolsUnknown)}</span>`
+      ? i.probeNote === "protected"
+        ? `${badge(IX[lang].ownAuth, "info")}`
+        : `<span class="meta">${esc(IX[lang].toolsUnknown)}</span>`
       : String(i.toolsCount);
   return n;
 }
