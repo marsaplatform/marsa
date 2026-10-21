@@ -95,3 +95,26 @@ describe("0.16.0 Arabic pages have no untranslated text", () => {
     expect(detailText("en", "redeploy of v3")).toBe("redeploy of v3");
   });
 });
+
+describe("0.16.0 Arabic glossary", () => {
+  it("uses one word per term in the UI and the Arabic docs", async () => {
+    const { readFile, readdir } = await import("node:fs/promises");
+    const files = [
+      ...(await readdir("src")).filter((f) => f.endsWith(".ts")).map((f) => `src/${f}`),
+      ...(await readdir("docs/ar")).map((f) => `docs/ar/${f}`),
+      ...(await readdir("docs/recipes"))
+        .filter((f) => f.endsWith(".ar.md"))
+        .map((f) => `docs/recipes/${f}`),
+    ];
+    const banned = /إيجنت|ايجنت|سيرفر|فحص الحالة/;
+    const hits: string[] = [];
+    for (const f of files) {
+      const text = await readFile(f, "utf8");
+      const lines = text.split("\n");
+      lines.forEach((l, i) => {
+        if (banned.test(l) && !f.endsWith("glossary.md")) hits.push(`${f}:${i + 1}`);
+      });
+    }
+    expect(hits).toEqual([]);
+  });
+});

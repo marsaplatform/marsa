@@ -253,7 +253,7 @@ describe("0.15.1 worker insight", () => {
     expect(wl).toMatch(/TypeScript \+ Hono/);
     expect(wl).toContain("org/pub");
     const mcpAdmin = await (await adm.get("/ar/admin/mcp")).text();
-    expect(mcpAdmin).toContain("سيرفرات MCP");
+    expect(mcpAdmin).toContain("خوادم MCP");
     expect(mcpAdmin).toContain("sanad-news.");
     expect(mcpAdmin).toContain("marsa-atlas.");
     expect(mcpAdmin).not.toMatch(/>site</);
@@ -420,7 +420,7 @@ describe("0.15.1 agent notes", () => {
     // Admin page: escaped, filters, mark resolved + reply.
     const adm = await t.adminBrowser();
     const page = await (await adm.get("/ar/admin/notes")).text();
-    expect(page).toContain("ملاحظات الإيجنتس");
+    expect(page).toContain("ملاحظات الوكلاء");
     expect(page).not.toContain("<script>alert(1)</script>");
     expect(page).toMatch(/(&lt;|&#60;)script(&gt;|&#62;)alert/);
     for (const f of ["severity", "stage", "team"]) expect(page).toContain(`data-dt-f="${f}"`);

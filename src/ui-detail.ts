@@ -281,7 +281,7 @@ export const DX = {
     varNames: "المتغيرات",
     secretNames: "الأسرار",
     none: "لا شيء",
-    health: "فحص الحالة",
+    health: "فحص الصحة",
     healthOk: (code: number, ms: number) => `HTTP ${code} خلال ${ms} مللي ثانية`,
     healthFail: (ms: number) => `لا رد (${ms} مللي ثانية)`,
     healthOff: "لم يُفحص: الوركر غير نشط.",

@@ -2102,9 +2102,9 @@ export const WS = {
     deleted: "تم حذف الوركر.",
     quota: (n: number, max: number, kb: number) =>
       `${n} من ${max} وركرز · حتى ${kb} كيلوبايت للسكربت`,
-    agentsTitle: "للإيجنتس",
+    agentsTitle: "للوكلاء",
     agentsSub:
-      "الإيجنت يستخدم مفتاح الفريق (أو رمز MCP للمساحة بصلاحية قراءة وكتابة: الأدوات list_workers وdeploy_worker وdelete_worker). لا يحتاج أبدًا مفتاح كلاودفلير.",
+      "الوكيل يستخدم مفتاح الفريق (أو رمز MCP للمساحة بصلاحية قراءة وكتابة: الأدوات list_workers وdeploy_worker وdelete_worker). لا يحتاج أبدًا مفتاح كلاودفلير.",
     viewOnly: "المشاهد يرى الوركرز ولا يستطيع تعديلها.",
     adminTitle: "الوركرز",
     adminSub: "مفتاح كلاودفلير واحد للمنصة كلها. الفرق تنشر عبر المساحات ولا تراه أبدًا.",
@@ -2112,10 +2112,10 @@ export const WS = {
     tokenSet: (l4: string) => `المفتاح محفوظ (…${l4})`,
     tokenUnset: "لا يوجد مفتاح",
     noKey:
-      "المتغير MARSA_SECRETS_KEY غير مضبوط على السيرفر، فلا يمكن حفظ المفتاح. أضفه لملف البيئة وأعد التشغيل.",
+      "المتغير MARSA_SECRETS_KEY غير مضبوط على الخادم، فلا يمكن حفظ المفتاح. أضفه لملف البيئة وأعد التشغيل.",
     token: "مفتاح API",
     tokenHelp:
-      "يحتاج صلاحيات: Workers Scripts: Edit على الحساب، وWorkers Routes: Edit وDNS: Edit على النطاق. للكتابة فقط: يُشفَّر على السيرفر ولا يظهر مرة أخرى.",
+      "يحتاج صلاحيات: Workers Scripts: Edit على الحساب، وWorkers Routes: Edit وDNS: Edit على النطاق. للكتابة فقط: يُشفَّر على الخادم ولا يظهر مرة أخرى.",
     account: "معرّف الحساب",
     accountHelp: "اختياري إذا كان المفتاح يرى حسابًا واحدًا أو النطاق.",
     zone: "النطاق (الدومين)",
@@ -2812,8 +2812,8 @@ export const DS = {
       overview: "نظرة عامة",
       sites: "المساحات",
       workers: "الوركرز",
-      mcp: "سيرفرات MCP",
-      notes: "ملاحظات الإيجنتس",
+      mcp: "خوادم MCP",
+      notes: "ملاحظات الوكلاء",
       members: "الأعضاء",
       agents: "مفاتيح الوكلاء",
       recipes: "الوصفات",
@@ -2875,7 +2875,7 @@ export const DS = {
     quotas: "الحصص والاستخدام",
     api: "الوصول عبر الـ API",
     apiNote: (p: string) =>
-      `الإيجنتس تستخدم مفتاح الفريق (يبدأ بـ ${p}…). ظهر المفتاح مرة واحدة عند إصداره، والمسؤول وحده يستطيع إصدار مفتاح جديد، وعندها يتوقف القديم فورًا.`,
+      `الوكلاء تستخدم مفتاح الفريق (يبدأ بـ ${p}…). ظهر المفتاح مرة واحدة عند إصداره، والمسؤول وحده يستطيع إصدار مفتاح جديد، وعندها يتوقف القديم فورًا.`,
     on: "مفعّل",
     off: "متوقف",
     adminOverviewSub:
@@ -2884,9 +2884,9 @@ export const DS = {
     more: "المزيد",
     dangerZone: "منطقة الخطر",
     rotateWarn:
-      "إصدار مفتاح جديد: يظهر مرة واحدة فقط، ويتوقف المفتاح القديم فورًا، فتفشل الإيجنتس والسكربتات التي تستخدمه حتى تحصل على الجديد.",
+      "إصدار مفتاح جديد: يظهر مرة واحدة فقط، ويتوقف المفتاح القديم فورًا، فتفشل الوكلاء والسكربتات التي تستخدمه حتى تحصل على الجديد.",
     rotateConfirm:
-      "تصدر مفتاحًا جديدًا للفريق؟ سيتوقف المفتاح الحالي الآن، وستفشل الإيجنتس والسكربتات التي تستخدمه حتى تعطيها المفتاح الجديد.",
+      "تصدر مفتاحًا جديدًا للفريق؟ سيتوقف المفتاح الحالي الآن، وستفشل الوكلاء والسكربتات التي تستخدمه حتى تعطيها المفتاح الجديد.",
     workersCol: "الوركرز",
     manage: "إدارة",
     adminSettingsSub: "ربط كلاودفلير لوركرز الفرق، وإعدادات هذا الخادم.",
@@ -2917,7 +2917,7 @@ export const DS = {
     newWorker: "وركر جديد",
     lastDeploy: "آخر نشر",
     by: "بواسطة",
-    agentSnippet: "كيف تستخدمه الإيجنتس",
+    agentSnippet: "كيف تستخدمه الوكلاء",
     agentSnippetSub: (slug: string) =>
       `جاهز للنسخ: الاسم المختصر للفريق (${slug}) مكتوب بالفعل. ضع مفتاح الفريق في MARSA_TEAM_KEY، ولا تضعه أبدًا في صفحة أو مستودع.`,
     mcpTip:
@@ -4057,11 +4057,11 @@ export function notesCallout(lang: Lang, dash?: "team" | "admin"): string {
   const ar = lang === "ar";
   const guide = localePath(lang, "/docs/recipes/agent-notes");
   const page = dash ? localePath(lang, dash === "team" ? "/team/notes" : "/admin/notes") : "";
-  return `<aside class="panel notes-callout" aria-label="${ar ? "ملاحظات الإيجنتس" : "Agent notes"}">${icon("notes")}<div><strong>${ar ? "واجهتكم مشكلة أو وصفة غير واضحة؟" : "Hit a problem, or a recipe is unclear?"}</strong> ${
+  return `<aside class="panel notes-callout" aria-label="${ar ? "ملاحظات الوكلاء" : "Agent notes"}">${icon("notes")}<div><strong>${ar ? "واجهتكم مشكلة أو وصفة غير واضحة؟" : "Hit a problem, or a recipe is unclear?"}</strong> ${
     ar
       ? 'اتركوا ملاحظة للمسؤول من أي مرحلة: <code class="ltr">POST /api/teams/&lt;team&gt;/notes</code> أو أداة MCP <code class="ltr">leave_note</code>.'
       : 'Leave a note for the admin at any stage: <code class="ltr">POST /api/teams/&lt;team&gt;/notes</code> or the MCP tool <code class="ltr">leave_note</code>.'
-  } <a class="text-link" href="${guide}">${ar ? "كيف؟" : "How"}</a>${page ? ` · <a class="text-link" href="${page}">${ar ? "ملاحظات الإيجنتس" : "Agent notes"}</a>` : ""}</div></aside>`;
+  } <a class="text-link" href="${guide}">${ar ? "كيف؟" : "How"}</a>${page ? ` · <a class="text-link" href="${page}">${ar ? "ملاحظات الوكلاء" : "Agent notes"}</a>` : ""}</div></aside>`;
 }
 
 export function recipesIndexHtml(lang: Lang, c: Config, list: RecipeSummary[]): string {
