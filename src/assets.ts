@@ -664,13 +664,16 @@ pre.tree{max-height:26rem;overflow:auto;font-size:.82rem;line-height:1.5;padding
 #teams-table .quota-form{display:grid;grid-template-columns:repeat(2,72px) auto;align-items:center}
 #teams-table .quota-form .button{grid-column:auto}
 /* 0.16.0: Admin › Workers team form: a row on wide screens, stacked with visible labels on phones. */
+.quota-form .ql{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 #wteams-table .quota-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 #wteams-table .quota-form .quota-field input[name=slug]{width:120px}
 #wteams-table .quota-form .quota-field input[type=number]{width:84px}
 @media (max-width:600px){
   #wteams-table .quota-form,#teams-table .quota-form{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;width:100%}
   #wteams-table .quota-form .quota-field input[name=slug],#wteams-table .quota-form .quota-field input[type=number],.quota-form .quota-field input{width:100%;min-height:44px}
-  .quota-form .quota-field .sr-only{position:static;width:auto;height:auto;margin:0 0 4px;overflow:visible;clip:auto;white-space:normal;display:block;font-size:13px;color:var(--muted)}
+  .quota-form .quota-field .ql{position:static;width:auto;height:auto;margin:0 0 4px;overflow:visible;clip:auto;white-space:normal;display:block;font-size:13px;font-weight:600;color:var(--muted)}
+  table.data.stack td:has(> form.quota-form){display:block}
+  table.data.stack td:has(> form.quota-form)::before{display:block;margin-bottom:10px}
   .quota-form .button{width:100%;justify-self:stretch}
   table.data.stack td.cell-actions,table.data.stack td{min-width:0;max-width:100%}
 }

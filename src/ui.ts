@@ -2401,9 +2401,9 @@ export function adminWorkersHtml(lang: Lang, c: Config, o: AdminWorkersOpts): st
               href(`/admin/workers/teams/${x.id}`),
               o.csrf,
               `<label class="check small"><input type="checkbox" name="enabled" value="1"${x.workers ? " checked" : ""}> ${esc(w.enabled)}</label>
-          <label class="quota-field"><span class="sr-only">${esc(`${w.slug} · ${x.name}`)}</span><input name="slug" type="text" dir="ltr" maxlength="20" placeholder="${esc(w.slug)}" value="${esc(x.slug ?? "")}"${x.count ? " readonly" : ""}></label>
-          <label class="quota-field"><span class="sr-only">${esc(`${w.maxWorkers} · ${x.name}`)}</span><input name="maxWorkers" type="number" min="0" max="100" placeholder="${x.quota.workers}" value="${x.maxWorkers ?? ""}"></label>
-          <label class="quota-field"><span class="sr-only">${esc(`${w.maxKb} · ${x.name}`)}</span><input name="maxWorkerKb" type="number" min="0" max="10240" placeholder="${x.quota.kb}" value="${x.maxWorkerKb ?? ""}"></label>
+          <label class="quota-field"><span class="ql">${esc(w.slug)}</span><span class="sr-only"> · ${esc(x.name)}</span><input name="slug" type="text" dir="ltr" maxlength="20" placeholder="${esc(w.slug)}" value="${esc(x.slug ?? "")}"${x.count ? " readonly" : ""}></label>
+          <label class="quota-field"><span class="ql">${esc(w.maxWorkers)}</span><span class="sr-only"> · ${esc(x.name)}</span><input name="maxWorkers" type="number" min="0" max="100" placeholder="${x.quota.workers}" value="${x.maxWorkers ?? ""}"></label>
+          <label class="quota-field"><span class="ql">${esc(w.maxKb)}</span><span class="sr-only"> · ${esc(x.name)}</span><input name="maxWorkerKb" type="number" min="0" max="10240" placeholder="${x.quota.kb}" value="${x.maxWorkerKb ?? ""}"></label>
           <button type="submit" class="button small ghost">${esc(t.common.save)}</button>`,
               {
                 cls: "inline-form quota-form",
