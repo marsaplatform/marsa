@@ -33,6 +33,20 @@ export function agentErr(c: Context, e: unknown) {
   throw e;
 }
 
+/** The ten rules every invited agent sees first (0.15.1). */
+export const TOP_RULES = [
+  "Never put keys, tokens or passwords in code, vars, repos, notes or logs: secrets go in the deploy `secrets` field.",
+  "Start from the MCP-on-Worker starter; keep its structure (src/tools/<tool>.ts, src/lib/http.ts, tests).",
+  "Run `npm run check` (typecheck, tests, build, size) before every deploy.",
+  "Deploy one Workers ES module with `export default { fetch }`, through the Spaces API, with a `note`, `meta` and `repo`.",
+  "Every upstream fetch: a fixed User-Agent, a timeout and retries on 429/5xx.",
+  "Tools: verb_noun names, typed and described inputs (zod), Arabic input, pagination with nextCursor, `isError` results instead of throwing.",
+  "Stateless MCP: POST /mcp with JSON responses, GET /mcp → 405, /health → 200.",
+  "After deploying, verify live: initialize, tools/list and one sample call (npm run smoke).",
+  "Call other team Workers with a service binding (or global_fetch_strictly_public), never another team's Workers.",
+  "Hit a problem, or a recipe is wrong? Leave a note (POST /api/teams/<team>/notes or the MCP tool leave_note) instead of working around the platform.",
+] as const;
+
 /** Onboarding for an agent invite: what an agent needs to start, before it claims a key. */
 export function inviteOnboarding(config: Config, team: Team, inv: AgentInvite, token: string) {
   const base = config.publicUrl;
@@ -41,6 +55,18 @@ export function inviteOnboarding(config: Config, team: Team, inv: AgentInvite, t
   return {
     product: "Marsa Spaces",
     team: { id: team.id, name: team.name, slug: team.slug ?? null },
+    startHere: {
+      stack:
+        "MCP servers and APIs: TypeScript + Hono + the official MCP SDK (@modelcontextprotocol/sdk + zod) on a Spaces Worker, deployed through the Spaces API (no wrangler). Bun is fine locally; deploy ONE Workers ES module. Python (FastMCP) only for self-hosted servers that need heavy data libraries.",
+      starter: `${base}/api/recipes/mcp-server-on-worker/starter.zip`,
+      starterTree: `${base}/api/recipes/mcp-server-on-worker/starter`,
+      recipe: `${base}/api/recipes/mcp-server-on-worker?format=md`,
+      rules: TOP_RULES,
+      notes: {
+        url: `${base}/api/teams/${ref}/notes`,
+        how: 'POST {"severity":"info|bug|blocker|suggestion","stage":"deploy|build|runtime|recipe|other","category","message","target":{"type":"space|worker|mcp|recipe","id"},"version","agent"} with your key; MCP: leave_note. Read replies with GET.',
+      },
+    },
     invite: {
       name: inv.name,
       description: inv.description || null,
@@ -84,6 +110,11 @@ export function inviteOnboarding(config: Config, team: Team, inv: AgentInvite, t
           slug: "bilingual-project-page",
           url: `${base}/api/recipes/bilingual-project-page?format=md`,
         },
+        {
+          slug: "python-mcp-self-hosted",
+          url: `${base}/api/recipes/python-mcp-self-hosted?format=md`,
+        },
+        { slug: "agent-notes", url: `${base}/api/recipes/agent-notes?format=md` },
       ],
     },
     examples: {
@@ -117,6 +148,16 @@ You were invited to work with the team **${o.team.name}** (slug \`${o.team.slug 
 - Scopes: ${o.invite.scopes.map((s) => `\`${s}\``).join(", ")}
 - Key lifetime: ${o.invite.keyLifetimeDays} days
 - This link is single-use and expires at ${o.invite.linkExpiresAt}
+
+## Start here
+
+- **Stack:** ${o.startHere.stack}
+- **Starter (builds, tests, deploy script):** ${o.startHere.starter} (tree: ${o.startHere.starterTree})
+- **Recipe:** ${o.startHere.recipe}
+
+Top 10 rules:
+
+${o.startHere.rules.map((r, i) => `${i + 1}. ${r}`).join("\n")}
 
 ## 1. Claim your key (once)
 

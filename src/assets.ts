@@ -628,6 +628,23 @@ th[data-sort] .sort-btn:focus-visible{outline:3px solid var(--accent);outline-of
 .icon-btn.done{color:var(--accent);border-color:var(--accent);background:var(--soft)}
 .icon-btn .icon{width:16px;height:16px}
 .js .icon-btn.js-only{display:inline-flex!important;align-items:center;justify-content:center}
+.starter-box{margin-block-end:1.25rem;border-inline-start:4px solid var(--accent,#0f5f4a)}
+.starter-box h2{display:flex;align-items:center;gap:.4rem;margin:0 0 .4rem}
+.starter-box details{margin-block-start:.6rem}
+pre.tree{max-height:26rem;overflow:auto;font-size:.82rem;line-height:1.5;padding:.75rem;border-radius:8px;background:var(--code,#f4f6f5);direction:ltr;text-align:left}
+.notes-callout{display:flex;gap:.6rem;align-items:flex-start;margin-block:1rem;font-size:.92rem}
+.notes-callout>.icon{flex:none;margin-block-start:.15rem}
+.notes-callout code{font-size:.85em}
+.how-notes{margin-block-end:1rem}
+.how-notes summary{cursor:pointer;font-weight:600;display:flex;align-items:center;gap:.4rem}
+.how-notes pre{overflow-x:auto;font-size:.8rem;white-space:pre}
+.note-msg{white-space:pre-wrap;overflow-wrap:anywhere;max-width:38rem;min-width:12rem}
+.note-reply{margin-block-start:.4rem;padding:.35rem .55rem;border-inline-start:3px solid var(--accent,#0f5f4a);background:var(--soft,#f2f5f4);border-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere}
+.note-reply-form{margin-block-start:.35rem}
+.note-reply-form summary{cursor:pointer;font-size:.85rem;display:inline-flex;align-items:center;gap:.3rem}
+.note-reply-form form{display:grid;gap:.4rem;margin-block-start:.4rem}
+.note-reply-form textarea{width:100%;min-width:14rem}
+.repo-badges{display:flex;flex-wrap:wrap;gap:.25rem;margin-block-start:.2rem}
 /* switches and per-row menus */
 .pill-toggle{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:3px 12px 3px 4px;border:1px solid var(--line);border-radius:999px;background:var(--paper);font-size:13px;font-weight:650;color:var(--muted)}
 [dir=rtl] .pill-toggle{padding:3px 4px 3px 12px}

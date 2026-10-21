@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { AgentKeyError, type AgentKeyStore } from "./agent-keys.js";
+import { NoteError, type NoteStore } from "./agent-notes.js";
 import { probeBackend } from "./backend/health.js";
 import type { SiteBackend } from "./backend/types.js";
 import { APP_VERSION } from "./brand.js";
@@ -36,6 +37,7 @@ import {
   servedLang,
   summaryOf,
 } from "./recipes.js";
+import { type RepoChecker, RepoError, type RepoLink, readRepo } from "./repo-status.js";
 import { fingerprint, type Session, type Sessions, sameOrigin } from "./session.js";
 import type { SiteMeta, SiteStore } from "./store.js";
 import { cleanTeamName, type Team, type TeamPatch, type TeamStore } from "./teams.js";
@@ -82,11 +84,20 @@ import {
   siteDetailHtml,
   workerDetailHtml,
 } from "./ui-detail.js";
+import { type InsightRow, IX, mcpServersHtml } from "./ui-insight.js";
+import { NX, notesHtml } from "./ui-notes.js";
 import type { UserKeyOps } from "./user-key-routes.js";
 import { UserKeyError, type UserKeyStore } from "./user-keys.js";
 import type { VisitCounter, VisitSummary } from "./visits.js";
+import { insightOf, type ProbeCache, stackLabel } from "./worker-insight.js";
 import { versionMeta } from "./worker-versions.js";
-import { PLATFORM_AUDIT, WorkerError, type WorkerService, workerView } from "./workers.js";
+import {
+  PLATFORM_AUDIT,
+  WorkerError,
+  type WorkerRec,
+  type WorkerService,
+  workerView,
+} from "./workers.js";
 import {
   ADMIN_ACTOR,
   applyTeamWorkers,
@@ -155,6 +166,11 @@ export interface WebDeps {
     m: SiteMeta,
     teamId: string | null,
   ) => Promise<{ type: string; body: Uint8Array | string }>;
+  /** 0.15.1: cached read-only MCP tools/list probes and GitHub repo checks. */
+  mcpProbe?: ProbeCache;
+  /** Agent notes (0.15.1). */
+  notes?: NoteStore;
+  repoChecker?: RepoChecker;
 }
 
 /** "NAME=value" lines into an object (blank lines and # comments skipped). */
@@ -394,7 +410,14 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     listed: team.directory && !m.unlisted,
     unlisted: !!m.unlisted,
     permanent: !!m.permanent,
+    ...repoOfSite(m),
   });
+  // 0.15.1: a space's linked repo and its cached (background) GitHub status.
+  function repoOfSite(m: SiteMeta) {
+    if (!m.repo) return {};
+    d.repoChecker?.touch(m.repo);
+    return { repo: m.repo, repoStatus: d.repoChecker?.get(m.repo) ?? null };
+  }
   const withVisits = async <T extends { id: string; visits?: VisitSummary }>(rows: T[]) => {
     if (!d.visits.enabled) return rows;
     await Promise.all(
@@ -411,6 +434,79 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
   });
 
   const live = (m: SiteMeta) => Date.parse(m.expiresAt) > now();
+
+  // ---- 0.15.1: what each Worker is (type, stack, tools), its repo and its space ----------
+  const codeCache = new Map<string, string | null>();
+  const latestCode = async (r: WorkerRec): Promise<string | null> => {
+    const k = `${r.id}@${r.version ?? 0}`;
+    if (codeCache.has(k)) return codeCache.get(k) ?? null;
+    const v = r.version ? await d.workers.getVersion(r, r.version).catch(() => null) : null;
+    codeCache.set(k, v?.code ?? null);
+    return v?.code ?? null;
+  };
+  const slugOf = (t: string) =>
+    t
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+  /** Manual link, then declared spaceSlug (a space id), then a space titled like the Worker. */
+  const spaceOf = (r: WorkerRec, sites: SiteMeta[], admin: boolean): InsightRow["space"] => {
+    const mine = sites.filter((m) => m.teamId === r.teamId && live(m));
+    const pick = (m: SiteMeta | undefined, how: "manual" | "declared" | "name") =>
+      m
+        ? {
+            id: m.id,
+            title: m.title || m.id,
+            href: admin ? `/admin/sites/${m.id}` : `/team/sites/${m.id}`,
+            url: d.siteUrl(m.id),
+            how,
+          }
+        : null;
+    if (r.spaceId) {
+      const m = mine.find((x) => x.id === r.spaceId);
+      if (m) return pick(m, "manual");
+    }
+    if (r.meta?.spaceSlug) {
+      const m = mine.find((x) => x.id === r.meta?.spaceSlug);
+      if (m) return pick(m, "declared");
+    }
+    return pick(
+      mine.find(
+        (x) => x.title && (slugOf(x.title) === r.name || slugOf(x.title).startsWith(`${r.name}-`)),
+      ),
+      "name",
+    );
+  };
+  const insightRow = async (
+    r: WorkerRec,
+    sites: SiteMeta[],
+    admin: boolean,
+  ): Promise<InsightRow> => {
+    const code = await latestCode(r);
+    const probe = d.mcpProbe?.get(r.id, r.version) ?? null;
+    const ins = insightOf(r.meta, code, r.url, probe);
+    if (ins.endpoint && r.status === "active" && ins.source.tools !== "declared")
+      d.mcpProbe?.touch(r.id, r.version, ins.endpoint);
+    d.repoChecker?.touch(r.repo);
+    return {
+      kind: ins.kind,
+      kindSource: ins.source.kind,
+      language: ins.language,
+      stack: stackLabel(ins),
+      toolsCount: ins.toolsCount,
+      toolsSource: ins.source.tools,
+      toolNames: ins.toolNames,
+      endpoint: ins.endpoint,
+      probeAt: probe?.at ?? null,
+      probeNote:
+        probe && !probe.ok
+          ? (probe.note ?? (probe.status ? `HTTP ${probe.status}` : "error"))
+          : null,
+      repo: r.repo ?? null,
+      repoStatus: d.repoChecker?.get(r.repo) ?? null,
+      space: spaceOf(r, sites, admin),
+    };
+  };
   /** The dashboard preview image (private: only for signed-in viewers of the space). */
   const previewResponse = async (c: Context, m: SiteMeta, team: Team | null) => {
     if (!d.previewImage) return c.body(null, 404);
@@ -548,7 +644,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     const workerDetailData = async (
       rec: NonNullable<ReturnType<typeof d.workers.find>>,
       tab: string,
+      admin = false,
     ) => {
+      const allSites = await store.list();
+      const insight = await insightRow(rec, allSites, admin);
+      const spaces = allSites
+        .filter((m) => m.teamId === rec.teamId && live(m))
+        .map((m) => ({ id: m.id, title: m.title || m.id }));
       const versions = (await d.workers.listVersions(rec)).map(versionMeta);
       const latest = versions.length ? await d.workers.getVersion(rec, versions[0]?.n ?? 0) : null;
       const keys = await d.userKeyOps.view(rec);
@@ -571,9 +673,12 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
               : null
             : null,
         mcp:
-          latest && rec.url && /["'`]\/mcp\b/.test(latest.code)
+          insight.endpoint ??
+          (latest && rec.url && /["'`]\/mcp\b/.test(latest.code)
             ? `${rec.url.replace(/\/$/, "")}/mcp`
-            : null,
+            : null),
+        insight,
+        spaces,
         keys: {
           settings: keys.settings,
           keys: keys.keys,
@@ -913,6 +1018,28 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       return done(c, s, back, { kind: "ok", text: t.team.listingSaved });
     });
 
+    sitePost("repo", async (c, { s, m, form, back, log }) => {
+      const url = field(form, "repoUrl").trim();
+      if (!url) delete m.repo;
+      else {
+        try {
+          m.repo = readRepo({
+            url,
+            branch: field(form, "branch").trim() || undefined,
+            commitSha: field(form, "commitSha").trim() || undefined,
+          }) as RepoLink;
+        } catch (e) {
+          if (e instanceof RepoError) return done(c, s, back, { kind: "err", text: e.message });
+          throw e;
+        }
+        d.repoChecker?.touch(m.repo);
+      }
+      await log("repo");
+      m.updatedAt = new Date(now()).toISOString();
+      await store.updateMeta(m);
+      return done(c, s, back, { kind: "ok", text: IX[lang].linksSaved });
+    });
+
     sitePost("mcp", async (c, { s, m, form, back, log }) => {
       const name = cleanTokenName(field(form, "name"));
       const scope = field(form, "scope") === "rw" ? "rw" : "ro";
@@ -1168,6 +1295,43 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         }),
       );
     });
+    // 0.15.1: notes the team's agents left for the admin (read-only here).
+    app.get(`${prefix}/team/notes`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      await d.notes?.ready();
+      const info = await teamInfo(team);
+      return page(
+        c,
+        notesHtml(lang, config, {
+          kind: "team",
+          csrf: sessions.csrfFor(s),
+          ctx: teamCtx(lang, { ...info, me: meOf(ts) }),
+          flash: takeFlash(c, s),
+          notes: d.notes?.list({ teamId: team.id }, 300) ?? [],
+          teams: [{ id: team.id, name: team.name }],
+        }),
+      );
+    });
+    // 0.15.1: every Worker of the team detected or declared as an MCP server.
+    app.get(`${prefix}/team/mcp`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const info = await teamInfo(team);
+      return page(
+        c,
+        mcpServersHtml(lang, config, {
+          kind: "team",
+          csrf: sessions.csrfFor(s),
+          ctx: teamCtx(lang, { ...info, me: meOf(ts) }),
+          flash: takeFlash(c, s),
+          rows: await workerList(d.workers.list(team.id)),
+          canEdit: roleRank[ts.role] >= roleRank.editor,
+        }),
+      );
+    });
     const workerPost = (
       path: string,
       fn: (c: Context, ctx: TeamCtx & { form: FormData }) => Promise<Response>,
@@ -1347,6 +1511,47 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         text: v14.redeployed,
         ...(w.url ? { link: w.url } : {}),
       });
+    });
+    workerEdit("probe", async (c, { s, rec, form, back: settingsBack }) => {
+      const back = localBack(form, settingsBack);
+      const ins = await insightRow(rec, [], false);
+      if (ins.endpoint && d.mcpProbe) await d.mcpProbe.refresh(rec.id, rec.version, ins.endpoint);
+      if (rec.repo && d.repoChecker) await d.repoChecker.check(rec.repo);
+      return done(c, s, back, { kind: "ok", text: IX[lang].refreshed });
+    });
+    workerEdit("links", async (c, { s, team, form, actor, rec, back }) => {
+      const repoUrl = field(form, "repoUrl").trim();
+      const spaceId = field(form, "spaceId").trim();
+      if (spaceId) {
+        const m = await store.get(spaceId).catch(() => null);
+        if (!m || m.teamId !== team.id)
+          return done(c, s, back, { kind: "err", text: t.badRequest });
+      }
+      // Keep what the deploy declared (toolsCount, spaceSlug); the form owns these three.
+      const meta: Record<string, unknown> = { ...(rec.meta ?? {}) };
+      for (const k of ["kind", "language", "framework"]) {
+        const v = field(form, k).trim();
+        if (v) meta[k] = v;
+        else delete meta[k];
+      }
+      await d.workers.setLinks(
+        rec,
+        {
+          repo: repoUrl
+            ? {
+                url: repoUrl,
+                branch: field(form, "branch").trim(),
+                commitSha: field(form, "commitSha").trim(),
+              }
+            : null,
+          spaceId: spaceId || null,
+          // The form sets the declared type/stack; empty = detect from the code.
+          meta: Object.keys(meta).length ? meta : null,
+        },
+        actor,
+      );
+      if (rec.repo || repoUrl) void d.repoChecker?.touch(d.workers.get(rec.id)?.repo);
+      return done(c, s, back, { kind: "ok", text: IX[lang].linksSaved });
     });
     workerEdit("runtime", async (c, { s, team, form, actor, rec, back }) => {
       const lines = envLines(field(form, "bindings"));
@@ -2059,8 +2264,9 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       await withVisits(sites);
       return sites;
     };
-    const workerList = async (recs: ReturnType<typeof d.workers.list>) =>
-      Promise.all(
+    const workerList = async (recs: ReturnType<typeof d.workers.list>, admin = false) => {
+      const sites = await store.list();
+      return Promise.all(
         recs.map(async (r) => {
           const team = teams.get(r.teamId);
           const v = await d.userKeyOps.view(r).catch(() => null);
@@ -2071,9 +2277,11 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             keysOn: !!v?.settings.required,
             keysCount: active,
             requests7: v?.keys.length ? v.keys.reduce((n, k) => n + k.usage.last7d, 0) : null,
+            insight: await insightRow(r, sites, admin),
           };
         }),
       );
+    };
     app.get(`${prefix}/admin/teams/:id`, async (c) => {
       const s = needAdmin(c);
       if (s instanceof Response) return s;
@@ -2118,7 +2326,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           })),
           invites: members.listInvites(team.id).length,
           sites: sites.map((x) => ({ ...x, owner: { id: team.id, name: team.name } })),
-          workers: await workerList(d.workers.list(team.id)),
+          workers: await workerList(d.workers.list(team.id), true),
           agentKeys: d.agentKeys.list(team.id).map((k) => d.agentKeys.view(k)),
           audit: members.entries(team.id, undefined, 100).map((e) => auditView(e)),
           cfConfigured: d.workers.settingsView().configured,
@@ -2148,7 +2356,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           ctx: ADMIN_CTX(lang),
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
-          ...(await workerDetailData(x.rec, tab)),
+          ...(await workerDetailData(x.rec, tab, true)),
           canEdit: true,
         }),
       );
@@ -2392,6 +2600,55 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
 
     // ---- admin: Workers (0.12.0) ------------------------------------------------------
     const wBack = href("/admin/workers");
+    app.get(`${prefix}/admin/notes`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      await d.notes?.ready();
+      return page(
+        c,
+        notesHtml(lang, config, {
+          kind: "admin",
+          csrf: sessions.csrfFor(s),
+          ctx: ADMIN_CTX(lang),
+          flash: takeFlash(c, s),
+          notes: d.notes?.list({}, 500) ?? [],
+          teams: teams.list().map((x) => ({ id: x.id, name: x.name })),
+        }),
+      );
+    });
+    adminPost("/admin/notes/:id", async (c, { s, form }) => {
+      const back = localBack(form, href("/admin/notes"));
+      if (!d.notes) return done(c, s, back, { kind: "err", text: t.notFound });
+      try {
+        await d.notes.update(
+          c.req.param("id") ?? "",
+          {
+            ...(form.has("status") ? { status: field(form, "status") } : {}),
+            ...(form.has("reply") ? { reply: field(form, "reply") } : {}),
+          },
+          "admin",
+        );
+      } catch (e) {
+        if (e instanceof NoteError) return done(c, s, back, { kind: "err", text: e.message });
+        throw e;
+      }
+      return done(c, s, back, { kind: "ok", text: NX[lang].saved });
+    });
+    app.get(`${prefix}/admin/mcp`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      return page(
+        c,
+        mcpServersHtml(lang, config, {
+          kind: "admin",
+          csrf: sessions.csrfFor(s),
+          ctx: ADMIN_CTX(lang),
+          flash: takeFlash(c, s),
+          rows: await workerList(d.workers.list(), true),
+          canEdit: true,
+        }),
+      );
+    });
     app.get(`${prefix}/admin/workers`, async (c) => {
       const s = needAdmin(c);
       if (s instanceof Response) return s;
@@ -2409,7 +2666,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             quota: d.workers.quotaOf(x),
             count: d.workers.list(x.id).length,
           })),
-          workers: await workerList(d.workers.list()),
+          workers: await workerList(d.workers.list(), true),
           audit: members.entries(PLATFORM_AUDIT, undefined, 30).map((e) => auditView(e)),
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
@@ -2512,6 +2769,16 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         return done(c, s, wBack, { kind: "ok", text: t.admin.saved });
       });
     }
+    // 0.15.1: re-run the read-only tools/list probe now (never calls a tool).
+    wPost("/admin/workers/:id/probe", async (c, { s, form }) => {
+      const wBack = localBack(form, href("/admin/mcp"));
+      const rec = d.workers.get(c.req.param("id") ?? "");
+      if (!rec) return done(c, s, wBack, { kind: "err", text: t.notFound });
+      const ins = await insightRow(rec, [], true);
+      if (ins.endpoint && d.mcpProbe) await d.mcpProbe.refresh(rec.id, rec.version, ins.endpoint);
+      if (rec.repo && d.repoChecker) await d.repoChecker.check(rec.repo);
+      return done(c, s, wBack, { kind: "ok", text: IX[lang].refreshed });
+    });
     wPost("/admin/workers/:id/delete", async (c, { s }) => {
       const rec = d.workers.get(c.req.param("id") ?? "");
       if (!rec) return done(c, s, wBack, { kind: "err", text: t.notFound });
@@ -2619,6 +2886,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             totalBytes: m.totalBytes,
             fileCount: m.fileCount,
             permanent: !!m.permanent,
+            ...repoOfSite(m),
           } as AdminSiteRow;
         });
       await withVisits(sites);
@@ -2654,4 +2922,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       return done(c, s, back, { kind: "ok", text: t.admin.siteDeleted });
     });
   }
+}
+
+/** A "back" field limited to this app's own dashboard pages (no open redirects). */
+function localBack(form: FormData, fallback: string): string {
+  const v = String(form.get("back") ?? "");
+  return /^\/(?:ar\/)?(?:admin|team)(?:\/[A-Za-z0-9_.\-/]*)?(?:\?[A-Za-z0-9_=&.-]*)?$/.test(v) &&
+    !v.includes("//")
+    ? v
+    : fallback;
 }

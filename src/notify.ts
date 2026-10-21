@@ -38,7 +38,8 @@ export type NoticeKind =
   | "webhook-test"
   | "user-key-create"
   | "user-key-revoke"
-  | "user-key-spike";
+  | "user-key-spike"
+  | "agent-note-blocker";
 
 /** Audit actions that also raise a notification. */
 const FROM_AUDIT = new Set<string>([
@@ -103,6 +104,7 @@ const T: Record<Lang, Record<NoticeKind, (n: Notice) => string>> = {
     "user-key-create": (n) => `${n.actor} created a Worker API key: ${n.detail}`,
     "user-key-revoke": (n) => `${n.actor} revoked a Worker API key: ${n.detail}`,
     "user-key-spike": (n) => `Rate-limit spike on a Worker: ${n.detail}`,
+    "agent-note-blocker": (n) => `Blocker note from ${n.actor}: ${n.detail}`,
   },
   ar: {
     "worker-deploy": (n) => `${n.actor} نشر Worker جديدًا: ${n.detail}`,
@@ -125,6 +127,7 @@ const T: Record<Lang, Record<NoticeKind, (n: Notice) => string>> = {
     "user-key-create": (n) => `${n.actor} أنشأ مفتاح API لوركر: ${n.detail}`,
     "user-key-revoke": (n) => `${n.actor} ألغى مفتاح API لوركر: ${n.detail}`,
     "user-key-spike": (n) => `ارتفاع في الطلبات المرفوضة بسبب الحد على وركر: ${n.detail}`,
+    "agent-note-blocker": (n) => `ملاحظة عائقة من ${n.actor}: ${n.detail}`,
   },
 };
 
@@ -144,7 +147,8 @@ export const noticeTone = (k: NoticeKind): "warn" | "info" | "ok" =>
   k === "cf-token-clear" ||
   k === "team-key-rotate" ||
   k === "user-key-revoke" ||
-  k === "user-key-spike"
+  k === "user-key-spike" ||
+  k === "agent-note-blocker"
     ? "warn"
     : k === "backend-ok"
       ? "ok"

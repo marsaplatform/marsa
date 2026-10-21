@@ -50,7 +50,7 @@ export function openapi(config: Config) {
     openapi: "3.1.0",
     info: {
       title: `${APP_NAME} API`,
-      version: "0.15.0",
+      version: "0.15.1",
       description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site. Teams can also sign in in a browser at /login (team key) to manage their sites; the admin signs in at /admin/login. Those browser routes use session cookies and are not part of this API. Each site also has an MCP server (Streamable HTTP, JSON-RPC) at /mcp/s/{siteId} with per-site bearer tokens; see /docs/mcp.`,
       license: { name: "MIT", identifier: "MIT" },
     },
@@ -333,6 +333,74 @@ export function openapi(config: Config) {
           responses: {
             "200": { description: "Redeployed" },
             "400": { description: "Invalid flag, date or binding" },
+          },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/links": {
+        post: {
+          summary: "Declare a Worker's type/stack, source repo and Space page (no redeploy)",
+          operationId: "setWorkerLinks",
+          description:
+            'JSON {"meta"?: {"kind": "mcp"|"web"|"other", "language"?, "framework"?, "toolsCount"?, "spaceSlug"?}|null, "repo"?: {"url": "https://github.com/org/repo", "branch"?, "commitSha"?}|null, "spaceId"?: string|null}. Omit a field to keep it, null clears it. The same `meta` and `repo` are accepted on deploy (PUT …/workers/{name}). Repos are checked read-only on GitHub (public/private/not found, synced/behind).',
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: {
+            "200": { description: "Saved" },
+            "400": { description: "Invalid meta, repo, or a space of another team" },
+          },
+        },
+      },
+      "/api/teams/{team}/notes": {
+        post: {
+          summary: "Leave a note for the platform admin (agent feedback)",
+          operationId: "leaveNote",
+          description:
+            'Team key or any agent key. JSON {"severity": "info"|"bug"|"blocker"|"suggestion", "message": "…" (≤2000), "stage"?: "deploy"|"build"|"runtime"|"recipe"|"other", "category"?, "target"?: {"type": "space"|"worker"|"mcp"|"recipe", "id"}, "version"?, "agent"?}. Secrets are removed; 30 notes/hour per key; blockers notify the admin. MCP: leave_note.',
+          security: [{ teamKey: [] }],
+          parameters: [{ name: "team", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "201": { description: "Stored" },
+            "400": { description: "Invalid note" },
+            "429": { description: "Rate limited" },
+          },
+        },
+        get: {
+          summary: "The team's notes with status and the admin's reply",
+          operationId: "listNotes",
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            {
+              name: "status",
+              in: "query",
+              schema: { type: "string", enum: ["open", "ack", "resolved"] },
+            },
+          ],
+          responses: { "200": { description: "Notes, newest first" } },
+        },
+      },
+      "/api/recipes/{slug}/starter.zip": {
+        get: {
+          summary: "Download a recipe's starter template (zip)",
+          operationId: "getStarterZip",
+          parameters: [{ name: "slug", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": { description: "application/zip" },
+            "404": { description: "No starter" },
+          },
+        },
+      },
+      "/api/recipes/{slug}/starter": {
+        get: {
+          summary: "A recipe's starter template: name, zip URL, file tree and file list",
+          operationId: "getStarter",
+          parameters: [{ name: "slug", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": { description: "Starter info" },
+            "404": { description: "No starter" },
           },
         },
       },

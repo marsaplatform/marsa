@@ -2,6 +2,7 @@ import type { Context, Hono } from "hono";
 import type { Lang } from "./i18n.js";
 import type { Actor, MemberStore } from "./members.js";
 import { RecipeError, type RecipeStore, recipeMarkdown, servedLang, summaryOf } from "./recipes.js";
+import { starterFor } from "./starters.js";
 import { can, scopeError, type TeamAuth } from "./team-auth.js";
 
 export interface RecipeRouteDeps {
@@ -44,6 +45,30 @@ export function mountRecipeRoutes(app: Hono, d: RecipeRouteDeps): void {
         url: r.scope === "team" ? null : urlOf(r.slug, lang),
         api: `${d.publicUrl}/api/recipes/${r.slug}`,
       })),
+    });
+  });
+  // 0.15.1: downloadable starter template of a built-in recipe (public).
+  app.get("/api/recipes/:slug/starter.zip", (c) => {
+    const s = starterFor(c.req.param("slug"));
+    if (!s) return err(c, 404, "NOT_FOUND", "this recipe has no starter");
+    c.header("Content-Type", "application/zip");
+    c.header("Content-Disposition", `attachment; filename="${s.name}.zip"`);
+    c.header("Cache-Control", "public, max-age=300");
+    c.header("X-Content-Type-Options", "nosniff");
+    return c.body(new Uint8Array(s.zip));
+  });
+  app.get("/api/recipes/:slug/starter", (c) => {
+    const slug = c.req.param("slug");
+    const s = starterFor(slug);
+    if (!s) return err(c, 404, "NOT_FOUND", "this recipe has no starter");
+    c.header("Cache-Control", "public, max-age=300");
+    return c.json({
+      starter: {
+        name: s.name,
+        zip: `${d.publicUrl}/api/recipes/${slug}/starter.zip`,
+        tree: s.tree,
+        files: s.files,
+      },
     });
   });
   app.get("/api/recipes/:slug", async (c) => {

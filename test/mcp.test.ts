@@ -83,6 +83,7 @@ describe("MCP per space", () => {
     expect(names).toEqual([
       "get_recipe",
       "get_site_info",
+      "leave_note",
       "list_files",
       "list_recipes",
       "read_file",
@@ -143,6 +144,7 @@ describe("MCP per space", () => {
     expect(names).toEqual([
       "get_recipe",
       "get_site_info",
+      "leave_note",
       "list_files",
       "list_recipes",
       "read_file",

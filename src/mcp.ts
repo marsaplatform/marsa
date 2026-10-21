@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Scope } from "./agent-keys.js";
+import { NoteError, type NoteInput, readNote } from "./agent-notes.js";
 import type { SiteBackend } from "./backend/types.js";
 import { APP_VERSION, PRODUCT_NAME } from "./brand.js";
 import type { Config } from "./config.js";
@@ -14,7 +15,7 @@ import type { RateLimiter } from "./rate-limit.js";
 import { type RecipeStore, recipeMarkdown, servedLang, summaryOf } from "./recipes.js";
 import type { SiteMeta, SiteStore } from "./store.js";
 import { isAgentKey, type TeamAuth } from "./team-auth.js";
-import type { TeamStore } from "./teams.js";
+import type { Team, TeamStore } from "./teams.js";
 import { bearer, hashToken, safeEqual } from "./tokens.js";
 import type { UserKeyOps } from "./user-key-routes.js";
 import { UserKeyError } from "./user-keys.js";
@@ -59,6 +60,34 @@ const runtimeArgs = (a: Record<string, unknown>) => ({
   ...("compatibilityFlags" in a ? { compatibilityFlags: a.compatibilityFlags } : {}),
   ...("bindings" in a ? { bindings: a.bindings } : {}),
 });
+
+/** Optional declared metadata and source repo (0.15.1): shown in the tables and MCP servers page. */
+const LINK_PROPS = {
+  meta: {
+    type: ["object", "null"],
+    properties: {
+      kind: { type: "string", enum: ["mcp", "web", "other"] },
+      language: { type: "string", enum: ["typescript", "javascript", "python"] },
+      framework: { type: "string", description: "e.g. hono" },
+      toolsCount: { type: "integer", minimum: 0, maximum: 500 },
+      spaceSlug: { type: "string", description: "id of this team's Space page for the Worker" },
+    },
+    additionalProperties: false,
+    description: "Declared type/stack/tool count. null clears; omit to keep.",
+  },
+  repo: {
+    type: ["object", "null"],
+    properties: {
+      url: { type: "string", description: "https://github.com/org/repo" },
+      branch: { type: "string" },
+      commitSha: { type: "string", description: "7-40 hex: the deployed commit" },
+    },
+    required: ["url"],
+    additionalProperties: false,
+    description:
+      "Source repo; the dashboard checks it read-only on GitHub (public/private, synced/behind). null clears.",
+  },
+};
 
 export type McpScope = "ro" | "rw";
 export interface McpToken {
@@ -127,6 +156,12 @@ export interface McpDeps {
   recipes?: RecipeStore;
   /** Worker API keys for end users (0.14.0). */
   userKeyOps?: UserKeyOps;
+  /** Agent notes (0.15.1): leave_note stores one for the space's team (rate-limited). */
+  leaveNote?: (
+    team: Team,
+    input: NoteInput,
+    who: string,
+  ) => Promise<{ id: string; status: string } | { retryAfterSec: number }>;
 }
 
 /** The agent-key scope a tool needs. */
@@ -455,7 +490,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
       name: "deploy_worker",
       title: "Deploy a Worker",
       description:
-        "Create or redeploy a Cloudflare Worker for this space's team. `code` is one ES module (export default { async fetch(request, env) { … } }). It is published at https://<team-slug>-<name>.<platform domain> (script team-<slug>-<name>). `vars` are plain env vars (shown in listings); `secrets` are write-only (null removes one). Omitting `vars` on a redeploy keeps the current ones.",
+        "Create or redeploy a Cloudflare Worker for this space's team. `code` is one ES module (export default { async fetch(request, env) { … } }). It is published at https://<team-slug>-<name>.<platform domain> (script team-<slug>-<name>). `vars` are plain env vars (shown in listings); `secrets` are write-only (null removes one). Omitting `vars` on a redeploy keeps the current ones. Declare `meta` (kind/language/framework/toolsCount) and `repo` so the dashboard shows them. If a deploy fails in a way you cannot fix, call leave_note.",
       inputSchema: obj(
         {
           name: { type: "string", description: "1-30 chars: a-z 0-9 and single hyphens" },
@@ -463,6 +498,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
           vars: { type: "object", additionalProperties: { type: "string" } },
           secrets: { type: "object", additionalProperties: { type: ["string", "null"] } },
           ...RUNTIME_PROPS,
+          ...LINK_PROPS,
         },
         ["name", "code"],
       ),
@@ -481,6 +517,8 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
               ...("vars" in a ? { vars: a.vars } : {}),
               ...("secrets" in a ? { secrets: a.secrets } : {}),
               ...runtimeArgs(a),
+              ...("meta" in a ? { meta: a.meta } : {}),
+              ...("repo" in a ? { repo: a.repo } : {}),
             },
             { kind: "mcp", label: token.name },
           );
@@ -583,6 +621,45 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
       },
     },
     {
+      name: "set_worker_links",
+      title: "Set a Worker's declared type, repo and Space page",
+      description:
+        "Without redeploying: declare the Worker's type/stack/tool count (meta), its source repo (url, branch, commitSha) and the team Space page that documents it (spaceId). Each field: omit to keep, null to clear.",
+      inputSchema: obj(
+        { name: { type: "string" }, ...LINK_PROPS, spaceId: { type: ["string", "null"] } },
+        ["name"],
+      ),
+      annotations: { destructiveHint: false },
+      write: true,
+      needsWorkers: true,
+      run: async (a, { meta, token }) => {
+        const team = teams.get(meta.teamId);
+        const w = d.workers as WorkerService;
+        const rec = team ? w.find(team.id, str(a, "name")) : null;
+        if (!team || !rec) return fail("no such Worker");
+        if (typeof a.spaceId === "string") {
+          const m = await d.store.get(a.spaceId).catch(() => null);
+          if (!m || m.teamId !== team.id) return fail("spaceId: no such space in this team");
+        }
+        try {
+          return ok({
+            worker: await w.setLinks(
+              rec,
+              {
+                ...("meta" in a ? { meta: a.meta } : {}),
+                ...("repo" in a ? { repo: a.repo } : {}),
+                ...("spaceId" in a ? { spaceId: (a.spaceId as string | null) ?? null } : {}),
+              },
+              { kind: "mcp", label: token.name },
+            ),
+          });
+        } catch (err) {
+          if (err instanceof WorkerError) return fail(`${err.code}: ${err.message}`);
+          throw err;
+        }
+      },
+    },
+    {
       name: "redeploy_worker",
       title: "Redeploy a Worker",
       description:
@@ -637,6 +714,62 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
           if (err instanceof WorkerError) return fail(`${err.code}: ${err.message}`);
           throw err;
         }
+      },
+    },
+    {
+      name: "leave_note",
+      title: "Leave a note for the platform admin",
+      description:
+        "Hit a problem (a failing deploy or build, a runtime error, an unclear or wrong recipe) or have a suggestion? Leave a short note: the Marsa admin sees it in the dashboard (blockers ring the bell) and can reply. Never put keys, tokens or passwords in it (they are removed). severity: info | bug | blocker | suggestion; stage: deploy | build | runtime | recipe | other.",
+      inputSchema: obj(
+        {
+          severity: { type: "string", enum: ["info", "bug", "blocker", "suggestion"] },
+          message: {
+            type: "string",
+            description: "What happened, what you expected, the error text (max 2000 chars)",
+          },
+          stage: { type: "string", enum: ["deploy", "build", "runtime", "recipe", "other"] },
+          category: {
+            type: "string",
+            description: "Short label, e.g. bindings, upload, mcp-recipe",
+          },
+          target: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["space", "worker", "mcp", "recipe"] },
+              id: { type: "string", description: "space id, Worker name, or recipe slug" },
+            },
+            required: ["type", "id"],
+            additionalProperties: false,
+          },
+          version: { type: "string", description: "Deploy/version id, e.g. 4 or a commit" },
+          agent: { type: "string", description: "Your agent's name" },
+        },
+        ["severity", "message"],
+      ),
+      annotations: { destructiveHint: false, readOnlyHint: false },
+      noScope: true,
+      when: () => !!d.leaveNote,
+      run: async (a, { meta, token }) => {
+        const team = meta.teamId ? teams.get(meta.teamId) : null;
+        if (!team) return fail("this space has no team: notes go to a team");
+        let input: NoteInput;
+        try {
+          input = readNote(
+            { ...a, ...(a.target ? {} : { target: { type: "space", id: meta.id } }) },
+            `MCP token ${token.name}`,
+          );
+        } catch (e) {
+          if (e instanceof NoteError) return fail(e.message);
+          throw e;
+        }
+        const r = await (d.leaveNote as NonNullable<McpDeps["leaveNote"]>)(
+          team,
+          input,
+          `mcp:${token.id}`,
+        );
+        if ("retryAfterSec" in r) return fail(`RATE_LIMITED: try again in ${r.retryAfterSec}s`);
+        return ok({ note: r, message: "Thanks: the admin will see it in the dashboard." });
       },
     },
     {
@@ -907,7 +1040,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
                 title: `${PRODUCT_NAME.en}: ${meta.title ?? meta.id}`,
                 version: APP_VERSION,
               },
-              instructions: `This server is one Marsa space (${d.siteUrl(meta.id)}). Token scope: ${token.scope === "rw" ? "read-write" : "read-only"}. Use get_site_info first.`,
+              instructions: `This server is one Marsa space (${d.siteUrl(meta.id)}). Token scope: ${token.scope === "rw" ? "read-write" : "read-only"}. Use get_site_info first. Building an MCP server? Read get_recipe mcp-server-on-worker (starter: ${d.config.publicUrl}/api/recipes/mcp-server-on-worker/starter.zip). Hit a problem or an unclear recipe? Call leave_note.`,
             }),
           );
         }

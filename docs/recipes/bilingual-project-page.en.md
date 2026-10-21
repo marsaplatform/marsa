@@ -1,7 +1,7 @@
 ---
 title: Bilingual AR/EN project page on Spaces
 summary: One static page per project (Arabic first, English second) with connect instructions, screenshots, correct RTL and a mobile check.
-version: 1
+version: 2
 updated: 2026-10-21
 tags: sites, arabic, design
 order: 2
@@ -15,6 +15,27 @@ A clean, fast project page (for an MCP server, a dataset, a tool) published on S
 - You launched something (MCP server, Worker, report) and need a link to share.
 - You want the page under your team (team key or agent key with `spaces:write`) so teammates can update it, and optionally make it permanent (the admin can mark team sites permanent).
 
+## Folder structure
+
+```
+my-project-page/
+├── index.html          # English page (lang="en"), links to /ar/
+├── ar/
+│   └── index.html      # Arabic page (lang="ar" dir="rtl"), links back to /
+├── assets/
+│   ├── style.css       # one stylesheet, logical properties (works in both directions)
+│   ├── app.js          # optional: copy buttons, language switch
+│   └── shot-1.webp     # screenshots, compressed, with width/height
+├── cover.png           # 1200×630 at the root: Spaces uses it as the cover in the directory and dashboard
+└── README.md           # optional: how to update the page (never put keys in it)
+```
+
+- Use relative links (`assets/style.css` from the root and `../assets/style.css` from `ar/`), so the page works on any host.
+- `cover.(png|jpg|webp)` at the root wins. Without it, Spaces uses your `og:image`, then the first image on the page.
+- Put the same `<meta property="og:image" content="cover.png">` in both pages, with an `og:title` in the page's language.
+- **Link the source repo** (optional): after publishing, `PATCH /api/sites/<id>` with `{"repo": {"url": "https://github.com/<org>/<repo>", "branch": "main", "commitSha": "<sha>"}}` (edit token or team key), or set it in the space's **Settings** tab. The Spaces tables then show whether the repo is public or private and whether the page is synced with the branch.
+- For an MCP server's page, deploy the Worker with `"meta": {"spaceSlug": "<this space id>"}` so the **MCP servers** page links the two.
+
 ## Steps
 
 1. **Write the content first, Arabic and English**, in this order of sections:
@@ -25,7 +46,7 @@ A clean, fast project page (for an MCP server, a dataset, a tool) published on S
    5. Screenshots or a cover image (with `alt` text in both languages).
    6. Data sources, limits and privacy (what is stored, what is not).
    7. Contact / source / version and "last updated".
-2. **Choose the layout:** either two pages (`index.html` Arabic, `en/index.html` English) with a language link, or one page with `lang`/`dir` per section. Two pages are simpler to keep correct.
+2. **Choose the layout:** two pages (`index.html` English, `ar/index.html` Arabic, as in the tree above) with a language link on each. For an Arabic-first audience you can swap them (Arabic at the root, `en/index.html`). One page with `lang`/`dir` per section also works, but two pages are simpler to keep correct.
 3. **Get RTL right:** `<html lang="ar" dir="rtl">` on the Arabic page; use logical CSS (`margin-inline-start`, `padding-inline`, `text-align: start`); wrap code, URLs, emails and numbers mixed with Arabic in `<bdi>` or `dir="ltr"`; keep code blocks `dir="ltr"`.
 4. **Fonts and type:** a system stack is fine (`system-ui, "Segoe UI", Tahoma, sans-serif`); Arabic needs a slightly larger size and line-height (1.7–1.8). No external font CDNs if you can avoid them.
 5. **Images:** compress (WebP or optimized PNG), set `width`/`height`, `loading="lazy"` below the fold. Keep the whole site small (it loads on slow mobile networks).

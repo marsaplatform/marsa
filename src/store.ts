@@ -26,6 +26,8 @@ export interface SiteMeta {
   ttlFrom?: string;
   /** Per-space MCP tokens (hashes only). */
   mcpTokens?: import("./mcp.js").McpToken[];
+  /** 0.15.1: where the page's source lives (optional). */
+  repo?: import("./repo-status.js").RepoLink;
   fileCount: number;
   totalBytes: number;
   files: Record<string, SiteFile>;

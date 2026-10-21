@@ -4,6 +4,7 @@ import { open, readFile } from "node:fs/promises";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AgentKeyStore } from "./agent-keys.js";
+import { NoteStore } from "./agent-notes.js";
 import { mountAgentInviteRoutes, mountAgentRoutes } from "./agent-routes.js";
 import { APP_CSS, APP_JS, fontAsset } from "./assets.js";
 import { CloudflareError } from "./backend/cloudflare.js";
@@ -40,15 +41,18 @@ import {
   publicMember,
 } from "./members.js";
 import { type NavAccount, withNavAccount } from "./nav-state.js";
+import { leaveNote, mountAdminNoteRoutes, mountNoteRoutes, noteView } from "./notes-routes.js";
 import { NotificationCenter, type NotifyDeps } from "./notify.js";
 import { openapi } from "./openapi.js";
 import { RateLimiter } from "./rate-limit.js";
 import { mountAdminRecipeRoutes, mountRecipeRoutes } from "./recipe-routes.js";
 import { loadBuiltinRecipes, RecipeStore, recipeHtml, servedLang, summaryOf } from "./recipes.js";
+import { RepoChecker, RepoError, type RepoLink, readRepo } from "./repo-status.js";
 import { SDK_JS } from "./sdk.js";
 import { SecretBox } from "./secrets.js";
 import { APP_CSP, baseHeaders, SITE_CSP } from "./security.js";
 import { Sessions } from "./session.js";
+import { starterFor } from "./starters.js";
 import { PERMANENT_EXPIRES, publicMeta, type SiteMeta, type SiteStore } from "./store.js";
 import { removeSite, sweepExpired } from "./sweep.js";
 import {
@@ -86,6 +90,7 @@ import { mountUserKeyRoutes, userKeyOps } from "./user-key-routes.js";
 import { UserKeyStore } from "./user-keys.js";
 import { VisitCounter } from "./visits.js";
 import { mountWebRoutes } from "./web.js";
+import { ProbeCache } from "./worker-insight.js";
 import { PLATFORM_AUDIT, WorkerService } from "./workers.js";
 import { ADMIN_ACTOR, mountWorkerRoutes } from "./workers-routes.js";
 
@@ -147,6 +152,9 @@ export interface AppDeps {
   recipes?: RecipeStore;
   /** End-user API keys for team Workers (0.14.0). */
   userKeys?: UserKeyStore;
+  /** 0.15.1: MCP tools/list probes and GitHub repo checks (tests inject fakes). */
+  mcpProbe?: ProbeCache;
+  repoChecker?: RepoChecker;
   now?: () => number;
 }
 
@@ -173,7 +181,12 @@ export function createApp({
   expose,
   recipes = new RecipeStore(config.dataDir, loadBuiltinRecipes(config.publicUrl), now),
   userKeys = new UserKeyStore(config.dataDir, now),
+  mcpProbe,
+  repoChecker,
 }: AppDeps) {
+  const probes = mcpProbe ?? new ProbeCache(cfFetch ?? ((i, init) => fetch(i, init)), now);
+  const repos =
+    repoChecker ?? new RepoChecker((i, init) => fetch(i, init), now, config.githubToken);
   const notices =
     notify ??
     new NotificationCenter(config.dataDir, {
@@ -193,6 +206,8 @@ export function createApp({
   void recipes.ready().catch((e) => console.error("[recipes] load failed", e?.message));
   void agentKeys.ready().catch((e) => console.error("[agent-keys] load failed", e?.message));
   void notices.ready().catch((e) => console.error("[notify] load failed", e?.message));
+  const agentNotes = new NoteStore(config.dataDir, now);
+  void agentNotes.ready().catch((e) => console.error("[notes] load failed", e?.message));
   const teamAuth = makeTeamAuth({
     teams,
     agentKeys,
@@ -313,14 +328,38 @@ export function createApp({
   };
 
   /** Parse any supported upload body into raw entries + an optional TTL. */
-  async function readUpload(c: Context): Promise<{ entries: UploadEntry[]; ttl?: unknown }> {
+  async function readUpload(
+    c: Context,
+  ): Promise<{ entries: UploadEntry[]; ttl?: unknown; repo?: RepoLink }> {
+    const r = await readUploadRaw(c);
+    const q = c.req.query("repoUrl");
+    const raw =
+      r.repo ??
+      (q
+        ? {
+            url: q,
+            ...(c.req.query("branch") ? { branch: c.req.query("branch") } : {}),
+            ...(c.req.query("commitSha") ? { commitSha: c.req.query("commitSha") } : {}),
+          }
+        : undefined);
+    try {
+      const repo = readRepo(raw);
+      return { entries: r.entries, ttl: r.ttl, ...(repo ? { repo } : {}) };
+    } catch (e) {
+      if (e instanceof RepoError) throw new UploadError("INVALID_REQUEST", e.message);
+      throw e;
+    }
+  }
+  async function readUploadRaw(
+    c: Context,
+  ): Promise<{ entries: UploadEntry[]; ttl?: unknown; repo?: unknown }> {
     const type = (c.req.header("content-type") ?? "").toLowerCase();
     const queryTtl =
       c.req.query("permanent") === "1" || c.req.query("permanent") === "true"
         ? "permanent"
         : (c.req.query("ttlHours") ?? c.req.query("ttl"));
     if (type.startsWith("application/json")) {
-      let body: { files?: FileInput[]; ttlHours?: unknown; permanent?: unknown };
+      let body: { files?: FileInput[]; ttlHours?: unknown; permanent?: unknown; repo?: unknown };
       try {
         body = await c.req.json();
       } catch {
@@ -333,7 +372,7 @@ export function createApp({
         );
       }
       const ttl = body.permanent === true ? "permanent" : (body.ttlHours ?? queryTtl);
-      return { entries: fromFilesArray(body.files), ttl };
+      return { entries: fromFilesArray(body.files), ttl, repo: body.repo };
     }
     if (type.startsWith("application/zip") || type.startsWith("application/octet-stream")) {
       const buf = Buffer.from(await c.req.arrayBuffer());
@@ -556,7 +595,12 @@ export function createApp({
     }
   };
 
-  async function createSite(entries: UploadEntry[], ttl: unknown, team: Team | null) {
+  async function createSite(
+    entries: UploadEntry[],
+    ttl: unknown,
+    team: Team | null,
+    repo?: RepoLink,
+  ) {
     const permanent = wantsPermanent(ttl);
     if (permanent) permanentFor(team);
     const files = prepareSite(entries, limits);
@@ -578,6 +622,7 @@ export function createApp({
         ...(permanent ? { permanent: true } : {}),
         tokenHash: hashToken(token),
         ...(team ? { teamId: team.id } : {}),
+        ...(repo ? { repo } : {}),
         ...titleOf(files),
       },
       files,
@@ -682,8 +727,8 @@ export function createApp({
     if (team instanceof Response) return team;
     const limited = await uploadRate(c);
     if (limited) return limited;
-    const { entries, ttl } = await readUpload(c);
-    const { meta, token } = await createSite(entries, ttl, team);
+    const { entries, ttl, repo } = await readUpload(c);
+    const { meta, token } = await createSite(entries, ttl, team, repo);
     if (team)
       await audit({
         teamId: team.id,
@@ -740,7 +785,29 @@ export function createApp({
     const body = (await c.req.json().catch(() => ({}))) as {
       ttlHours?: unknown;
       permanent?: unknown;
+      repo?: unknown;
     };
+    if ("repo" in body) {
+      let repo: RepoLink | null | undefined;
+      try {
+        repo = readRepo(body.repo);
+      } catch (e) {
+        if (e instanceof RepoError) return apiError(c, 400, "INVALID_REQUEST", e.message);
+        throw e;
+      }
+      if (repo) meta.repo = repo;
+      else delete meta.repo;
+      meta.updatedAt = new Date(now()).toISOString();
+      await store.updateMeta(meta);
+      await audit({
+        teamId: meta.teamId,
+        siteId: meta.id,
+        actor: apiActor(c),
+        action: "repo",
+        detail: repo?.url ?? "-",
+      });
+      if (body.ttlHours === undefined && body.permanent === undefined) return c.json(view(meta));
+    }
     const ttl = body.permanent === true ? "permanent" : body.ttlHours;
     const out = await extendSite(meta, ttl);
     await audit({
@@ -783,6 +850,16 @@ export function createApp({
     teamAuth,
     recipes,
     userKeyOps: ukOps,
+    leaveNote: async (team, input, who) => {
+      const r = await leaveNote(
+        { notes: agentNotes, notify: notices, limiter },
+        team,
+        input,
+        "mcp",
+        who,
+      );
+      return "retryAfterSec" in r ? r : noteView(r);
+    },
   });
 
   // ---- optional per-site data/files backend --------------------------------
@@ -814,9 +891,16 @@ export function createApp({
     limiter,
     now,
     teamAuth,
+    siteOfTeam: async (teamId, siteId) => {
+      const m = await store.get(siteId).catch(() => null);
+      return !!m && m.teamId === teamId;
+    },
   });
   mountAgentRoutes(app, agentDeps);
   mountAdminRecipeRoutes(app, recipeDeps);
+  const noteDeps = { teams, notes: agentNotes, notify: notices, limiter, teamAuth };
+  mountNoteRoutes(app, noteDeps);
+  mountAdminNoteRoutes(app, noteDeps);
   app.get("/api/admin/backend/check", async (c) =>
     c.json(backend ? { enabled: true, ...(await probeBackend(backend)) } : { enabled: false }),
   );
@@ -1032,6 +1116,7 @@ export function createApp({
     await notices.purgeTeam(id);
     await userKeys.purgeTeam(id);
     await recipes.purgeTeam(id);
+    await agentNotes.purgeTeam(id);
     invalidateDirectory();
     return c.json({ deleted: id, removedSites, removedWorkers });
   });
@@ -1116,6 +1201,9 @@ export function createApp({
     recipes,
     userKeys,
     userKeyOps: ukOps,
+    mcpProbe: probes,
+    repoChecker: repos,
+    notes: agentNotes,
     previewImage: async (meta, teamId) => {
       const cover = await coverOf(meta);
       const path = cover ? store.filePath(meta, cover.path) : null;
@@ -1157,6 +1245,17 @@ export function createApp({
           recipeHtml(r, served),
           served,
           recipes.visible(null).map((x) => summaryOf(x, lang)),
+          (() => {
+            const s = r.scope === "builtin" ? starterFor(r.slug) : null;
+            return s
+              ? {
+                  name: s.name,
+                  zip: `/api/recipes/${r.slug}/starter.zip`,
+                  tree: s.tree,
+                  count: s.files.length,
+                }
+              : null;
+          })(),
         ),
       );
     });
