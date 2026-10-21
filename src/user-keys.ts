@@ -25,6 +25,8 @@ export const DEFAULT_PER_MINUTE = 60;
 export const DEFAULT_PER_DAY = 5_000;
 export const MAX_TOOLS = 50;
 export const USAGE_DAYS = 7;
+/** 0.15.2: daily counters kept for the 30-day per-key usage chart. */
+export const USAGE_KEEP_DAYS = 31;
 /** 429s per Worker per UTC day that raise an alert (each once a day). */
 export const SPIKE_STEPS = [10, 100, 1000];
 const DAY = 86_400_000;
@@ -209,7 +211,9 @@ export class UserKeyStore {
   save(): Promise<void> {
     this.dirty = false;
     const t = this.now();
-    const keep = new Set(Array.from({ length: USAGE_DAYS }, (_, i) => this.today(t - i * DAY)));
+    const keep = new Set(
+      Array.from({ length: USAGE_KEEP_DAYS }, (_, i) => this.today(t - i * DAY)),
+    );
     for (const [id, k] of this.keys) {
       for (const d of Object.keys(k.days)) if (!keep.has(d)) delete k.days[d];
       const end = k.revokedAt

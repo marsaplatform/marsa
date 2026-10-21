@@ -15,6 +15,7 @@ import { isPermanentIso } from "./store.js";
 import {
   agentKeyCols,
   agentKeyRows,
+  healthFilter,
   keyStateFilter,
   memberCols,
   memberRows,
@@ -2181,6 +2182,7 @@ export function teamWorkersHtml(
         empty: w.none,
         filters: [
           workerStatusFilter(lang, i.workers),
+          healthFilter(lang, i.workers),
           kindFilter(lang, i.workers),
           languageFilter(lang, i.workers),
           repoFilter(lang, i.workers),
@@ -2392,6 +2394,7 @@ export function adminWorkersHtml(lang: Lang, c: Config, o: AdminWorkersOpts): st
       empty: w.none,
       filters: [
         workerStatusFilter(lang, o.workers),
+        healthFilter(lang, o.workers),
         kindFilter(lang, o.workers),
         languageFilter(lang, o.workers),
         repoFilter(lang, o.workers),
@@ -2462,6 +2465,8 @@ function cfCard(lang: Lang, st: AdminWorkersOpts["settings"], csrf: string): str
 
 export interface AdminSettingsOpts {
   settings: AdminWorkersOpts["settings"];
+  /** 0.15.2: prerendered token permission checklists + health interval. */
+  extra?: string;
   server: {
     version: string;
     publicUrl: string;
@@ -2493,6 +2498,7 @@ export function adminSettingsHtml(lang: Lang, c: Config, o: AdminSettingsOpts): 
   ${pageHead(t.admin.eyebrow, esc(d.settings), d.adminSettingsSub, adminTools(lang, "settings", o.csrf))}
   ${flashBox(lang, o.flash)}
   ${cfCard(lang, o.settings, o.csrf)}
+  ${o.extra ?? ""}
   <section class="card-block" aria-labelledby="srv-title">
     <h2 id="srv-title" class="h3">${esc(d.server)}</h2>
     <dl class="facts">
@@ -3185,6 +3191,7 @@ export const V14 = {
     scopeHelp: {
       "workers:read": "List Workers, versions and code",
       "workers:deploy": "Deploy, redeploy, roll back and delete Workers",
+      "workers:secrets": "Set, rotate and delete Worker secrets (write-only)",
       "spaces:read": "List and read the team's spaces",
       "spaces:write": "Publish, replace, extend and delete spaces",
       "kv:read": "Read KV values and uploaded files",
@@ -3290,6 +3297,7 @@ export const V14 = {
     scopeHelp: {
       "workers:read": "عرض الوركرز وإصداراتها وكودها",
       "workers:deploy": "نشر الوركرز وإعادة نشرها والرجوع بها وحذفها",
+      "workers:secrets": "إضافة أسرار الوركرز وتغييرها وحذفها (كتابة فقط)",
       "spaces:read": "عرض مساحات الفريق وقراءتها",
       "spaces:write": "نشر المساحات واستبدالها وتمديدها وحذفها",
       "kv:read": "قراءة قيم KV والملفات المرفوعة",

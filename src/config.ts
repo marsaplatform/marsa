@@ -46,7 +46,14 @@ export interface Config {
   /** Optional, read-only GitHub token for repo status (tells private from missing). Never shown. */
   githubToken: string | null;
   /** Team Workers defaults (0.12.0). */
-  workers: { defaultMax: number; defaultMaxKb: number; compatibilityDate: string; apiBase: string };
+  workers: {
+    defaultMax: number;
+    defaultMaxKb: number;
+    compatibilityDate: string;
+    apiBase: string;
+    /** 0.15.2: seconds between health checks of each Worker (WORKER_HEALTH_INTERVAL_SEC). */
+    healthIntervalSec: number;
+  };
   /** Site ids spotlighted on the home page (FEATURED_SITES, comma-separated). */
   featuredSites: string[];
 }
@@ -202,6 +209,7 @@ export function loadConfig(env: Env = process.env): Config {
         ? (env.WORKERS_COMPAT_DATE?.trim() as string)
         : "2025-09-01",
       apiBase: url(env, "CLOUDFLARE_API_BASE", "https://api.cloudflare.com/client/v4"),
+      healthIntervalSec: Math.min(3600, int(env, "WORKER_HEALTH_INTERVAL_SEC", 300, 60)),
     },
     teamMaxBytes: int(env, "TEAM_MAX_MB", 200, 1) * MB,
     featuredSites: (env.FEATURED_SITES ?? "")

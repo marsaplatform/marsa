@@ -107,6 +107,7 @@ curl -s -X PUT "$MARSA_URL/api/teams/$MARSA_TEAM/workers/$WORKER_NAME" \
 { "code": $(jq -Rs . < dist/worker.js),
   "note": "v1.2.0: add get_item",
   "vars": { "DATA_URL": "https://example.org/data.json" },
+  "requiredEnv": ["DATA_URL", "UPSTREAM_TOKEN"],
   "secrets": { "UPSTREAM_TOKEN": "…من مخزن أسراركم…" },
   "meta": { "kind": "mcp", "language": "typescript", "framework": "hono", "toolsCount": 2, "spaceSlug": "<معرّف المساحة>" },
   "repo": { "url": "https://github.com/<org>/<repo>", "branch": "main", "commitSha": "<git rev-parse HEAD>" } }
@@ -115,6 +116,8 @@ JSON
 
 - **`meta`** (اختياري): يخبر لوحة التحكم بنوع الوركر. من دونه تستنتج المساحات النوع من الكود، وتفحص `/mcp` فحص قراءة فقط (`initialize` و`tools/list`، مع تخزين مؤقت، ودون `tools/call` أبدًا). قيم `kind` هي: `mcp` أو `web` (موقع/API) أو `other`. ويربط `spaceSlug` الوركر بصفحة مشروعه في المساحات.
 - **`repo`** (اختياري): يظهر في عمود المستودع. تتحقق المساحات من GitHub قراءةً فقط وتخزّن النتيجة: عام أو خاص أو غير موجود، ومتزامن أو متأخر عن الفرع.
+- **`requiredEnv`** (اختياري، 0.15.2): أسماء متغيرات البيئة التي يحتاجها الكود. يُظهر تبويب **المتغيرات والأسرار** في صفحة الوركر أي اسم ناقص (وأيضًا الأسماء التي يراها في الكود بصيغة `env.X`). لإضافة سر أو تغييره لاحقًا دون إعادة نشر: `PUT /api/teams/<team>/workers/<name>/secrets/<NAME>` مع `{"value":"…"}` (كتابة فقط؛ لا تُرجع القيمة أبدًا)، و`DELETE` لحذفه، أو أداة MCP ‏`set_worker_secret`. يحتاج مفتاح الإيجنت صلاحية `workers:secrets` (أو `workers:deploy`).
+- بعد النشر راجع `GET …/workers/<name>/health` و`…/usage?range=24h` و`…/logs` (أو أداة MCP ‏`worker_status`). وإذا بقي شيء معطّلًا فاترك ملاحظة.
 - لتغيير `meta` أو `repo` أو المساحة المربوطة لاحقًا دون إعادة نشر: `POST /api/teams/<team>/workers/<name>/links`، أو أداة MCP ‏`set_worker_links`، أو تبويب **الإعدادات** في صفحة الوركر.
 
 عبر MCP (إيجنت متصل بـ MCP إحدى المساحات): تقبل أداة `deploy_worker` الحقول نفسها: `code` و`vars` و`secrets` و`meta` و`repo` و`compatibilityFlags` و`bindings`.

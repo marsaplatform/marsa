@@ -20,6 +20,13 @@ import {
   type ServiceBinding,
   type WorkerRuntime,
 } from "./worker-config.js";
+import {
+  ENV_NAME_RE,
+  EnvError,
+  readRequiredEnv,
+  SECRET_MAX_BYTES,
+  SYSTEM_SECRETS,
+} from "./worker-env.js";
 import { MetaError, readMeta, type WorkerMeta } from "./worker-insight.js";
 import {
   cleanNote,
@@ -130,6 +137,13 @@ export interface WorkerRec {
   meta?: WorkerMeta;
   repo?: RepoLink;
   spaceId?: string;
+  /** 0.15.2: when/by whom each secret and var was last set through Spaces (names only). */
+  secretsMeta?: Record<string, { at: string; by: string }>;
+  varsMeta?: Record<string, { at: string; by: string }>;
+  /** Env names the code needs (declared on deploy as requiredEnv). */
+  requiredEnv?: string[];
+  /** Workers Logs (Cloudflare observability) turned on through Spaces. */
+  logs?: boolean;
 }
 
 export interface WorkerView {
@@ -158,6 +172,8 @@ export interface WorkerView {
   meta: WorkerMeta;
   repo: RepoLink | null;
   spaceId: string | null;
+  requiredEnv: string[];
+  logs: boolean;
 }
 
 /** Platform default compatibility date, set once by WorkerService (config). */
@@ -184,6 +200,8 @@ export const workerView = (r: WorkerRec): WorkerView => ({
   compatibilityFlags: [...(r.compatibilityFlags ?? [])],
   bindings: (r.bindings ?? []).map((b) => ({ ...b })),
   meta: { ...(r.meta ?? {}) },
+  requiredEnv: [...(r.requiredEnv ?? [])],
+  logs: !!r.logs,
   repo: r.repo ? { ...r.repo } : null,
   spaceId: r.spaceId ?? null,
 });
@@ -222,6 +240,8 @@ export interface DeployInput {
   /** 0.15.1: {kind, language, framework, toolsCount, spaceSlug}; {url, branch, commitSha}. */
   meta?: unknown;
   repo?: unknown;
+  /** 0.15.2: env names the code needs; missing ones are flagged on the Worker page. */
+  requiredEnv?: unknown;
 }
 
 export interface WorkerLimits {
@@ -642,11 +662,13 @@ export class WorkerService {
     }
     let meta: WorkerMeta | null | undefined;
     let repo: RepoLink | null | undefined;
+    let requiredEnv: string[] | null | undefined;
     try {
       meta = readMeta(input.meta);
       repo = readRepo(input.repo);
+      requiredEnv = readRequiredEnv(input.requiredEnv);
     } catch (err) {
-      if (err instanceof MetaError || err instanceof RepoError)
+      if (err instanceof MetaError || err instanceof RepoError || err instanceof EnvError)
         throw new WorkerError(400, "INVALID_REQUEST", err.message);
       throw err;
     }
@@ -734,6 +756,7 @@ export class WorkerService {
           vars: finalVars,
           compatibilityFlags: runtime.compatibilityFlags,
           services,
+          ...(rec.logs ? { observability: true } : {}),
         });
         created.script = !existing;
         for (const [k, v] of Object.entries(secrets)) {
@@ -786,6 +809,24 @@ export class WorkerService {
       };
       if (meta === null) delete done.meta;
       else if (meta) done.meta = meta;
+      if (requiredEnv === null || (requiredEnv && !requiredEnv.length)) delete done.requiredEnv;
+      else if (requiredEnv) done.requiredEnv = requiredEnv;
+      // Names-only bookkeeping: when/by whom each secret and var last changed.
+      const stamp = { at: done.updatedAt, by: actor.label };
+      if (Object.keys(secrets).length) {
+        const sm = { ...(done.secretsMeta ?? {}) };
+        for (const [k, v] of Object.entries(secrets)) {
+          if (v === null) delete sm[k];
+          else sm[k] = stamp;
+        }
+        done.secretsMeta = sm;
+      }
+      const vm: Record<string, { at: string; by: string }> = {};
+      for (const [k, v] of Object.entries(finalVars)) {
+        const prev = existing?.varsMeta?.[k];
+        vm[k] = existing && existing.vars[k] === v && prev ? prev : stamp;
+      }
+      done.varsMeta = vm;
       if (repo === null) delete done.repo;
       else if (repo) done.repo = repo;
       else if (done.repo?.commitSha && existing) {
@@ -931,16 +972,18 @@ export class WorkerService {
   /** Change metadata only (no redeploy): declared meta, repo link, linked space. */
   setLinks(
     rec: WorkerRec,
-    change: { meta?: unknown; repo?: unknown; spaceId?: string | null },
+    change: { meta?: unknown; repo?: unknown; spaceId?: string | null; requiredEnv?: unknown },
     actor: Actor,
   ): Promise<WorkerView> {
     let meta: WorkerMeta | null | undefined;
     let repo: RepoLink | null | undefined;
+    let requiredEnv: string[] | null | undefined;
     try {
       meta = readMeta(change.meta);
       repo = readRepo(change.repo);
+      requiredEnv = readRequiredEnv(change.requiredEnv);
     } catch (err) {
-      if (err instanceof MetaError || err instanceof RepoError)
+      if (err instanceof MetaError || err instanceof RepoError || err instanceof EnvError)
         throw new WorkerError(400, "INVALID_REQUEST", err.message);
       throw err;
     }
@@ -954,6 +997,8 @@ export class WorkerService {
       else if (repo) next.repo = repo;
       if (change.spaceId === null) delete next.spaceId;
       else if (typeof change.spaceId === "string") next.spaceId = change.spaceId;
+      if (requiredEnv === null || (requiredEnv && !requiredEnv.length)) delete next.requiredEnv;
+      else if (requiredEnv) next.requiredEnv = requiredEnv;
       this.recs.set(cur.id, next);
       await this.saveRecs();
       await this.deps.audit({
@@ -987,6 +1032,182 @@ export class WorkerService {
     } catch (err) {
       throw this.cfFail(err, "could not set the key secrets on the Worker");
     }
+  }
+
+  /** 0.15.2: an audit line about one Worker (health on/off …). */
+  auditOf(rec: WorkerRec, actor: Actor, action: string, extra?: string): Promise<void> {
+    return this.deps.audit({
+      teamId: rec.teamId,
+      actor,
+      action,
+      detail: extra ? `${rec.name}: ${extra}` : rec.name,
+    });
+  }
+
+  /** 0.15.2: run a Cloudflare call with the platform token (never exposed to the caller). */
+  async withCf<T>(fn: (a: CfAccess, api: CloudflareWorkersApi) => Promise<T>): Promise<T> {
+    this.token();
+    return fn(this.access(), this.deps.api);
+  }
+
+  /** The platform account id (for analytics queries), or null when not configured. */
+  get accountId(): string | null {
+    return this.settings?.accountId ?? null;
+  }
+
+  private checkEnvName(rec: WorkerRec, name: unknown, what: "secret" | "var"): string {
+    const n = typeof name === "string" ? name.trim() : "";
+    if (!ENV_NAME_RE.test(n))
+      throw new WorkerError(
+        400,
+        "INVALID_NAME",
+        `${what} name: letters, digits and _ (not starting with a digit)`,
+      );
+    if ((SYSTEM_SECRETS as readonly string[]).includes(n) || n.startsWith("MARSA_"))
+      throw new WorkerError(400, "RESERVED_NAME", `${n} is managed by Spaces`);
+    if ((rec.bindings ?? []).some((b) => b.name === n))
+      throw new WorkerError(409, "NAME_IN_USE", `${n} is a service binding`);
+    if (what === "secret" && n in rec.vars)
+      throw new WorkerError(409, "NAME_IN_USE", `${n} is a plain var; delete it first`);
+    if (what === "var" && rec.secrets.includes(n))
+      throw new WorkerError(409, "NAME_IN_USE", `${n} is a secret; delete it first`);
+    return n;
+  }
+
+  /**
+   * 0.15.2: set or rotate one secret (write-only) without a code redeploy. The value goes
+   * straight to Cloudflare; Spaces keeps only the name and when/by whom it changed.
+   */
+  setSecret(
+    rec: WorkerRec,
+    name: unknown,
+    value: unknown,
+    actor: Actor,
+  ): Promise<{ name: string; rotated: boolean }> {
+    const n = this.checkEnvName(rec, name, "secret");
+    if (typeof value !== "string" || !value.length)
+      throw new WorkerError(400, "INVALID_REQUEST", "value: the secret (a non-empty string)");
+    if (Buffer.byteLength(value) > SECRET_MAX_BYTES)
+      throw new WorkerError(413, "SECRET_TOO_LARGE", "a secret is limited to 5 KB");
+    this.token();
+    return this.serial(async () => {
+      const cur = this.recs.get(rec.id);
+      if (!cur) throw new WorkerError(404, "NOT_FOUND", "worker not found");
+      try {
+        await this.deps.api.putSecret(this.access(), cur.script, n, value);
+      } catch (err) {
+        throw this.cfFail(err, "could not set the secret");
+      }
+      const rotated = cur.secrets.includes(n);
+      const at = this.iso();
+      const next: WorkerRec = {
+        ...cur,
+        secrets: [...new Set([...cur.secrets, n])].sort(),
+        secretsMeta: { ...(cur.secretsMeta ?? {}), [n]: { at, by: actor.label } },
+        updatedAt: at,
+      };
+      this.recs.set(cur.id, next);
+      await this.saveRecs();
+      await this.deps.audit({
+        teamId: cur.teamId,
+        actor,
+        action: rotated ? "worker-secret-rotate" : "worker-secret-set",
+        detail: `${cur.name}: ${n}`,
+      });
+      return { name: n, rotated };
+    });
+  }
+
+  /** 0.15.2: delete one secret from the Worker (no redeploy). */
+  deleteSecretNamed(rec: WorkerRec, name: unknown, actor: Actor): Promise<{ name: string }> {
+    const n = typeof name === "string" ? name.trim() : "";
+    if (!ENV_NAME_RE.test(n) || (SYSTEM_SECRETS as readonly string[]).includes(n))
+      throw new WorkerError(400, "INVALID_NAME", "not a secret of this Worker");
+    this.token();
+    return this.serial(async () => {
+      const cur = this.recs.get(rec.id);
+      if (!cur) throw new WorkerError(404, "NOT_FOUND", "worker not found");
+      if (!cur.secrets.includes(n)) throw new WorkerError(404, "NOT_FOUND", `no secret named ${n}`);
+      try {
+        await this.deps.api.deleteSecret(this.access(), cur.script, n);
+      } catch (err) {
+        throw this.cfFail(err, "could not delete the secret");
+      }
+      const sm = { ...(cur.secretsMeta ?? {}) };
+      delete sm[n];
+      const next: WorkerRec = {
+        ...cur,
+        secrets: cur.secrets.filter((x) => x !== n),
+        secretsMeta: sm,
+        updatedAt: this.iso(),
+      };
+      this.recs.set(cur.id, next);
+      await this.saveRecs();
+      await this.deps.audit({
+        teamId: cur.teamId,
+        actor,
+        action: "worker-secret-delete",
+        detail: `${cur.name}: ${n}`,
+      });
+      return { name: n };
+    });
+  }
+
+  /** 0.15.2: set (value) or delete (null) one plain var; redeploys the newest stored code. */
+  async setVar(
+    team: Team,
+    rec: WorkerRec,
+    name: unknown,
+    value: string | null,
+    actor: Actor,
+  ): Promise<WorkerView> {
+    const n =
+      value === null
+        ? typeof name === "string" && name.trim() in rec.vars
+          ? name.trim()
+          : (() => {
+              throw new WorkerError(404, "NOT_FOUND", "no var with that name");
+            })()
+        : this.checkEnvName(rec, name, "var");
+    if (value !== null && typeof value !== "string")
+      throw new WorkerError(400, "INVALID_REQUEST", "value: a string");
+    const vars = { ...rec.vars };
+    if (value === null) delete vars[n];
+    else vars[n] = value;
+    const w = await this.editEnv(team, rec, { vars }, actor);
+    await this.deps.audit({
+      teamId: rec.teamId,
+      actor,
+      action: value === null ? "worker-var-delete" : "worker-var-set",
+      detail: `${rec.name}: ${n}`,
+    });
+    return w;
+  }
+
+  /** 0.15.2: Workers Logs on/off (Cloudflare observability; settings only, no new code). */
+  setLogs(rec: WorkerRec, on: boolean, actor: Actor): Promise<WorkerView> {
+    this.token();
+    return this.serial(async () => {
+      const cur = this.recs.get(rec.id);
+      if (!cur) throw new WorkerError(404, "NOT_FOUND", "worker not found");
+      try {
+        await this.deps.api.setObservability(this.access(), cur.script, on);
+      } catch (err) {
+        throw this.cfFail(err, "could not change Workers Logs");
+      }
+      const next: WorkerRec = { ...cur, updatedAt: this.iso() };
+      if (on) next.logs = true;
+      else delete next.logs;
+      this.recs.set(cur.id, next);
+      await this.saveRecs();
+      await this.deps.audit({
+        teamId: cur.teamId,
+        actor,
+        action: on ? "worker-logs-on" : "worker-logs-off",
+        detail: cur.name,
+      });
+      return workerView(next);
+    });
   }
 
   /**

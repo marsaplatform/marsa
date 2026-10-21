@@ -20,6 +20,7 @@ import { bearer, hashToken, safeEqual } from "./tokens.js";
 import type { UserKeyOps } from "./user-key-routes.js";
 import { UserKeyError } from "./user-keys.js";
 import { ALLOWED_COMPAT_FLAGS } from "./worker-config.js";
+import type { WorkerOps } from "./worker-ops.js";
 import { versionMeta } from "./worker-versions.js";
 import { WorkerError, type WorkerService, workerView } from "./workers.js";
 
@@ -63,6 +64,13 @@ const runtimeArgs = (a: Record<string, unknown>) => ({
 
 /** Optional declared metadata and source repo (0.15.1): shown in the tables and MCP servers page. */
 const LINK_PROPS = {
+  requiredEnv: {
+    type: ["array", "null"],
+    items: { type: "string" },
+    maxItems: 50,
+    description:
+      "0.15.2: env names the code needs (vars or secrets). Missing ones are flagged on the Worker page.",
+  },
   meta: {
     type: ["object", "null"],
     properties: {
@@ -162,6 +170,8 @@ export interface McpDeps {
     input: NoteInput,
     who: string,
   ) => Promise<{ id: string; status: string } | { retryAfterSec: number }>;
+  /** 0.15.2: env view, health, usage, logs. */
+  ops?: WorkerOps;
 }
 
 /** The agent-key scope a tool needs. */
@@ -519,6 +529,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
               ...runtimeArgs(a),
               ...("meta" in a ? { meta: a.meta } : {}),
               ...("repo" in a ? { repo: a.repo } : {}),
+              ...("requiredEnv" in a ? { requiredEnv: a.requiredEnv } : {}),
             },
             { kind: "mcp", label: token.name },
           );
@@ -647,6 +658,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
               rec,
               {
                 ...("meta" in a ? { meta: a.meta } : {}),
+                ...("requiredEnv" in a ? { requiredEnv: a.requiredEnv } : {}),
                 ...("repo" in a ? { repo: a.repo } : {}),
                 ...("spaceId" in a ? { spaceId: (a.spaceId as string | null) ?? null } : {}),
               },
@@ -681,6 +693,86 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
           if (err instanceof WorkerError) return fail(`${err.code}: ${err.message}`);
           throw err;
         }
+      },
+    },
+    {
+      name: "worker_env",
+      title: "A Worker's vars & secrets (names only)",
+      description:
+        "Names, types and status (set/empty/missing) of a Worker's plain vars, secrets and bindings, read live from Cloudflare, plus names the code expects but are missing (declared requiredEnv + env.X usage). Never returns any value.",
+      inputSchema: obj({ name: { type: "string" } }, ["name"]),
+      annotations: { readOnlyHint: true },
+      needsWorkers: true,
+      run: async (a, { meta }) => {
+        const team = teams.get(meta.teamId);
+        const w = d.workers as WorkerService;
+        const rec = team ? w.find(team.id, str(a, "name")) : null;
+        if (!rec || !d.ops) return fail("no such Worker");
+        return ok({ worker: rec.name, env: await d.ops.envView(rec) });
+      },
+    },
+    {
+      name: "set_worker_secret",
+      title: "Set or rotate a Worker secret",
+      description:
+        "Set (or rotate) one secret on a Worker without redeploying code. Write-only: the value goes to Cloudflare and is never shown again. Pass value null to delete the secret.",
+      inputSchema: obj(
+        {
+          name: { type: "string" },
+          secret: { type: "string" },
+          value: { type: ["string", "null"] },
+        },
+        ["name", "secret", "value"],
+      ),
+      annotations: { destructiveHint: true },
+      write: true,
+      needsWorkers: true,
+      run: async (a, { meta, token }) => {
+        const team = teams.get(meta.teamId);
+        const w = d.workers as WorkerService;
+        const rec = team ? w.find(team.id, str(a, "name")) : null;
+        if (!rec) return fail("no such Worker");
+        const lim = d.limiter.hit(`secrets:${rec.teamId}`, 60, 3_600_000);
+        if (!lim.allowed) return fail("RATE_LIMITED: at most 60 secret changes per hour");
+        const actor = { kind: "mcp" as const, label: token.name };
+        try {
+          const r =
+            a.value === null
+              ? { ...(await w.deleteSecretNamed(rec, a.secret, actor)), deleted: true }
+              : await w.setSecret(rec, a.secret, a.value, actor);
+          d.ops?.forgetEnv(rec.id);
+          return ok({ ok: true, ...r });
+        } catch (err) {
+          if (err instanceof WorkerError) return fail(`${err.code}: ${err.message}`);
+          throw err;
+        }
+      },
+    },
+    {
+      name: "worker_status",
+      title: "A Worker's health, usage and recent errors",
+      description:
+        "Uptime/latency from Spaces' health checks, requests/errors/CPU from Cloudflare analytics (range 24h, 7d or 30d) and recent errors (24h, secrets redacted). Read-only.",
+      inputSchema: obj(
+        { name: { type: "string" }, range: { type: "string", enum: ["24h", "7d", "30d"] } },
+        ["name"],
+      ),
+      annotations: { readOnlyHint: true },
+      needsWorkers: true,
+      run: async (a, { meta }) => {
+        const team = teams.get(meta.teamId);
+        const w = d.workers as WorkerService;
+        const rec = team ? w.find(team.id, str(a, "name")) : null;
+        if (!rec || !d.ops) return fail("no such Worker");
+        const range = (["24h", "7d", "30d"] as const).find((r) => r === a.range) ?? "24h";
+        const h = d.ops.health.view(rec.id);
+        const logs = await d.ops.analytics.logs(rec.script, !!rec.logs);
+        return ok({
+          worker: rec.name,
+          health: { ...h, series: undefined, checksIn24h: h.series.length },
+          usage: await d.ops.analytics.usage(rec.script, range),
+          errors: { ...logs, entries: logs.entries.slice(0, 30) },
+        });
       },
     },
     {

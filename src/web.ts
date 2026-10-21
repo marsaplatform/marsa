@@ -86,10 +86,12 @@ import {
 } from "./ui-detail.js";
 import { type InsightRow, IX, mcpServersHtml } from "./ui-insight.js";
 import { NX, notesHtml } from "./ui-notes.js";
+import { intervalForm, OX, permsSection } from "./ui-ops.js";
 import type { UserKeyOps } from "./user-key-routes.js";
 import { UserKeyError, type UserKeyStore } from "./user-keys.js";
 import type { VisitCounter, VisitSummary } from "./visits.js";
 import { insightOf, type ProbeCache, stackLabel } from "./worker-insight.js";
+import type { WorkerOps } from "./worker-ops.js";
 import { versionMeta } from "./worker-versions.js";
 import {
   PLATFORM_AUDIT,
@@ -171,6 +173,8 @@ export interface WebDeps {
   /** Agent notes (0.15.1). */
   notes?: NoteStore;
   repoChecker?: RepoChecker;
+  /** 0.15.2: env view, health, analytics/logs, permission checklists. */
+  ops?: WorkerOps;
 }
 
 /** "NAME=value" lines into an object (blank lines and # comments skipped). */
@@ -645,7 +649,30 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       rec: NonNullable<ReturnType<typeof d.workers.find>>,
       tab: string,
       admin = false,
+      c?: Context,
     ) => {
+      const q = (k: string) => c?.req.query(k) ?? "";
+      const ops = d.ops;
+      const opsData: NonNullable<Parameters<typeof workerDetailHtml>[2]["ops"]> = {};
+      if (ops) {
+        opsData.healthCell = ops.health.cell(rec.id);
+        const refresh = q("refresh") === "1";
+        if (tab === "env") {
+          opsData.env = await ops.envView(rec, refresh);
+          const name = q("name");
+          if (/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name)) opsData.prefill = name;
+        } else if (tab === "health") opsData.health = ops.health.view(rec.id);
+        else if (tab === "logs")
+          opsData.logs = await ops.analytics.logs(rec.script, !!rec.logs, refresh);
+        else if (tab === "usage") {
+          const range = (["24h", "7d", "30d"] as const).find((r) => r === q("range")) ?? "24h";
+          opsData.usage = {
+            range,
+            series: await ops.analytics.usage(rec.script, range, refresh),
+            keys: ops.keyUsage(rec, range === "30d" ? 30 : range === "7d" ? 7 : 1),
+          };
+        }
+      }
       const allSites = await store.list();
       const insight = await insightRow(rec, allSites, admin);
       const spaces = allSites
@@ -687,6 +714,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         },
         audit,
         teamWorkers: d.workers.list(rec.teamId).map((w) => w.name),
+        ops: opsData,
       };
     };
 
@@ -1461,7 +1489,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           ctx: teamCtx(lang, { team, me: meOf(ts) }),
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
-          ...(await workerDetailData(rec, tab)),
+          ...(await workerDetailData(rec, tab, false, c)),
           canEdit: roleRank[ts.role] >= roleRank.editor,
         }),
       );
@@ -1512,6 +1540,69 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         ...(w.url ? { link: w.url } : {}),
       });
     });
+    // ---- 0.15.2: vars & secrets, health, logs (team side) ------------------------------
+    const opsEdit = async (
+      c: Context,
+      s: Session,
+      what: "secret" | "var" | "health" | "logs",
+      rec: NonNullable<ReturnType<typeof d.workers.find>>,
+      form: FormData,
+      actor: Actor,
+      back: string,
+    ): Promise<Response> => {
+      const op = field(form, "op");
+      const name = field(form, "name").trim();
+      const ops = d.ops;
+      if (!ops) return done(c, s, back, { kind: "err", text: t.badRequest });
+      const ox = OX[lang];
+      if (what === "secret") {
+        const lim = limiter.hit(`secrets:${rec.teamId}`, 60, 3_600_000);
+        if (!lim.allowed) return done(c, s, back, { kind: "err", text: t.badRequest });
+        if (op === "delete") await d.workers.deleteSecretNamed(rec, name, actor);
+        else await d.workers.setSecret(rec, name, field(form, "value"), actor);
+        ops.forgetEnv(rec.id);
+        return done(c, s, back, {
+          kind: "ok",
+          text: `${name}: ${op === "delete" ? ox.del : ox.saveSecret} ✓`,
+        });
+      }
+      if (what === "var") {
+        const team = teams.get(rec.teamId);
+        if (!team) return done(c, s, back, { kind: "err", text: t.notFound });
+        await d.workers.setVar(
+          team,
+          rec,
+          name,
+          op === "delete" ? null : field(form, "value"),
+          actor,
+        );
+        ops.forgetEnv(rec.id);
+        return done(c, s, back, { kind: "ok", text: v14.redeployed });
+      }
+      if (what === "health") {
+        if (op === "on" || op === "off") {
+          await ops.health.setEnabled(rec.id, op === "on");
+          await d.workers.auditOf(
+            rec,
+            actor,
+            op === "on" ? "worker-health-on" : "worker-health-off",
+          );
+        } else if (op === "check" && rec.status === "active" && rec.url) {
+          const lim = limiter.hit(`health-now:${rec.id}`, 12, 3_600_000);
+          if (!lim.allowed) return done(c, s, back, { kind: "err", text: t.badRequest });
+          await ops.code(rec);
+          await ops.health.checkOne(rec);
+        }
+        return done(c, s, back, { kind: "ok", text: IX[lang].refreshed });
+      }
+      await d.workers.setLogs(rec, op === "on", actor);
+      return done(c, s, back, { kind: "ok", text: op === "on" ? ox.logsOn : ox.logsOff });
+    };
+    for (const what of ["secret", "var", "health", "logs"] as const) {
+      workerEdit(what, async (c, { s, rec, form, actor, back: settingsBack }) =>
+        opsEdit(c, s, what, rec, form, actor, localBack(form, settingsBack)),
+      );
+    }
     workerEdit("probe", async (c, { s, rec, form, back: settingsBack }) => {
       const back = localBack(form, settingsBack);
       const ins = await insightRow(rec, [], false);
@@ -2266,6 +2357,11 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     };
     const workerList = async (recs: ReturnType<typeof d.workers.list>, admin = false) => {
       const sites = await store.list();
+      // Sparklines come from a cached snapshot (refreshed in the background, never blocking).
+      const snap =
+        d.ops && d.workers.configured && recs.length
+          ? d.ops.analytics.snapshot(recs.map((r) => r.script))
+          : null;
       return Promise.all(
         recs.map(async (r) => {
           const team = teams.get(r.teamId);
@@ -2278,6 +2374,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             keysCount: active,
             requests7: v?.keys.length ? v.keys.reduce((n, k) => n + k.usage.last7d, 0) : null,
             insight: await insightRow(r, sites, admin),
+            ...(d.ops ? { health: d.ops.health.cell(r.id), spark: snap?.[r.script] ?? null } : {}),
           };
         }),
       );
@@ -2356,7 +2453,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           ctx: ADMIN_CTX(lang),
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
-          ...(await workerDetailData(x.rec, tab, true)),
+          ...(await workerDetailData(x.rec, tab, true, c)),
           canEdit: true,
         }),
       );
@@ -2779,6 +2876,39 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       if (rec.repo && d.repoChecker) await d.repoChecker.check(rec.repo);
       return done(c, s, wBack, { kind: "ok", text: IX[lang].refreshed });
     });
+    for (const what of ["secret", "var", "health", "logs"] as const) {
+      wPost(`/admin/workers/:id/${what}`, async (c, { s, form }) => {
+        const rec = d.workers.get(c.req.param("id") ?? "");
+        const back = localBack(form, wBack);
+        if (!rec) return done(c, s, back, { kind: "err", text: t.notFound });
+        return opsEdit(c, s, what, rec, form, ADMIN_ACTOR, back);
+      });
+    }
+    // 0.15.2: token permission checklist (recheck = fresh read-only probes) + interval.
+    wPost(
+      "/admin/settings/permissions",
+      async (c, { s }) => {
+        await Promise.all([
+          d.ops?.workersPermissions(true).catch(() => null),
+          d.ops?.backendPermissions(true).catch(() => null),
+        ]);
+        return done(c, s, `${sBack}#permissions`, { kind: "ok", text: IX[lang].refreshed });
+      },
+      sBack,
+    );
+    wPost(
+      "/admin/settings/health-interval",
+      async (c, { s, form }) => {
+        try {
+          await d.ops?.health.setInterval(Number(field(form, "intervalSec")));
+        } catch (e) {
+          if (e instanceof RangeError) return done(c, s, sBack, { kind: "err", text: e.message });
+          throw e;
+        }
+        return done(c, s, sBack, { kind: "ok", text: t.admin.saved });
+      },
+      sBack,
+    );
     wPost("/admin/workers/:id/delete", async (c, { s }) => {
       const rec = d.workers.get(c.req.param("id") ?? "");
       if (!rec) return done(c, s, wBack, { kind: "err", text: t.notFound });
@@ -2848,6 +2978,23 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             workerKb: config.workers.defaultMaxKb,
             health: backend ? await probeBackend(backend) : null,
           },
+          extra: d.ops
+            ? permsSection(
+                lang,
+                d.workers.configured ? await d.ops.workersPermissions().catch(() => null) : null,
+                await d.ops.backendPermissions().catch(() => null),
+                href("/admin/settings/permissions"),
+                sessions.csrfFor(s),
+                href("/admin/settings"),
+                intervalForm(
+                  lang,
+                  href("/admin/settings/health-interval"),
+                  sessions.csrfFor(s),
+                  href("/admin/settings"),
+                  d.ops.health.interval,
+                ),
+              )
+            : "",
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
         }),

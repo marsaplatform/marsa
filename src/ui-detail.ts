@@ -44,9 +44,23 @@ import {
   stackCell,
   toolsCell,
 } from "./ui-insight.js";
+import {
+  envTab,
+  healthCellHtml,
+  healthTab,
+  logsTab,
+  type OpsTabCtx,
+  OX,
+  sparkCellHtml,
+  usageTab,
+} from "./ui-ops.js";
 import { badge, type DtAction, type DtRow, dataTable, relTime, tabsNav } from "./ui-table.js";
 import type { UserKeyView } from "./user-keys.js";
+import type { LogsResult, UsageRange, UsageSeries } from "./worker-analytics.js";
 import { ALLOWED_COMPAT_FLAGS } from "./worker-config.js";
+import type { EnvView } from "./worker-env.js";
+import type { HealthView } from "./worker-health.js";
+import type { KeyUsageRow } from "./worker-ops.js";
 import type { VersionMeta } from "./worker-versions.js";
 import type { WorkerView } from "./workers.js";
 
@@ -467,7 +481,20 @@ function detailBody(head: string, flash: string, tabs: string, body: string): st
 
 // ---- Worker detail -------------------------------------------------------------------------
 
-export const WORKER_TABS = ["overview", "versions", "keys", "settings", "activity"] as const;
+export const WORKER_TABS = [
+  "overview",
+  "env",
+  "health",
+  "logs",
+  "usage",
+  "versions",
+  "keys",
+  "settings",
+  "activity",
+] as const;
+type OpsTab = "env" | "health" | "logs" | "usage";
+const isOpsTab = (k: string): k is OpsTab =>
+  k === "env" || k === "health" || k === "logs" || k === "usage";
 
 type RuntimeView = Pick<
   WorkerView,
@@ -483,7 +510,12 @@ export interface WorkerDetailOpts {
   ctx: DashCtx;
   csrf: string;
   flash?: Flash | null;
-  worker: WorkerRowView & { script: string; createdAt: string; updatedAt: string } & RuntimeView;
+  worker: WorkerRowView & {
+    script: string;
+    createdAt: string;
+    updatedAt: string;
+    logs?: boolean;
+  } & RuntimeView;
   disabledBy: "admin" | "team" | null;
   versions: VersionMeta[];
   health: { status: number | null; ms: number } | null;
@@ -502,6 +534,16 @@ export interface WorkerDetailOpts {
   spaces?: { id: string; title: string }[];
   /** Owner/editor on the team side, or the admin. */
   canEdit: boolean;
+  /** 0.15.2: data for the env / health / logs / usage tabs (only the open tab's is loaded). */
+  ops?: {
+    env?: EnvView;
+    health?: HealthView;
+    logs?: LogsResult;
+    usage?: { range: UsageRange; series: UsageSeries; keys: KeyUsageRow[] };
+    prefill?: string;
+    /** Health summary for the overview. */
+    healthCell?: { state: HealthView["state"]; d7: number | null };
+  };
 }
 
 export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): string {
@@ -519,7 +561,7 @@ export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): st
     x.tabs,
     WORKER_TABS.map((key) => ({
       key,
-      label: x[key],
+      label: isOpsTab(key) ? OX[lang][key] : x[key],
       href: href(`${o.base}${key === "overview" ? "" : `?tab=${key}`}`),
       count:
         key === "versions" ? o.versions.length : key === "keys" ? activeKeys.length : undefined,
@@ -553,7 +595,24 @@ export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): st
   <div class="detail-links">${w.url ? copyLine(lang, "w-url", x.liveUrl, w.url) : ""}${o.mcp ? copyLine(lang, "w-mcp", `${x.mcpUrl} (${x.mcpDetected})`, o.mcp, false) : ""}</div></div>
   <div class="detail-actions">${headActions}</div></div>`;
   let body: string;
-  if (tab === "versions") body = workerVersionsTab(lang, o, self, teamBase);
+  const opsCtx: OpsTabCtx = {
+    lang,
+    csrf: o.csrf,
+    self,
+    act: (what) => href(admin ? `/admin/workers/${w.id}/${what}` : `${teamBase}/${what}`),
+    canEdit: o.canEdit,
+    canVars: o.canEdit && !!w.version,
+    ...(o.ops?.prefill ? { prefill: o.ops.prefill } : {}),
+  };
+  if (tab === "env" && o.ops?.env) body = envTab(opsCtx, o.ops.env);
+  else if (tab === "health" && o.ops?.health)
+    body = healthTab(opsCtx, o.ops.health, w.status === "active" && !!w.url);
+  else if (tab === "logs" && o.ops?.logs) body = logsTab(opsCtx, !!w.logs, o.ops.logs);
+  else if (tab === "usage" && o.ops?.usage)
+    body = usageTab(opsCtx, o.ops.usage.range, o.ops.usage.series, o.ops.usage.keys, (r) =>
+      href(`${o.base}?tab=usage&range=${r}`),
+    );
+  else if (tab === "versions") body = workerVersionsTab(lang, o, self, teamBase);
   else if (tab === "keys") body = workerKeysTab(lang, o, self, teamBase);
   else if (tab === "settings") body = workerSettingsTab(lang, o, self, teamBase);
   else if (tab === "activity") body = activityBlock(lang, o.audit, false);
@@ -583,7 +642,7 @@ export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): st
       ${fact(x.version, latest ? `v${latest.n} · ${esc(V14[lang].actions[latest.action] ?? latest.action)}${latest.note ? ` <span class="meta"><bdi>${esc(latest.note)}</bdi></span>` : ""}` : `<span class="meta">${esc(x.noVersion)}</span>`)}
       ${fact(x.size, esc(bytesLabel(lang, w.bytes)))}
       ${fact(x.sha, latest ? `<code class="ltr" title="${esc(latest.sha256)}">${esc(latest.sha256.slice(0, 16))}…</code>` : "—")}
-      ${fact(x.health, health)}
+      ${fact(x.health, `${health}${o.ops?.healthCell ? ` · ${healthCellHtml(lang, o.ops.healthCell)}` : ""}`)}
       ${fact(x.requests, esc(reqs))}
       ${fact(x.varNames, codeList(Object.keys(w.vars)) || `<span class="meta">${esc(x.none)}</span>`)}
       ${fact(x.secretNames, codeList(w.secrets, true) || `<span class="meta">${esc(x.none)}</span>`)}
@@ -607,7 +666,7 @@ export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): st
     config: c,
     kind: o.kind,
     active: "workers",
-    title: `${w.name} · ${x[tab as (typeof WORKER_TABS)[number]]} · ${t.product}`,
+    title: `${w.name} · ${isOpsTab(tab) ? OX[lang][tab] : x[tab as Exclude<(typeof WORKER_TABS)[number], OpsTab>]} · ${t.product}`,
     description: x.worker,
     path: `${o.base}${tab === "overview" ? "" : `?tab=${tab}`}`,
     body: detailBody(head, flashBox(lang, o.flash), tabs, body),
@@ -897,45 +956,6 @@ function workerSettingsTab(
     ${editable ? `<button class="button small" type="submit">${esc(k.saveSettings)}</button>` : ""}
   </form>`;
   const canChange = editable && !!w.version;
-  const varsText = Object.entries(w.vars)
-    .map(([n, val]) => `${n}=${val}`)
-    .join("\n");
-  const envForm = `<form method="post" action="${href(`${teamBase}/vars`)}" class="panel stack-form">
-    ${csrfField(o.csrf)}${backField(self)}
-    <h2 class="h3">${esc(x.envTitle)}</h2>
-    <p class="meta">${esc(x.envHelp)}</p>
-    <label for="wd-vars" class="sr-only">${esc(x.envTitle)}</label>
-    <textarea id="wd-vars" name="vars" rows="5" dir="ltr" spellcheck="false" class="code-input"${canChange ? "" : " disabled"}>${esc(varsText)}</textarea>
-    ${canChange ? `<button class="button small" type="submit" data-busy>${esc(x.saveEnv)}</button>` : editable ? `<p class="meta">${esc(x.needVersion)}</p>` : ""}
-  </form>`;
-  const secretItems = w.secrets
-    .map(
-      (n) =>
-        `<li><code class="ltr">${esc(n)}</code>${
-          canChange
-            ? postForm(
-                href(`${teamBase}/secrets`),
-                o.csrf,
-                `${backField(self)}<input type="hidden" name="secrets" value="${esc(n)}="><button class="button small ghost danger" type="submit" aria-label="${esc(`${x.removeSecret}: ${n}`)}">${icon("trash")}${esc(x.removeSecret)}</button>`,
-                { confirm: x.removeSecretConfirm(n) },
-              )
-            : ""
-        }</li>`,
-    )
-    .join("");
-  const secretsPanel = `<div class="panel stack-form">
-    <h2 class="h3">${icon("key")} ${esc(x.secretsTitle)}</h2>
-    ${w.secrets.length ? `<ul class="secret-list">${secretItems}</ul>` : `<p class="meta">${esc(x.none)}</p>`}
-    ${
-      canChange
-        ? `<form method="post" action="${href(`${teamBase}/secrets`)}" class="stack-form">${csrfField(o.csrf)}${backField(self)}
-    <p class="meta">${esc(x.secretsHelp)}</p>
-    <label for="wd-secrets" class="sr-only">${esc(x.secretsTitle)}</label>
-    <textarea id="wd-secrets" name="secrets" rows="3" dir="ltr" spellcheck="false" autocomplete="off" class="code-input" placeholder="API_KEY=…"></textarea>
-    <button class="button small" type="submit" data-busy>${esc(x.saveSecrets)}</button></form>`
-        : ""
-    }
-  </div>`;
   const off = w.status === "disabled";
   const lockedByAdmin = off && o.disabledBy === "admin" && !admin;
   const toggleAction = admin
@@ -1016,7 +1036,8 @@ function workerSettingsTab(
     <button class="button small" type="submit">${esc(ix.saveLinks)}</button>
   </form>`
     : "";
-  return `<div class="settings-grid">${keysForm}${envForm}${secretsPanel}${runtimeForm}${linksForm}</div>${danger}`;
+  const envLink = `<div class="panel stack-form"><h2 class="h3">${icon("key")} ${esc(OX[lang].env)}</h2><p class="meta">${esc(OX[lang].envHelp)}</p><p><a class="button small ghost" href="${esc(href(`${o.base}?tab=env`))}">${esc(OX[lang].env)}</a></p></div>`;
+  return `<div class="settings-grid">${keysForm}${envLink}${runtimeForm}${linksForm}</div>${danger}`;
 }
 
 // ---- rows shared by the list pages and the detail tabs --------------------------------------
@@ -1030,6 +1051,9 @@ export interface WorkerListRow extends WorkerRowView {
   requests7?: number | null;
   /** 0.15.1: type, stack, tools, repo, linked space. */
   insight?: InsightRow;
+  /** 0.15.2: health state + 7-day uptime, and the 24h request series (sparkline). */
+  health?: { state: HealthView["state"]; d7: number | null };
+  spark?: UsageSeries | null;
 }
 
 /** Rows of a Workers table (team list, admin list, admin team detail). */
@@ -1047,6 +1071,7 @@ export function workerRows(
     locked?: (w: WorkerListRow) => boolean;
   },
 ): { rows: DtRow[]; cols: Col[] } {
+  const withOps = list.some((r) => r.health !== undefined);
   const x = DX[lang];
   const ws = WS[lang];
   const href = (p: string) => localePath(lang, p);
@@ -1093,6 +1118,19 @@ export function workerRows(
       });
     const cells = [
       { html: workerStatusBadge(lang, r.status), v: r.status },
+      ...(withOps
+        ? [
+            {
+              html: healthCellHtml(lang, r.health),
+              v: `${r.health?.state ?? ""}${r.health?.d7 ?? ""}`,
+            },
+            {
+              html: sparkCellHtml(lang, r.spark ?? undefined),
+              v: r.spark?.total.requests ?? -1,
+              cls: "num",
+            },
+          ]
+        : []),
       ...(opts.showTeam
         ? [
             {
@@ -1145,6 +1183,7 @@ export function workerRows(
       actions: acts,
       filters: {
         status: r.status,
+        ...(r.health ? { health: r.health.state } : {}),
         ...(r.team ? { team: r.team.id } : {}),
         ...(r.insight
           ? { kind: r.insight.kind, lang: r.insight.language, repo: repoValue(r.insight) }
@@ -1154,6 +1193,12 @@ export function workerRows(
   });
   const cols: Col[] = [
     { label: x.status, sort: "text" },
+    ...(withOps
+      ? [
+          { label: OX[lang].health, sort: "text" as const },
+          { label: `${OX[lang].requests} · 24h`, sort: "num" as const },
+        ]
+      : []),
     ...(opts.showTeam ? [{ label: x.team, sort: "text" as const }] : []),
     ...(list.some((r) => r.insight)
       ? [
@@ -1179,6 +1224,28 @@ export function workerStatusFilter(lang: Lang, list: { status: string }[]) {
     options: [...new Set(list.map((r) => r.status))].map(
       (s) => [s, WS[lang].statuses[s] ?? s] as [string, string],
     ),
+  };
+}
+
+/** 0.15.2: filter by health state (up / down / not checked / off). */
+export function healthFilter(lang: Lang, list: object[]) {
+  const states = [
+    ...new Set(
+      list.map((r) => (r as { health?: { state: string } }).health?.state).filter(Boolean),
+    ),
+  ] as string[];
+  const lab = (st: string) =>
+    st === "up"
+      ? OX[lang].up
+      : st === "down"
+        ? OX[lang].down
+        : st === "off"
+          ? OX[lang].off
+          : OX[lang].unknown;
+  return {
+    key: "health",
+    label: OX[lang].health,
+    options: states.map((st) => [st, lab(st)] as [string, string]),
   };
 }
 
@@ -1565,6 +1632,7 @@ export function adminTeamHtml(lang: Lang, c: Config, o: AdminTeamOpts): string {
       empty: x.noWorkers,
       filters: [
         workerStatusFilter(lang, o.workers),
+        healthFilter(lang, o.workers),
         kindFilter(lang, o.workers),
         languageFilter(lang, o.workers),
         repoFilter(lang, o.workers),

@@ -12,4 +12,4 @@ export const PRODUCT_NAME = { en: "Marsa Spaces", ar: "مساحات مرسى" } 
 export const PLATFORM_URL = "https://marsaplatform.com";
 
 /** Released version (kept in step with package.json). */
-export const APP_VERSION = "0.15.1";
+export const APP_VERSION = "0.15.2";
