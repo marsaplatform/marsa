@@ -311,6 +311,14 @@ describe("0.17.0 BIC exception and permission light", () => {
     const { cf, a, put } = await setup();
     cf.configRuleset = { id: "rs_x", rules: [{ id: "other", ref: "someone", expression: "true" }] };
     await put("marsa", a.key, "web", { code: CODE }, "?health=0");
+    type Check = { id: string; state: string };
+    const light = async (force: boolean) => {
+      const p = await j(await t.admin("GET", `/workers/permissions${force ? "?refresh=1" : ""}`));
+      const all: Check[] = p.permissions.checks;
+      return all.find((c) => c.id === "config-rules")?.state;
+    };
+    // a successful read is not proof of Edit: grey until the rule is saved
+    expect(await light(false)).toBe("unchecked");
     const on = await t.admin("PUT", "/workers/bic", { enabled: true });
     expect(on.status).toBe(200);
     const mine = cf.configRuleset.rules.find((r) => r.ref === "marsa_spaces_bic_team_workers");
@@ -319,6 +327,7 @@ describe("0.17.0 BIC exception and permission light", () => {
     await put("marsa", a.key, "two", { code: CODE }, "?health=0");
     await new Promise((r) => setTimeout(r, 50));
     expect(JSON.stringify(cf.configRuleset.rules)).toContain(`marsa-two.${ZONE_NAME}`);
+    expect(await light(true)).toBe("granted");
     await t.admin("PUT", "/workers/bic", { enabled: false });
     expect(cf.configRuleset.rules.map((r) => r.id)).toEqual(["other"]);
   });

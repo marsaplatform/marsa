@@ -37,6 +37,8 @@ export interface WorkersPermInput {
   sampleScript: string | null;
   /** Last successful Spaces deploy (evidence that Workers Scripts: Edit works). */
   lastDeployAt: string | null;
+  /** 0.17.0: when the BIC config rule was last written successfully (edit proven), else null. */
+  bicConfirmedAt?: string | null;
   now: number;
 }
 
@@ -201,16 +203,26 @@ export async function checkWorkersToken(i: WorkersPermInput): Promise<PermReport
         ),
     mk("kv", "Account · Workers KV Storage: Edit", "kvbind", false, kv),
     mk("r2", "Account · Workers R2 Storage: Edit", "r2bind", false, r2),
-    hasZone
-      ? mk(
-          "config-rules",
-          CONFIG_RULES_PERMISSION,
-          "bic",
-          false,
-          cfgR,
-          "read OK; edit is not probed (nothing is changed). The BIC exception stays off until the admin turns it on.",
-        )
-      : mk("config-rules", CONFIG_RULES_PERMISSION, "bic", false, null, "no zone configured"),
+    // Edit can only be proven by a write, which this checklist never does: a successful read stays
+    // grey ("unchecked") until the admin turns the exception on and Cloudflare accepts the rule.
+    !hasZone
+      ? mk("config-rules", CONFIG_RULES_PERMISSION, "bic", false, null, "no zone configured")
+      : i.bicConfirmedAt
+        ? mk(
+            "config-rules",
+            CONFIG_RULES_PERMISSION,
+            "bic",
+            false,
+            cfgR,
+            `edit confirmed: the BIC exception rule was saved (${i.bicConfirmedAt})`,
+          )
+        : cfgR && !cfgR.ok
+          ? mk("config-rules", CONFIG_RULES_PERMISSION, "bic", false, cfgR)
+          : {
+              ...mk("config-rules", CONFIG_RULES_PERMISSION, "bic", false, null),
+              status: cfgR?.status ?? null,
+              note: "rules read OK; Edit is not probed (that would change the zone). It is confirmed only when the admin turns the BIC exception on.",
+            },
   ];
   return summary("workers", checks, i.now);
 }
