@@ -5,7 +5,15 @@ import { PLATFORM_URL } from "./brand.js";
 import type { Config, Operator } from "./config.js";
 import { hashIndex, initialOf } from "./cover.js";
 import type { DocPage } from "./docs.js";
-import { bytesLabel, hoursLabel, type Lang, type LimitValues, STRINGS } from "./i18n.js";
+import {
+  actorText,
+  bytesLabel,
+  detailText,
+  hoursLabel,
+  type Lang,
+  type LimitValues,
+  STRINGS,
+} from "./i18n.js";
 import type { MemberRole } from "./members.js";
 import { currentNavAccount } from "./nav-state.js";
 import { type Notice, noticeText, noticeTone, type WebhookView } from "./notify.js";
@@ -797,7 +805,7 @@ export function auditTable(
           : withSite && e.site === null
             ? ""
             : "";
-      return `<tr><td data-label="${esc(t.members.when)}">${timeTag(lang, e.at)}</td>${td(t.members.who, `<bdi>${esc(e.kind === "member" ? e.who : (t.members.actorLabels[e.who] ?? e.who))}</bdi> <span class="badge muted">${esc(t.members.actorKinds[e.kind])}</span>`)}${td(t.members.what, `${esc(what)}${e.detail ? ` <span class="meta">${/^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(e.detail) ? timeTag(lang, e.detail) : `<bdi>${esc(e.detail)}</bdi>`}</span>` : ""}${site}`)}</tr>`;
+      return `<tr><td data-label="${esc(t.members.when)}">${timeTag(lang, e.at)}</td>${td(t.members.who, `<bdi>${esc(e.kind === "member" ? e.who : actorText(lang, e.who))}</bdi> <span class="badge muted">${esc(t.members.actorKinds[e.kind])}</span>`)}${td(t.members.what, `${esc(what)}${e.detail ? ` <span class="meta">${/^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(e.detail) ? timeTag(lang, e.detail) : `<bdi>${esc(detailText(lang, e.detail))}</bdi>`}</span>` : ""}${site}`)}</tr>`;
     })
     .join("");
   return `<div class="table-wrap"><table class="data stack audit-table" aria-labelledby="${labelId}"><thead><tr><th scope="col">${esc(t.members.when)}</th><th scope="col">${esc(t.members.who)}</th><th scope="col">${esc(t.members.what)}</th></tr></thead><tbody>${body}</tbody></table></div>`;
@@ -2592,7 +2600,7 @@ export function adminActivityHtml(
       const what =
         t.members.actions[e.action] ??
         (e.action.startsWith("mcp:") ? `MCP · ${e.action.slice(4)}` : e.action);
-      const who = e.kind === "member" ? e.who : (t.members.actorLabels[e.who] ?? e.who);
+      const who = e.kind === "member" ? e.who : actorText(lang, e.who);
       const target = e.site
         ? href(`/admin/sites/${e.site.id}`)
         : e.team
@@ -2615,7 +2623,7 @@ export function adminActivityHtml(
             v: who.toLowerCase(),
           },
           {
-            html: `${esc(what)}${e.detail ? ` <span class="meta"><bdi>${esc(e.detail)}</bdi></span>` : ""}${e.site ? ` · <a class="text-link" href="${href(`/admin/sites/${e.site.id}`)}"><bdi>${esc(e.site.title)}</bdi></a>` : ""}`,
+            html: `${esc(what)}${e.detail ? ` <span class="meta"><bdi>${esc(detailText(lang, e.detail))}</bdi></span>` : ""}${e.site ? ` · <a class="text-link" href="${href(`/admin/sites/${e.site.id}`)}"><bdi>${esc(e.site.title)}</bdi></a>` : ""}`,
           },
         ],
         filters: { kind: e.kind },
@@ -3120,12 +3128,12 @@ export function activityFeed(lang: Lang, rows: AuditView[], withSite = true): st
       const what =
         t.members.actions[e.action] ??
         (e.action.startsWith("mcp:") ? `MCP · ${e.action.slice(4)}` : e.action);
-      const who = e.kind === "member" ? e.who : (t.members.actorLabels[e.who] ?? e.who);
+      const who = e.kind === "member" ? e.who : actorText(lang, e.who);
       const site =
         withSite && e.site
           ? ` · <a class="text-link" href="${localePath(lang, `/team/sites/${e.site.id}`)}"><bdi>${esc(e.site.title)}</bdi></a>`
           : "";
-      return `<li><span class="feed-dot k-${esc(e.kind)}" aria-hidden="true"></span><div><p><strong><bdi>${esc(who)}</bdi></strong> ${esc(what)}${e.detail && !/^\d{4}-\d\d-\d\dT/.test(e.detail) ? ` <span class="meta"><bdi>${esc(e.detail)}</bdi></span>` : ""}${site}</p>${timeTag(lang, e.at)}</div></li>`;
+      return `<li><span class="feed-dot k-${esc(e.kind)}" aria-hidden="true"></span><div><p><strong><bdi>${esc(who)}</bdi></strong> ${esc(what)}${e.detail && !/^\d{4}-\d\d-\d\dT/.test(e.detail) ? ` <span class="meta"><bdi>${esc(detailText(lang, e.detail))}</bdi></span>` : ""}${site}</p>${timeTag(lang, e.at)}</div></li>`;
     })
     .join("")}</ol>`;
 }

@@ -4,7 +4,7 @@
  * checklists on the admin Cloudflare settings page. AR + EN.
  */
 import type { PermCheck, PermReport } from "./cf-permissions.js";
-import type { Lang } from "./i18n.js";
+import { actorText, type Lang } from "./i18n.js";
 import { csrfField, esc, icon, postForm, timeTag } from "./ui.js";
 import { badge, type DtRow, dataTable, relTime } from "./ui-table.js";
 import type { LogsResult, UsageRange, UsageSeries } from "./worker-analytics.js";
@@ -138,6 +138,9 @@ export const OX = {
     unlocks: "Unlocks",
     result: "Result",
     recheck: "Recheck",
+    tokenActive: "Token is active",
+    editConfirmed: "Edit confirmed by a successful deploy",
+    editPending: "Read OK; edit is confirmed by the first deploy",
     checked: "checked",
     checking: "Checking the token now. Reload in a few seconds to see the result.",
     granted: "Granted",
@@ -287,6 +290,9 @@ export const OX = {
     unlocks: "ما تتيحه",
     result: "النتيجة",
     recheck: "إعادة الفحص",
+    tokenActive: "الرمز فعّال",
+    editConfirmed: "تأكّدت صلاحية التعديل بنشر ناجح",
+    editPending: "القراءة تعمل؛ تتأكد صلاحية التعديل مع أول نشر",
     checked: "آخر فحص",
     checking: "يجري فحص المفتاح الآن. أعد تحميل الصفحة بعد ثوانٍ لترى النتيجة.",
     granted: "ممنوحة",
@@ -489,7 +495,7 @@ export function envTab(o: OpsTabCtx, v: EnvView): string {
         },
         {
           html: e.updatedAt
-            ? `${relTime(e.updatedAt, lang)}${e.updatedBy ? ` <span class="meta"><bdi>${esc(e.updatedBy)}</bdi></span>` : ""}`
+            ? `${relTime(e.updatedAt, lang)}${e.updatedBy ? ` <span class="meta"><bdi>${esc(actorText(lang, e.updatedBy))}</bdi></span>` : ""}`
             : "—",
           v: e.updatedAt ?? "",
         },
@@ -740,6 +746,17 @@ function light(c: PermCheck): string {
   return `<span class="light ${cls}" aria-hidden="true"></span>`;
 }
 
+/** 0.16.0: our own notes are translated; Cloudflare's messages stay as they are (LTR). */
+function permNote(lang: Lang, note: string): string {
+  const x = OX[lang];
+  const m = /^edit confirmed by a successful deploy \((.+)\)$/.exec(note);
+  if (m)
+    return `<p class="meta perm-note">${esc(x.editConfirmed)} · ${timeTag(lang, m[1] as string)}</p>`;
+  if (note === "read OK; edit is confirmed by the first deploy")
+    return `<p class="meta perm-note">${esc(x.editPending)}</p>`;
+  return `<p class="meta perm-note" dir="ltr">${esc(note)}</p>`;
+}
+
 export function permsPanel(
   lang: Lang,
   title: string,
@@ -759,7 +776,7 @@ export function permsPanel(
     .map((c) => {
       const stateLabel =
         c.state === "granted" ? x.granted : c.state === "missing" ? x.missing : x.unchecked;
-      return `<li class="perm-row perm-${c.state}${c.required ? "" : " perm-optional"}" data-perm="${esc(c.id)}">${light(c)}<div class="perm-body"><p><strong>${esc(c.permission)}</strong>${c.required ? "" : ` <span class="badge muted">${esc(x.optional)}</span>`} <span class="meta">— ${esc(stateLabel)}</span></p><p class="meta">${esc(x.unlocks)}: ${esc(x.feat[c.unlocks] ?? c.unlocks)}</p>${c.note ? `<p class="meta perm-note" dir="ltr">${esc(c.note)}</p>` : ""}</div></li>`;
+      return `<li class="perm-row perm-${c.state}${c.required ? "" : " perm-optional"}" data-perm="${esc(c.id)}">${light(c)}<div class="perm-body"><p><strong${c.id === "token" ? "" : ' dir="ltr"'}>${esc(c.id === "token" ? x.tokenActive : c.permission)}</strong>${c.required ? "" : ` <span class="badge muted">${esc(x.optional)}</span>`} <span class="meta">— ${esc(stateLabel)}</span></p><p class="meta">${esc(x.unlocks)}: ${esc(x.feat[c.unlocks] ?? c.unlocks)}</p>${c.note ? permNote(lang, c.note) : ""}</div></li>`;
     })
     .join("");
   return `<section class="panel perms"><div class="detail-head slim"><h2 class="h3">${esc(title)}</h2>${postForm(recheck, csrf, `${back(self)}<button class="button small ghost" type="submit" data-busy>${icon("redeploy")}${esc(x.recheck)}</button>`)}</div>

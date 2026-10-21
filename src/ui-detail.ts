@@ -1,6 +1,6 @@
 import type { AgentKeyView } from "./agent-keys.js";
 import type { Config } from "./config.js";
-import { bytesLabel, type Lang, STRINGS } from "./i18n.js";
+import { actorText, bytesLabel, detailText, type Lang, STRINGS } from "./i18n.js";
 import type { MemberRole } from "./members.js";
 import {
   ADMIN_CTX,
@@ -427,7 +427,7 @@ const _arHasAll: typeof DX.en = DX.ar;
 void _arHasAll;
 
 const num = (lang: Lang, n: number) => n.toLocaleString(lang === "ar" ? "ar-EG" : "en-US");
-const actorName = (lang: Lang, who: string) => STRINGS[lang].members.actorLabels[who] ?? who;
+const actorName = (lang: Lang, who: string) => actorText(lang, who);
 const backField = (path: string) => `<input type="hidden" name="back" value="${esc(path)}">`;
 const codeList = (names: string[], lock = false) =>
   names.length
@@ -635,7 +635,7 @@ export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): st
       `<div><dt>${esc(label)}</dt><dd>${html}</dd></div>`;
     body = `<dl class="facts-grid">
       ${fact(x.lastDeploy, w.deployedAt ? `${timeTag(lang, w.deployedAt)} <span class="meta">${esc(x.by)} <bdi>${esc(actorName(lang, w.deployedBy))}</bdi></span>` : "—")}
-      ${fact(x.version, latest ? `v${latest.n} · ${esc(V14[lang].actions[latest.action] ?? latest.action)}${latest.note ? ` <span class="meta"><bdi>${esc(latest.note)}</bdi></span>` : ""}` : `<span class="meta">${esc(x.noVersion)}</span>`)}
+      ${fact(x.version, latest ? `v${latest.n} · ${esc(V14[lang].actions[latest.action] ?? latest.action)}${latest.note ? ` <span class="meta"><bdi>${esc(detailText(lang, latest.note))}</bdi></span>` : ""}` : `<span class="meta">${esc(x.noVersion)}</span>`)}
       ${fact(x.size, esc(bytesLabel(lang, w.bytes)))}
       ${fact(x.sha, latest ? `<code class="ltr" title="${esc(latest.sha256)}">${esc(latest.sha256.slice(0, 16))}…</code>` : "—")}
       ${fact(x.health, `${health}${o.ops?.healthCell ? ` · ${healthCellHtml(lang, o.ops.healthCell)}` : ""}`)}
@@ -717,7 +717,7 @@ function workerVersionsTab(
         { html: relTime(vv.at, lang), v: vv.at },
         { html: `<bdi>${esc(actorName(lang, vv.by))}</bdi>`, v: vv.by.toLowerCase() },
         {
-          html: `${esc(v.actions[vv.action] ?? vv.action)}${vv.from ? ` <span class="meta">${esc(v.rolledFrom(vv.from))}</span>` : ""}${vv.note ? `<div class="meta"><bdi>${esc(vv.note)}</bdi></div>` : ""}`,
+          html: `${esc(v.actions[vv.action] ?? vv.action)}${vv.from ? ` <span class="meta">${esc(v.rolledFrom(vv.from))}</span>` : ""}${vv.note ? `<div class="meta"><bdi>${esc(detailText(lang, vv.note))}</bdi></div>` : ""}`,
         },
         { html: esc(bytesLabel(lang, vv.bytes)), v: vv.bytes, cls: "num" },
         {
@@ -887,7 +887,7 @@ function insightFacts(
                 .map((n) => `<li><code class="ltr">${esc(n)}</code></li>`)
                 .join("")}</ul>`
             : ""
-        }${i.probeNote ? `<div class="meta">${esc(i.probeNote)}</div>` : ""}${i.probeAt ? `<div class="meta">${esc(ix.probeAt)} ${relTime(i.probeAt, lang)}</div>` : ""}`
+        }${i.probeNote ? `<div class="meta">${esc(ix.probeNotes[i.probeNote] ?? i.probeNote)}</div>` : ""}${i.probeAt ? `<div class="meta">${esc(ix.probeAt)} ${relTime(i.probeAt, lang)}</div>` : ""}`
       : `<span class="meta">—</span>`;
   return [
     fact(ix.type, kindBadge(lang, i)),
@@ -1939,7 +1939,7 @@ function siteFilesTab(lang: Lang, o: SiteDetailOpts): string {
     caption: x.files,
     headLabel: x.path,
     cols: [
-      { label: "Type", srOnly: true },
+      { label: IX[lang].type, srOnly: true },
       { label: x.size, sort: "num" },
     ],
     rows,

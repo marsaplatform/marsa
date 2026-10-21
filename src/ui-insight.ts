@@ -57,6 +57,11 @@ export const IX = {
     tools: "MCP tools",
     toolsUnknown: "—",
     ownAuth: "Own auth (401)",
+    probeNotes: {
+      protected: "Asks for its own key (401/403)",
+      timeout: "No answer (timeout)",
+      error: "Error",
+    } as Record<string, string>,
     endpoint: "MCP endpoint",
     protected: "Spaces keys",
     yes: "Yes",
@@ -122,6 +127,11 @@ export const IX = {
     tools: "أدوات MCP",
     toolsUnknown: "—",
     ownAuth: "مصادقة خاصة (401)",
+    probeNotes: {
+      protected: "يطلب مفتاحه الخاص (401/403)",
+      timeout: "لا رد (انتهت المهلة)",
+      error: "خطأ",
+    } as Record<string, string>,
     endpoint: "عنوان MCP",
     protected: "مفاتيح مساحات",
     yes: "نعم",

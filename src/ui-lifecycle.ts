@@ -190,7 +190,7 @@ export function backupsSection(lang: Lang, s: BackupStatus, csrf: string, back: 
     "docker compose stop marsa\nmv /var/lib/marsa-data/tmp/restore /var/lib/marsa-data.restored\nmv /var/lib/marsa-data /var/lib/marsa-data.old && mv /var/lib/marsa-data.restored /var/lib/marsa-data\ndocker compose start marsa",
   ];
   const where = !s.enabled
-    ? `${badge(x.off, "warn")}${s.reason ? ` <span class="meta">${esc(s.reason)}</span>` : ""}`
+    ? `${badge(x.off, "warn")}${s.reason ? ` <span class="meta">${esc(lang === "ar" ? (AR_BACKUP_REASONS[s.reason] ?? s.reason) : s.reason)}</span>` : ""}`
     : `${badge(s.offsite ? x.offsite : x.local, s.offsite ? "on" : "warn")} <code class="ltr">${esc((s.where ?? "").replace(/^(R2 bucket|directory) /, ""))}</code>`;
   return `<section class="card-block" id="backups" aria-labelledby="bk-title">
   <h2 id="bk-title" class="h3">${icon("download")} ${esc(x.backups)}</h2>
@@ -276,6 +276,13 @@ export function teamDeleteRows(
       <button class="button small danger" type="submit">${icon("trash")}${esc(x.deleteTeam)}</button></form>`,
   )}`;
 }
+
+const AR_BACKUP_REASONS: Record<string, string> = {
+  "set BACKUP_KEY or MARSA_SECRETS_KEY (32+ characters)":
+    "اضبط BACKUP_KEY أو MARSA_SECRETS_KEY (٣٢ حرفًا أو أكثر)",
+  "no backup store: configure the R2 backend or BACKUP_DIR":
+    "لا يوجد مكان للنسخ الاحتياطية: اضبط تخزين R2 أو BACKUP_DIR",
+};
 
 /** Team Settings (owners): download everything the team has on Spaces. */
 export function teamExportSection(lang: Lang, action: string): string {

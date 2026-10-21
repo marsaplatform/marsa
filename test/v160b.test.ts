@@ -11,8 +11,11 @@ afterEach(async () => {
 });
 
 const count = async (app: App, team: string) =>
-  ((await (await app.admin("GET", `/activity?team=${team}&limit=5000`)).json()) as { count: number })
-    .count;
+  (
+    (await (await app.admin("GET", `/activity?team=${team}&limit=5000`)).json()) as {
+      count: number;
+    }
+  ).count;
 
 describe("0.16.0 activity API and downloads", () => {
   it("lets the team key read and download its log; agent keys get 403", async () => {
@@ -24,7 +27,10 @@ describe("0.16.0 activity API and downloads", () => {
     await t.publish(team.key, "<title>=cmd()</title>");
     const r = await t.api("GET", `/api/teams/${id}/activity`, undefined, tk);
     expect(r.status).toBe(200);
-    const j = (await r.json()) as { entries: { action: string; memberId?: string }[]; count: number };
+    const j = (await r.json()) as {
+      entries: { action: string; memberId?: string }[];
+      count: number;
+    };
     expect(j.count).toBeGreaterThanOrEqual(2);
     expect(j.entries.every((e) => e.memberId === undefined)).toBe(true);
     const only = await (
@@ -128,7 +134,12 @@ describe("0.16.0 every admin mutation writes an audit entry", () => {
     const cases: [string, () => Response | Promise<Response>, string, number][] = [
       ["team-create", () => app.admin("POST", "/teams", { name: "Second" }), "platform", 201],
       ["team-update", () => app.admin("PATCH", `/teams/${id}`, { maxSites: 9 }), id, 200],
-      ["invite-revoke", () => app.admin("DELETE", `/teams/${id}/invites/${invite.invite.id}`), id, 204],
+      [
+        "invite-revoke",
+        () => app.admin("DELETE", `/teams/${id}/invites/${invite.invite.id}`),
+        id,
+        204,
+      ],
       ["permanent", () => app.admin("PATCH", `/sites/${pub.id}`, { permanent: true }), id, 200],
       ["delete", () => app.admin("DELETE", `/sites/${pub.id}`), id, 204],
       ["sweep", () => app.admin("POST", "/sweep"), "platform", 200],
@@ -221,7 +232,9 @@ describe("0.16.0 health checks treat 4xx by Worker type and honour a declared ta
     status["https://mcp1.test"] = 401;
     expect((await m.checkOne(rec("mcp1"))).ok).toBe(1);
     status["https://web2.test/health"] = 204;
-    expect((await m.checkOne(rec("web2", { healthPath: "/health", healthExpect: "2xx" }))).ok).toBe(1);
+    expect((await m.checkOne(rec("web2", { healthPath: "/health", healthExpect: "2xx" }))).ok).toBe(
+      1,
+    );
     expect(hits).toContain("https://web2.test/health");
     status["https://web3.test"] = 404;
     expect((await m.checkOne(rec("web3", { healthExpect: "200,404" }))).ok).toBe(1);

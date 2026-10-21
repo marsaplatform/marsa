@@ -17,7 +17,7 @@ import type { PermReport } from "./cf-permissions.js";
 import { clientIp } from "./client-ip.js";
 import type { Config } from "./config.js";
 import { UploadError } from "./errors.js";
-import { type Lang, STRINGS } from "./i18n.js";
+import { actorText, type Lang, STRINGS } from "./i18n.js";
 import type { UploadEntry } from "./ingest.js";
 import { addMcpToken, cleanTokenName, MAX_MCP_TOKENS } from "./mcp.js";
 import {
@@ -137,7 +137,7 @@ function matchesAudit(e: AuditView, q: string, lang: Lang): boolean {
   const t = STRINGS[lang].members;
   return [
     e.who,
-    t.actorLabels[e.who] ?? "",
+    actorText(lang, e.who),
     e.action,
     t.actions[e.action] ?? "",
     e.detail ?? "",
