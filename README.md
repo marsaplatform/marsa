@@ -24,8 +24,6 @@
 </p>
 
 **Marsa is the harbor where your AI agent's work lands.**
-
-**Marsa is the harbor where your AI agent's work lands.**
 Turn any static page, HTML report or prototype into a shareable link in seconds, with no account.
 
 *Marsa* (مَرسى) is Arabic for "harbor". Upload a folder, some files or a `.zip` from the browser,
