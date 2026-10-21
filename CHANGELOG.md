@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.13.1] - 2026-10-21
+
+### Fixed
+- When the data/files store fails (for example Cloudflare answers `401 Authentication error`
+  because the server's API token lost its *Workers KV Storage* permission), the KV and files API
+  now answer `503 BACKEND_UNAVAILABLE` with `Retry-After: 60` instead of a generic
+  `500 INTERNAL`, so agents can tell a store outage from a bad request.
+
+### Added
+- `GET /api/admin/backend/check`: a live check of the KV and file stores with the reason when one
+  fails (never includes credentials). The admin **Settings** page shows the same check.
+- The server checks both stores at start and logs a clear `[backend] … FAILED` line.
+
 ## [0.13.0] - 2026-10-21
 
 ### Changed

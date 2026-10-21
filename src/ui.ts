@@ -2535,6 +2535,11 @@ export interface AdminSettingsOpts {
     teamMb: number;
     workersMax: number;
     workerKb: number;
+    health?: {
+      kind: string;
+      kv: { ok: boolean; error?: string };
+      files: { ok: boolean; error?: string };
+    } | null;
   };
   csrf: string;
   flash?: Flash | null;
@@ -2556,6 +2561,16 @@ export function adminSettingsHtml(lang: Lang, c: Config, o: AdminSettingsOpts): 
       <div><dt>${esc(d.version)}</dt><dd><code class="ltr">${esc(sv.version)}</code></dd></div>
       <div class="fact-wide"><dt>${esc(d.publicUrl)}</dt><dd><a class="text-link" href="${esc(sv.publicUrl)}" dir="ltr">${esc(hostless(sv.publicUrl))}</a></dd></div>
       <div><dt>${esc(d.backendSrv)}</dt><dd>${yes(sv.backend, d.on, d.off)}</dd></div>
+      ${
+        sv.health
+          ? (["kv", "files"] as const)
+              .map((k) => {
+                const h = sv.health?.[k];
+                return `<div class="fact-wide"><dt>${esc(k === "kv" ? d.healthKv : d.healthFiles)}</dt><dd>${yes(!!h?.ok, d.healthOk, d.healthFail)}${h?.error ? ` <span class="meta">${esc(h.error)}</span>` : ""}</dd></div>`;
+              })
+              .join("")
+          : ""
+      }
       <div><dt>${esc(d.secretsKey)}</dt><dd>${yes(sv.secretsKey)}</dd></div>
       <div class="fact-wide"><dt>${esc(d.sessions)}</dt><dd>${esc(sv.sessionKey ? d.sessionsPersistent : d.sessionsEphemeral)}</dd></div>
       <div><dt>${esc(d.limits)}</dt><dd>${esc(`${fmt(lang, sv.maxUploadMb)} MB`)}</dd></div>
@@ -2728,6 +2743,10 @@ export const DS = {
     version: "Version",
     publicUrl: "Public URL",
     backendSrv: "Data/files backend",
+    healthKv: "KV store (live check)",
+    healthFiles: "File store (live check)",
+    healthOk: "Working",
+    healthFail: "Failing",
     secretsKey: "Secrets key (MARSA_SECRETS_KEY)",
     sessions: "Session key",
     sessionsPersistent: "Set (sessions survive restarts)",
@@ -2841,6 +2860,10 @@ export const DS = {
     version: "الإصدار",
     publicUrl: "العنوان العام",
     backendSrv: "خدمة البيانات والملفات",
+    healthKv: "مخزن KV (فحص مباشر)",
+    healthFiles: "مخزن الملفات (فحص مباشر)",
+    healthOk: "يعمل",
+    healthFail: "معطّل",
     secretsKey: "مفتاح التشفير (MARSA_SECRETS_KEY)",
     sessions: "مفتاح الجلسات",
     sessionsPersistent: "مضبوط (الجلسات تبقى بعد إعادة التشغيل)",

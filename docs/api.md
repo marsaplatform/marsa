@@ -88,6 +88,7 @@ A wrong token and a missing site both return `404` on purpose, so ids can't be p
 
 | Call | Result |
 | --- | --- |
+| `GET /api/admin/backend/check` | Live check of the KV and file stores (`{enabled, kind, kv:{ok,status?,error?}, files:{…}}`) |
 | `GET /api/admin/sites` | All sites with sizes and expiry (no tokens) |
 | `DELETE /api/admin/sites/:id` | Remove any site |
 | `POST /api/admin/sweep` | Delete expired sites now |
@@ -124,4 +125,5 @@ see [Teams](teams.md).
 | `INVALID_TEAM_KEY` | 401 | Unknown or rotated team key on upload |
 | `BACKEND_NOT_ALLOWED` | 403 | The site isn't in a team with backend access |
 | `BACKEND_NOT_CONFIGURED` | 503 | Allowed, but the instance has no data/files backend configured |
+| `BACKEND_UNAVAILABLE` | 503 | The data/files store failed (e.g. its credentials were rejected); retry later (`Retry-After`) or tell the admin |
 | `RATE_LIMITED` | 429 | Slow down; see the `Retry-After` header |
