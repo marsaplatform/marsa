@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { SiteBackend } from "./backend/types.js";
+import { APP_VERSION } from "./brand.js";
 import { clientIp } from "./client-ip.js";
 import type { Config } from "./config.js";
 import { UploadError } from "./errors.js";
@@ -30,7 +31,10 @@ import { cleanTeamName, type Team, type TeamPatch, type TeamStore } from "./team
 import { safeEqual } from "./tokens.js";
 import {
   type AdminSiteRow,
+  type AdminStats,
   type AuditView,
+  adminActivityHtml,
+  adminSettingsHtml,
   adminSitesHtml,
   adminTeamsHtml,
   adminWorkersHtml,
@@ -41,8 +45,11 @@ import {
   membersHtml,
   messageHtml,
   type TeamSiteRow,
+  teamActivityHtml,
   teamHtml,
+  teamSettingsHtml,
   teamSiteHtml,
+  teamSitesHtml,
   teamWorkersHtml,
   WS,
 } from "./ui.js";
@@ -54,6 +61,25 @@ import {
   readTeamWorkers,
   teamWorkersInfo,
 } from "./workers-routes.js";
+
+const ACTIVITY_KINDS = ["member", "key", "api", "mcp", "admin"] as const;
+/** A valid actor-kind filter from a query string, or "" for all. */
+const activityKind = (raw: string | undefined): string =>
+  (ACTIVITY_KINDS as readonly string[]).includes(raw ?? "") ? (raw as string) : "";
+/** Free-text match on an activity entry (who, what, detail, site), case-insensitive. */
+function matchesAudit(e: AuditView, q: string, lang: Lang): boolean {
+  if (!q) return true;
+  const n = q.toLowerCase();
+  const t = STRINGS[lang].members;
+  return [
+    e.who,
+    t.actorLabels[e.who] ?? "",
+    e.action,
+    t.actions[e.action] ?? "",
+    e.detail ?? "",
+    e.site?.title ?? "",
+  ].some((x) => x.toLowerCase().includes(n));
+}
 
 export interface WebDeps {
   config: Config;
@@ -411,15 +437,36 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       throw err;
     };
 
-    app.get(`${prefix}/team`, async (c) => {
-      const ts = needTeam(c);
-      if (ts instanceof Response) return ts;
-      const { s, team } = ts;
+    const teamSites = async (team: Team) => {
       const sites = (await store.list())
         .filter((m) => m.teamId === team.id && live(m))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .map((m) => teamRow(m, team));
       await withVisits(sites);
+      return sites;
+    };
+    const siteTitles = async (team: Team) =>
+      new Map(
+        (await store.list())
+          .filter((m) => m.teamId === team.id)
+          .map((m) => [m.id, m.title || m.id]),
+      );
+    const workersSummary = (team: Team) => {
+      const enabled = d.workers.enabledFor(team);
+      return {
+        enabled,
+        count: d.workers.list(team.id).length,
+        max: d.workers.quotaOf(team).workers,
+        kb: d.workers.quotaOf(team).kb,
+      };
+    };
+
+    app.get(`${prefix}/team`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const sites = await teamSites(team);
+      const titles = new Map(sites.map((x) => [x.id, x.title]));
       return page(
         c,
         teamHtml(lang, config, {
@@ -427,6 +474,78 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           me: meOf(ts),
           backendConfigured: !!backend,
           sites,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+          overview: {
+            audit: members.entries(team.id, undefined, 8).map((e) => auditView(e, titles)),
+            members: members.count(team.id),
+            invites: members.listInvites(team.id).length,
+            workers: workersSummary(team),
+          },
+        }),
+      );
+    });
+
+    app.get(`${prefix}/team/sites`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      return page(
+        c,
+        teamSitesHtml(lang, config, {
+          ...(await teamInfo(team)),
+          me: meOf(ts),
+          backendConfigured: !!backend,
+          sites: await teamSites(team),
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+
+    app.get(`${prefix}/team/activity`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const kind = activityKind(c.req.query("kind"));
+      const q = (c.req.query("q") ?? "").trim().slice(0, 80);
+      const titles = await siteTitles(team);
+      const audit = members
+        .entries(team.id, undefined, 1000)
+        .map((e) => auditView(e, titles))
+        .filter((e) => (!kind || e.kind === kind) && matchesAudit(e, q, lang))
+        .slice(0, 300);
+      return page(
+        c,
+        teamActivityHtml(lang, config, {
+          ...(await teamInfo(team)),
+          me: meOf(ts),
+          backendConfigured: !!backend,
+          sites: [],
+          audit,
+          kind,
+          q,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+
+    app.get(`${prefix}/team/settings`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      return page(
+        c,
+        teamSettingsHtml(lang, config, {
+          ...(await teamInfo(team)),
+          me: meOf(ts),
+          backendConfigured: !!backend,
+          sites: [],
+          meId: ts.member?.id ?? null,
+          keyPrefix: team.keyPrefix,
+          slug: team.slug ?? null,
+          workers: workersSummary(team),
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
         }),
@@ -812,25 +931,26 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     const pwError = (p: ReturnType<typeof passwordProblem>) =>
       p === "short" ? t.members.short : p === "long" ? t.members.long : t.members.same;
 
+    const settingsBack = href("/team/settings");
     teamPost(
       "/team/account/password",
       async (c, { s, team, member, form, actor }) => {
-        if (!member) return done(c, s, membersBack, { kind: "err", text: t.members.keyAccount });
+        if (!member) return done(c, s, settingsBack, { kind: "err", text: t.members.keyAccount });
         if (!(await verifyPassword(field(form, "current"), member.passwordHash))) {
-          return done(c, s, membersBack, { kind: "err", text: t.members.wrongPassword });
+          return done(c, s, settingsBack, { kind: "err", text: t.members.wrongPassword });
         }
         const pw = field(form, "password");
         const problem = passwordProblem(pw, member.username);
-        if (problem) return done(c, s, membersBack, { kind: "err", text: pwError(problem) });
+        if (problem) return done(c, s, settingsBack, { kind: "err", text: pwError(problem) });
         if (pw !== field(form, "confirm")) {
-          return done(c, s, membersBack, { kind: "err", text: t.members.mismatch });
+          return done(c, s, settingsBack, { kind: "err", text: t.members.mismatch });
         }
         const fresh = await members.setPassword(member.id, pw);
-        if (!fresh) return done(c, s, membersBack, { kind: "err", text: t.notFound });
+        if (!fresh) return done(c, s, settingsBack, { kind: "err", text: t.notFound });
         // Keep this browser signed in; every other session of the member ends.
         const ns = sessions.start(c, "team", memberFp(fresh), team.id, fresh.id);
         await d.audit({ teamId: team.id, actor, action: "password" });
-        return done(c, ns, membersBack, { kind: "ok", text: t.members.passwordChanged });
+        return done(c, ns, settingsBack, { kind: "ok", text: t.members.passwordChanged });
       },
       "viewer",
     );
@@ -838,11 +958,11 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     teamPost(
       "/team/account/signout-all",
       async (c, { s, team, member }) => {
-        if (!member) return done(c, s, membersBack, { kind: "err", text: t.members.keyAccount });
+        if (!member) return done(c, s, settingsBack, { kind: "err", text: t.members.keyAccount });
         const fresh = await members.endSessions(member.id);
-        if (!fresh) return done(c, s, membersBack, { kind: "err", text: t.notFound });
+        if (!fresh) return done(c, s, settingsBack, { kind: "err", text: t.notFound });
         const ns = sessions.start(c, "team", memberFp(fresh), team.id, fresh.id);
-        return done(c, ns, membersBack, { kind: "ok", text: t.members.signedOutAll });
+        return done(c, ns, settingsBack, { kind: "ok", text: t.members.signedOutAll });
       },
       "viewer",
     );
@@ -863,6 +983,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           me: meOf(ts),
           info,
           zone: d.workers.settingsView().zoneName,
+          redeploy: (c.req.query("redeploy") ?? "").slice(0, 30),
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
         }),
@@ -1063,9 +1184,27 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       const s = needAdmin(c);
       if (s instanceof Response) return s;
       const counts = await d.siteCounts();
+      const liveSites = (await store.list()).filter((m) => live(m));
+      const vrows = liveSites.map((m) => ({ id: m.id }) as { id: string; visits?: VisitSummary });
+      await withVisits(vrows);
+      const counting = vrows.some((x) => x.visits);
+      const cf = d.workers.settingsView();
+      const stats: AdminStats = {
+        sites: liveSites.length,
+        bytes: liveSites.reduce((n, m) => n + m.totalBytes, 0),
+        guests: liveSites.filter((m) => !teams.get(m.teamId)).length,
+        permanent: liveSites.filter((m) => m.permanent).length,
+        views30: counting ? vrows.reduce((n, x) => n + (x.visits?.views30 ?? 0), 0) : null,
+        views7: counting ? vrows.reduce((n, x) => n + (x.visits?.views7 ?? 0), 0) : null,
+        workers: d.workers.list().length,
+        workersTeams: teams.list().filter((x) => x.workers).length,
+        members: teams.list().reduce((n, x) => n + members.count(x.id), 0),
+      };
       return page(
         c,
         adminTeamsHtml(lang, config, {
+          stats,
+          cfConfigured: cf.configured,
           teams: teams.list().map((x) => ({
             id: x.id,
             name: x.name,
@@ -1079,6 +1218,9 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             createdAt: x.createdAt,
             liveSites: counts.get(x.id) ?? 0,
             members: members.count(x.id),
+            workers: !!x.workers,
+            slug: x.slug ?? null,
+            workerCount: d.workers.list(x.id).length,
           })),
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
@@ -1218,63 +1360,81 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         }),
       );
     });
-    const wErr = (c: Context, s: Session, e: unknown) => {
-      if (e instanceof WorkerError) return done(c, s, wBack, { kind: "err", text: e.message });
+    const sBack = href("/admin/settings");
+    const wErr = (c: Context, s: Session, e: unknown, back: string) => {
+      if (e instanceof WorkerError) return done(c, s, back, { kind: "err", text: e.message });
       throw e;
     };
     const wPost = (
       path: string,
-      fn: (c: Context, ctx: { s: Session; form: FormData }) => Promise<Response>,
+      fn: (c: Context, ctx: { s: Session; form: FormData; back: string }) => Promise<Response>,
+      fixedBack?: string,
     ) => {
       app.post(`${prefix}${path}`, async (c) => {
         const s = needAdmin(c);
         if (s instanceof Response) return s;
-        const form = await guardPost(c, s, lang, wBack);
+        const form = await guardPost(c, s, lang, fixedBack ?? wBack);
         if (form instanceof Response) return form;
+        // Inline controls on the overview send back=admin to return there.
+        const back = fixedBack ?? (field(form, "back") === "admin" ? href("/admin") : wBack);
         try {
-          return await fn(c, { s, form });
+          return await fn(c, { s, form, back });
         } catch (e) {
-          return wErr(c, s, e);
+          return wErr(c, s, e, back);
         }
       });
     };
-    wPost("/admin/workers/settings", async (c, { s, form }) => {
-      const token = field(form, "token").trim();
-      await d.workers.saveSettings(
-        {
-          ...(token ? { token } : {}),
-          accountId: field(form, "accountId"),
-          zone: field(form, "zone"),
-        },
-        ADMIN_ACTOR,
-      );
-      return done(c, s, wBack, { kind: "ok", text: WS[lang].saved });
-    });
-    wPost("/admin/workers/settings/verify", async (c, { s }) => {
-      const v = await d.workers.verifySettings();
-      return done(c, s, wBack, {
-        kind: v.status === "active" ? "ok" : "err",
-        text: WS[lang].verifiedFlash(v.status ?? "?"),
-      });
-    });
-    wPost("/admin/workers/settings/clear", async (c, { s }) => {
-      await d.workers.clearSettings(ADMIN_ACTOR);
-      return done(c, s, wBack, { kind: "ok", text: WS[lang].cleared });
-    });
-    wPost("/admin/workers/teams/:id", async (c, { s, form }) => {
+    wPost(
+      "/admin/workers/settings",
+      async (c, { s, form }) => {
+        const token = field(form, "token").trim();
+        await d.workers.saveSettings(
+          {
+            ...(token ? { token } : {}),
+            accountId: field(form, "accountId"),
+            zone: field(form, "zone"),
+          },
+          ADMIN_ACTOR,
+        );
+        return done(c, s, sBack, { kind: "ok", text: WS[lang].saved });
+      },
+      sBack,
+    );
+    wPost(
+      "/admin/workers/settings/verify",
+      async (c, { s }) => {
+        const v = await d.workers.verifySettings();
+        return done(c, s, sBack, {
+          kind: v.status === "active" ? "ok" : "err",
+          text: WS[lang].verifiedFlash(v.status ?? "?"),
+        });
+      },
+      sBack,
+    );
+    wPost(
+      "/admin/workers/settings/clear",
+      async (c, { s }) => {
+        await d.workers.clearSettings(ADMIN_ACTOR);
+        return done(c, s, sBack, { kind: "ok", text: WS[lang].cleared });
+      },
+      sBack,
+    );
+    wPost("/admin/workers/teams/:id", async (c, { s, form, back }) => {
       const team = teams.get(c.req.param("id") ?? "");
-      if (!team) return done(c, s, wBack, { kind: "err", text: t.notFound });
+      if (!team) return done(c, s, back, { kind: "err", text: t.notFound });
       const num = (k: string) => {
         const raw = field(form, k).trim();
         return raw === "" ? null : Number(raw);
       };
+      // Only fields present in the form change: the overview's on/off toggle
+      // must not reset the quotas.
       const patch = readTeamWorkers(d.workers, team, {
         enabled: field(form, "enabled") === "1",
         ...(field(form, "slug").trim() ? { slug: field(form, "slug") } : {}),
-        maxWorkers: num("maxWorkers"),
-        maxWorkerKb: num("maxWorkerKb"),
+        ...(form.has("maxWorkers") ? { maxWorkers: num("maxWorkers") } : {}),
+        ...(form.has("maxWorkerKb") ? { maxWorkerKb: num("maxWorkerKb") } : {}),
       });
-      if (typeof patch === "string") return done(c, s, wBack, { kind: "err", text: patch });
+      if (typeof patch === "string") return done(c, s, back, { kind: "err", text: patch });
       await applyTeamWorkers(
         { teams, workers: d.workers },
         team,
@@ -1283,7 +1443,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         ADMIN_ACTOR,
         d.audit as never,
       );
-      return done(c, s, wBack, { kind: "ok", text: WS[lang].teamSaved });
+      return done(c, s, back, { kind: "ok", text: WS[lang].teamSaved });
     });
     for (const [act, off] of [
       ["disable", true],
@@ -1301,6 +1461,73 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       if (!rec) return done(c, s, wBack, { kind: "err", text: t.notFound });
       await d.workers.remove(rec, ADMIN_ACTOR);
       return done(c, s, wBack, { kind: "ok", text: WS[lang].deleted });
+    });
+
+    app.get(`${prefix}/admin/activity`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      const all = teams.list();
+      const rawTeam = c.req.query("team") ?? "";
+      const team = rawTeam === "platform" || teams.get(rawTeam) ? rawTeam : "";
+      const kind = activityKind(c.req.query("kind"));
+      const q = (c.req.query("q") ?? "").trim().slice(0, 80);
+      const ids = team
+        ? [team === "platform" ? PLATFORM_AUDIT : team]
+        : [PLATFORM_AUDIT, ...all.map((x) => x.id)];
+      const titles = new Map((await store.list()).map((m) => [m.id, m.title || m.id]));
+      const audit = ids
+        .flatMap((id) => {
+          const tm = id === PLATFORM_AUDIT ? null : teams.get(id);
+          return members.entries(id, undefined, 500).map((e) => ({
+            ...auditView(e, titles),
+            team: tm ? { id: tm.id, name: tm.name } : null,
+          }));
+        })
+        .filter(
+          (e) =>
+            (!kind || e.kind === kind) &&
+            (matchesAudit(e, q, lang) ||
+              (!!q && !!e.team?.name.toLowerCase().includes(q.toLowerCase()))),
+        )
+        .sort((a, b) => b.at.localeCompare(a.at))
+        .slice(0, 300);
+      return page(
+        c,
+        adminActivityHtml(lang, config, {
+          audit,
+          teams: all.map((x) => ({ id: x.id, name: x.name })),
+          team,
+          kind,
+          q,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+
+    app.get(`${prefix}/admin/settings`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      return page(
+        c,
+        adminSettingsHtml(lang, config, {
+          settings: d.workers.settingsView(),
+          server: {
+            version: APP_VERSION,
+            publicUrl: config.publicUrl,
+            backend: !!backend,
+            secretsKey: !!config.secretsKey,
+            sessionKey: !config.sessions.ephemeral,
+            maxUploadMb: Math.round(config.maxSiteBytes / 1024 / 1024),
+            teamSites: config.teamMaxSites,
+            teamMb: Math.round(config.teamMaxBytes / 1024 / 1024),
+            workersMax: config.workers.defaultMax,
+            workerKb: config.workers.defaultMaxKb,
+          },
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
     });
 
     const ownerFilter = (raw: string | undefined) =>

@@ -9,10 +9,12 @@ export function baseHeaders(h: Headers): void {
 /** Strict CSP for the app's own pages (upload UI, manage page). */
 export const APP_CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  // Cloudflare Web Analytics: the edge injects its beacon into HTML responses
+  // (no inline code; an external script that posts page timings).
+  "script-src 'self' https://static.cloudflareinsights.com",
   "style-src 'self'",
   "img-src 'self' data:",
-  "connect-src 'self'",
+  "connect-src 'self' https://cloudflareinsights.com",
   "form-action 'self'",
   "base-uri 'none'",
   "object-src 'none'",

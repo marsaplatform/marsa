@@ -4,7 +4,7 @@ Teams can deploy small [Cloudflare Workers](https://developers.cloudflare.com/wo
 
 ## How it works
 
-- **Admin, once:** in the admin console → **Workers**, paste a Cloudflare API token (permissions: *Account · Workers Scripts: Edit*, *Zone · Workers Routes: Edit*, *Zone · DNS: Edit*), the account id (optional) and the zone (e.g. `marsaplatform.com`). The token is verified with Cloudflare, encrypted at rest (AES-256-GCM with `MARSA_SECRETS_KEY`) and is **write-only**: the console shows only "set (…last 4)" and a **Verify** button. No API ever returns it.
+- **Admin, once:** in the admin console → **Settings** (`/admin/settings`), paste a Cloudflare API token (permissions: *Account · Workers Scripts: Edit*, *Zone · Workers Routes: Edit*, *Zone · DNS: Edit*), the account id (optional) and the zone (e.g. `marsaplatform.com`). The token is verified with Cloudflare, encrypted at rest (AES-256-GCM with `MARSA_SECRETS_KEY`) and is **write-only**: the console shows only "set (…last 4)" and a **Verify** button. No API ever returns it.
 - **Admin, per team:** turn **Workers** on, give the team a **slug** (2-20 lowercase letters/digits, e.g. `sanad`) and optional quotas (default 3 Workers, 1024 KB per script).
 - **Names are forced:** a Worker called `hello` of team `sanad` is the script `team-sanad-hello` at `https://sanad-hello.<zone>` (a proxied `AAAA 100::` DNS record + a route `sanad-hello.<zone>/*`). With no zone configured, Workers get a `workers.dev` address.
 - **Safety:** Spaces only modifies or deletes scripts, routes and DNS records it created (tracked in `workers.json`). Before creating anything it checks that the script name, the hostname (any DNS record) and the route are free, and refuses with `409 NAME_TAKEN` / `409 HOST_TAKEN` otherwise.
