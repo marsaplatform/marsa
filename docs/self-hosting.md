@@ -45,6 +45,8 @@ Every setting is an environment variable with a safe default. Copy
 | `LOGIN_ATTEMPTS_PER_15_MIN` | `10` | Sign-in attempts per client IP per 15 minutes |
 | `TEAM_MAX_SITES` | `50` | Default quota: live sites per team (admin can override per team) |
 | `TEAM_MAX_MB` | `200` | Default quota: MB across a team's live sites (admin can override per team) |
+| `OPERATOR_NAME` / `OPERATOR_ADDRESS` / `OPERATOR_LAW` / `OPERATOR_EMAIL` | marsaplatform / Bologna, Italy / Italy / info@marsaplatform.com | Data controller shown in the privacy policy (`/privacy`). **Set these when you self-host.** |
+| `OPERATOR_AUTHORITY` / `OPERATOR_AUTHORITY_URL` | Italian Garante / https://www.garanteprivacy.it | Supervisory authority named in the privacy policy |
 | `VISITS` | `true` | Count page views per site per day, privately (see [Teams](teams.md#visit-counts)) |
 | `VISITS_RETENTION_DAYS` | `90` | Days of visit counts kept (minimum 31) |
 | `VISITS_FLUSH_SECONDS` | `60` | How often buffered counts are written to disk |

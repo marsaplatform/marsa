@@ -10,6 +10,8 @@ export const ZONE_NAME = "marsaplatform.test";
 
 interface Script {
   code: string;
+  /** Every module part of the upload (name -> source). */
+  modules: Record<string, string>;
   vars: Record<string, string>;
   secrets: Map<string, string>;
   workersDev: boolean;
@@ -40,6 +42,7 @@ export class FakeCfWorkers {
     ]) {
       this.scripts.set(name, {
         code: "x",
+        modules: { "worker.js": "x" },
         vars: {},
         secrets: new Map(),
         workersDev: false,
@@ -142,12 +145,18 @@ export class FakeCfWorkers {
         if (this.failPutScript) return this.bad(400, "Uncaught SyntaxError", 10021);
         const form = init.body as FormData;
         const meta = JSON.parse(await (form.get("metadata") as Blob).text());
-        const code = await (form.get("worker.js") as Blob).text();
+        const modules: Record<string, string> = {};
+        for (const k of ["worker.js", "user.js", "marsa-vars.js"]) {
+          const v = form.get(k);
+          if (v && typeof v !== "string") modules[k] = await v.text();
+        }
+        const code = modules[meta.main_module] ?? "";
         const prev = this.scripts.get(name);
         const vars: Record<string, string> = {};
         for (const b of meta.bindings ?? []) if (b.type === "plain_text") vars[b.name] = b.text;
         this.scripts.set(name, {
           code,
+          modules,
           vars,
           secrets: prev?.secrets ?? new Map(),
           workersDev: prev?.workersDev ?? false,

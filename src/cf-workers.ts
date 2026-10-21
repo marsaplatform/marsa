@@ -45,6 +45,30 @@ export interface ScriptUpload {
   vars: Record<string, string>;
 }
 
+/** Cloudflare's limit for one plain_text binding. */
+export const CF_BINDING_MAX = 5 * 1024;
+
+/**
+ * Main module used when some vars are larger than a binding allows: it imports the
+ * user's module and the large vars, and hands every handler an env that has them.
+ */
+export const WRAPPER_MODULE = `import * as user from "./user.js";
+import big from "./marsa-vars.js";
+export * from "./user.js";
+const mod = user.default;
+const withVars = (env) =>
+  new Proxy(env ?? {}, {
+    get: (t, k) => (Object.hasOwn(big, k) ? big[k] : Reflect.get(t, k)),
+    has: (t, k) => Object.hasOwn(big, k) || Reflect.has(t, k),
+  });
+const out = {};
+for (const k of Object.keys(mod ?? {})) {
+  const v = mod[k];
+  out[k] = typeof v === "function" ? (a, env, ctx) => v.call(mod, a, withVars(env), ctx) : v;
+}
+export default out;
+`;
+
 export class CloudflareWorkersApi {
   constructor(
     private readonly apiBase = "https://api.cloudflare.com/client/v4",
@@ -132,10 +156,19 @@ export class CloudflareWorkersApi {
 
   async putScript(a: CfAccess, script: string, s: ScriptUpload): Promise<void> {
     const form = new FormData();
+    // Cloudflare caps one text binding at 5 KB. Larger vars ride in a generated
+    // module and a tiny wrapper merges them into `env` before the user's handlers run.
+    const small: [string, string][] = [];
+    const large: Record<string, string> = {};
+    for (const [k, v] of Object.entries(s.vars)) {
+      if (Buffer.byteLength(v) > CF_BINDING_MAX) large[k] = v;
+      else small.push([k, v]);
+    }
+    const wrapped = Object.keys(large).length > 0;
     const metadata = {
       main_module: "worker.js",
       compatibility_date: s.compatibilityDate,
-      bindings: Object.entries(s.vars).map(([name, text]) => ({ type: "plain_text", name, text })),
+      bindings: small.map(([name, text]) => ({ type: "plain_text", name, text })),
       // Secrets are set separately and survive redeploys.
       keep_bindings: ["secret_text"],
       tags: ["marsa-spaces"],
@@ -145,11 +178,15 @@ export class CloudflareWorkersApi {
       new Blob([JSON.stringify(metadata)], { type: "application/json" }),
       "metadata.json",
     );
-    form.append(
-      "worker.js",
-      new Blob([s.code], { type: "application/javascript+module" }),
-      "worker.js",
-    );
+    const mod = (name: string, body: string) =>
+      form.append(name, new Blob([body], { type: "application/javascript+module" }), name);
+    if (wrapped) {
+      mod("worker.js", WRAPPER_MODULE);
+      mod("user.js", s.code);
+      mod("marsa-vars.js", `export default ${JSON.stringify(large)};\n`);
+    } else {
+      mod("worker.js", s.code);
+    }
     await this.call(a.token, "PUT", `/accounts/${a.accountId}/workers/scripts/${script}`, form);
   }
 

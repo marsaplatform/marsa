@@ -6,6 +6,8 @@ export interface Config {
   host: string;
   /** Public base URL used to build share links, e.g. https://marsa.example.com */
   publicUrl: string;
+  /** Who operates this instance, shown in the privacy policy. */
+  operator: Operator;
   /** Directory where uploaded sites and their metadata are stored. */
   dataDir: string;
   /** Default link lifetime, in hours, when the uploader doesn't pick one. */
@@ -21,6 +23,8 @@ export interface Config {
   apiRequestsPerMinute: number;
   /** Trust X-Forwarded-For / X-Real-IP (only behind a reverse proxy you control). */
   trustProxy: boolean;
+  /** Allow http:// and private hosts for outgoing webhooks (local testing only). */
+  webhookAllowPrivate: boolean;
   /** Optional admin token. Empty = admin API disabled. */
   adminToken: string;
   /** How often the expiry sweeper runs, in seconds. */
@@ -90,7 +94,52 @@ export interface BackendLimits {
   maxFiles: number;
 }
 
+/** Who operates this instance (privacy policy). Each field has an English and Arabic text. */
+export interface Operator {
+  name: { en: string; ar: string };
+  address: { en: string; ar: string };
+  law: { en: string; ar: string };
+  email: string;
+  /** Data protection supervisory authority people can complain to. */
+  authority: { en: string; ar: string; url: string };
+}
+
+/** marsaplatform's hosted instance. Self-hosters set the OPERATOR_* variables. */
+export const DEFAULT_OPERATOR: Operator = {
+  name: { en: "marsaplatform", ar: "marsaplatform" },
+  address: { en: "Bologna, Italy", ar: "بولونيا، إيطاليا" },
+  law: {
+    en: "Italy (Italian law and the EU GDPR)",
+    ar: "إيطاليا (القانون الإيطالي واللائحة الأوروبية العامة لحماية البيانات GDPR)",
+  },
+  email: "info@marsaplatform.com",
+  authority: {
+    en: "Garante per la protezione dei dati personali (the Italian data protection authority)",
+    ar: "Garante per la protezione dei dati personali (هيئة حماية البيانات الإيطالية)",
+    url: "https://www.garanteprivacy.it",
+  },
+};
+
 type Env = Record<string, string | undefined>;
+
+function both(env: Env, key: string, fallback: { en: string; ar: string }) {
+  const v = env[key]?.trim();
+  return v ? { en: v, ar: v } : fallback;
+}
+
+export function loadOperator(env: Env): Operator {
+  const d = DEFAULT_OPERATOR;
+  const auth = env.OPERATOR_AUTHORITY?.trim();
+  return {
+    name: both(env, "OPERATOR_NAME", d.name),
+    address: both(env, "OPERATOR_ADDRESS", d.address),
+    law: both(env, "OPERATOR_LAW", d.law),
+    email: env.OPERATOR_EMAIL?.trim() || d.email,
+    authority: auth
+      ? { en: auth, ar: auth, url: env.OPERATOR_AUTHORITY_URL?.trim() || "" }
+      : d.authority,
+  };
+}
 
 function int(env: Env, key: string, fallback: number, min = 0): number {
   const raw = env[key];
@@ -116,6 +165,7 @@ export function loadConfig(env: Env = process.env): Config {
     port,
     host: env.HOST?.trim() || "0.0.0.0",
     publicUrl: (env.PUBLIC_URL?.trim() || `http://localhost:${port}`).replace(/\/+$/, ""),
+    operator: loadOperator(env),
     dataDir: env.DATA_DIR?.trim() || "./data",
     defaultTtlHours: int(env, "DEFAULT_TTL_HOURS", 24, 1),
     minTtlHours: int(env, "MIN_TTL_HOURS", 1, 1),
@@ -126,6 +176,7 @@ export function loadConfig(env: Env = process.env): Config {
     uploadsPerHour: int(env, "UPLOADS_PER_HOUR", 20, 1),
     apiRequestsPerMinute: int(env, "API_REQUESTS_PER_MINUTE", 120, 1),
     trustProxy: bool(env, "TRUST_PROXY", false),
+    webhookAllowPrivate: bool(env, "WEBHOOK_ALLOW_PRIVATE", false),
     adminToken: env.ADMIN_TOKEN?.trim() ?? "",
     sweepIntervalSeconds: int(env, "SWEEP_INTERVAL_SECONDS", 60, 5),
     cloudflare: cloudflareConfig(env),

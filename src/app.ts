@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { open, readFile } from "node:fs/promises";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { AgentKeyStore } from "./agent-keys.js";
+import { mountAgentInviteRoutes, mountAgentRoutes } from "./agent-routes.js";
 import { APP_CSS, APP_JS, fontAsset } from "./assets.js";
 import { CloudflareError } from "./backend/cloudflare.js";
 import { probeBackend } from "./backend/health.js";
@@ -38,14 +40,25 @@ import {
   publicMember,
 } from "./members.js";
 import { type NavAccount, withNavAccount } from "./nav-state.js";
+import { NotificationCenter, type NotifyDeps } from "./notify.js";
 import { openapi } from "./openapi.js";
 import { RateLimiter } from "./rate-limit.js";
+import { mountAdminRecipeRoutes, mountRecipeRoutes } from "./recipe-routes.js";
+import { loadBuiltinRecipes, RecipeStore, recipeHtml, servedLang, summaryOf } from "./recipes.js";
 import { SDK_JS } from "./sdk.js";
 import { SecretBox } from "./secrets.js";
 import { APP_CSP, baseHeaders, SITE_CSP } from "./security.js";
 import { Sessions } from "./session.js";
 import { PERMANENT_EXPIRES, publicMeta, type SiteMeta, type SiteStore } from "./store.js";
 import { removeSite, sweepExpired } from "./sweep.js";
+import {
+  can,
+  credentialOf,
+  hasEditBearer,
+  makeTeamAuth,
+  scopeError,
+  type TeamCred,
+} from "./team-auth.js";
 import {
   cleanTeamName,
   isTeamKey,
@@ -65,7 +78,12 @@ import {
   newHtml,
   notFoundHtml,
   placeholderSvg,
+  privacyHtml,
+  recipePageHtml,
+  recipesIndexHtml,
 } from "./ui.js";
+import { mountUserKeyRoutes, userKeyOps } from "./user-key-routes.js";
+import { UserKeyStore } from "./user-keys.js";
 import { VisitCounter } from "./visits.js";
 import { mountWebRoutes } from "./web.js";
 import { PLATFORM_AUDIT, WorkerService } from "./workers.js";
@@ -112,6 +130,23 @@ export interface AppDeps {
   workers?: WorkerService;
   /** fetch used for the Cloudflare API and Worker probes (tests inject a fake). */
   cfFetch?: FetchFn;
+  /** Agent keys and invites (0.14.0). Loaded from <dataDir> when omitted. */
+  agentKeys?: AgentKeyStore;
+  /** Notification center + webhooks (0.14.0). Built from config when omitted. */
+  notify?: NotificationCenter;
+  /** Overrides for the webhook sender (tests: fetch, retry delays). */
+  notifyOpts?: Partial<NotifyDeps>;
+  /** Receives the services the caller may need (index.ts runs the alert ticker). */
+  expose?: (s: {
+    agentKeys: AgentKeyStore;
+    notify: NotificationCenter;
+    userKeys: UserKeyStore;
+    recipes: RecipeStore;
+  }) => void;
+  /** Agent recipes (0.14.0). Built from docs/recipes + <dataDir> when omitted. */
+  recipes?: RecipeStore;
+  /** End-user API keys for team Workers (0.14.0). */
+  userKeys?: UserKeyStore;
   now?: () => number;
 }
 
@@ -132,7 +167,40 @@ export function createApp({
   members = new MemberStore(config.dataDir, now),
   cfFetch,
   workers,
+  agentKeys = new AgentKeyStore(config.dataDir, now, config.secretsKey || config.sessions.secret),
+  notify,
+  notifyOpts = {},
+  expose,
+  recipes = new RecipeStore(config.dataDir, loadBuiltinRecipes(config.publicUrl), now),
+  userKeys = new UserKeyStore(config.dataDir, now),
 }: AppDeps) {
+  const notices =
+    notify ??
+    new NotificationCenter(config.dataDir, {
+      box: config.secretsKey ? new SecretBox(config.secretsKey) : null,
+      now,
+      allowPrivate: config.webhookAllowPrivate,
+      publicUrl: config.publicUrl,
+      teamName: (id) => {
+        const t = teams.get(id);
+        return t ? { name: t.name, ...(t.slug ? { slug: t.slug } : {}) } : null;
+      },
+      ...notifyOpts,
+    });
+  members.onLog = (e) => notices.fromAudit(e);
+  expose?.({ agentKeys, notify: notices, userKeys, recipes });
+  void userKeys.ready().catch((e) => console.error("[user-keys] load failed", e?.message));
+  void recipes.ready().catch((e) => console.error("[recipes] load failed", e?.message));
+  void agentKeys.ready().catch((e) => console.error("[agent-keys] load failed", e?.message));
+  void notices.ready().catch((e) => console.error("[notify] load failed", e?.message));
+  const teamAuth = makeTeamAuth({
+    teams,
+    agentKeys,
+    notify: notices,
+    trustProxy: config.trustProxy,
+  });
+  /** The team/agent credential each request used (for audit labels). */
+  const credOf = new WeakMap<Context, TeamCred>();
   const workerSvc =
     workers ??
     new WorkerService(config.dataDir, {
@@ -146,15 +214,25 @@ export function createApp({
         if (e.teamId === PLATFORM_AUDIT || teams.get(e.teamId)) await members.log(e);
       },
     });
+  workerSvc.onRemove = (rec) => userKeys.purgeWorker(rec.id);
+  const ukOps = userKeyOps({
+    config,
+    teams,
+    members,
+    workers: workerSvc,
+    userKeys,
+    notify: notices,
+  });
   /** Record an action on a team's site (or the team) in its audit log. */
   const audit = async (e: Omit<AuditEntry, "at" | "teamId"> & { teamId?: string }) => {
     if (e.teamId && teams.get(e.teamId)) await members.log({ ...e, teamId: e.teamId });
   };
   /** Who is calling the API: the team key, or a site's edit token. */
   const apiActor = (c: Context): Actor =>
-    c.req.header("x-team-key") || isTeamKey(bearer(c.req.header("authorization")) ?? "")
+    credOf.get(c)?.actor ??
+    (c.req.header("x-team-key") || isTeamKey(bearer(c.req.header("authorization")) ?? "")
       ? { kind: "api", label: "team key" }
-      : { kind: "api", label: "edit token" };
+      : { kind: "api", label: "edit token" });
   store.onDelete((id) => visits.purge(id));
   const session = sessions ?? new Sessions(config, now);
   const app = new Hono();
@@ -285,6 +363,21 @@ export function createApp({
 
   async function authorizeSite(c: Context): Promise<SiteMeta | Response> {
     const meta = await store.get(c.req.param("id") ?? "");
+    // 0.14.0: the team key or an agent key (spaces:read / spaces:write) on the team's sites.
+    const raw = hasEditBearer(c) ? "" : credentialOf(c);
+    if (raw) {
+      const cred = await teamAuth(c, raw);
+      if (!meta || !cred || cred === "invalid" || cred.team.id !== meta.teamId) {
+        return apiError(c, 404, "NOT_FOUND", "site not found or token invalid");
+      }
+      const scope = c.req.method === "GET" ? "spaces:read" : "spaces:write";
+      if (!can(cred, scope)) return scopeError(c, scope);
+      if (Date.parse(meta.expiresAt) <= now()) {
+        return apiError(c, 410, "EXPIRED", "this link has expired");
+      }
+      credOf.set(c, cred);
+      return meta;
+    }
     const token = bearer(c.req.header("authorization"));
     if (!meta || !token || !safeEqual(hashToken(token), meta.tokenHash)) {
       // Same answer for "no such site" and "wrong token": no existence oracle.
@@ -300,20 +393,21 @@ export function createApp({
    * The team an upload belongs to. X-Team-Key, or an Authorization bearer that
    * looks like a team key, must be valid; no key at all means a guest upload.
    */
-  function uploadTeam(c: Context): Team | null | Response {
-    const header = c.req.header("x-team-key")?.trim();
-    const auth = bearer(c.req.header("authorization"));
-    const key = header || (auth && isTeamKey(auth) ? auth : "");
-    if (!key) return null;
-    return (
-      teams.byTeamKey(key) ??
-      apiError(
+  async function uploadTeam(c: Context): Promise<Team | null | Response> {
+    const raw = credentialOf(c);
+    if (!raw) return null;
+    const cred = await teamAuth(c, raw);
+    if (!cred || cred === "invalid") {
+      return apiError(
         c,
         401,
         "INVALID_TEAM_KEY",
-        "unknown or rotated team key (omit it to upload as a guest)",
-      )
-    );
+        "unknown, rotated, revoked or expired key (omit it to upload as a guest)",
+      );
+    }
+    if (!can(cred, "spaces:write")) return scopeError(c, "spaces:write");
+    credOf.set(c, cred);
+    return cred.team;
   }
 
   const siteUrl = (id: string) => `${config.publicUrl}/s/${id}/`;
@@ -584,7 +678,7 @@ export function createApp({
   });
 
   app.post("/api/sites", uploadLimit, async (c) => {
-    const team = uploadTeam(c);
+    const team = await uploadTeam(c);
     if (team instanceof Response) return team;
     const limited = await uploadRate(c);
     if (limited) return limited;
@@ -599,6 +693,28 @@ export function createApp({
         detail: meta.title,
       });
     return c.json({ ...view(meta), editToken: token }, 201);
+  });
+
+  /** 0.14.0: a team's live sites, for the team key or an agent key with spaces:read. */
+  app.get("/api/teams/:team/sites", async (c) => {
+    const cred = await teamAuth(c);
+    if (!cred || cred === "invalid") {
+      return apiError(c, 401, "UNAUTHORIZED", "send the team key or an agent key");
+    }
+    const want = c.req.param("team");
+    if (want !== cred.team.id && want !== cred.team.slug) {
+      return apiError(c, 404, "NOT_FOUND", "this key does not belong to that team");
+    }
+    if (!can(cred, "spaces:read")) return scopeError(c, "spaces:read");
+    const t = now();
+    const sites = (await store.list())
+      .filter((m) => m.teamId === cred.team.id && Date.parse(m.expiresAt) > t)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((m) => {
+        const { files: _f, ...rest } = view(m);
+        return rest;
+      });
+    return c.json({ team: { id: cred.team.id, slug: cred.team.slug ?? null }, sites });
   });
 
   app.get("/api/sites/:id", async (c) => {
@@ -664,10 +780,22 @@ export function createApp({
     replaceSite,
     audit,
     workers: workerSvc,
+    teamAuth,
+    recipes,
+    userKeyOps: ukOps,
   });
 
   // ---- optional per-site data/files backend --------------------------------
-  mountBackendRoutes(app, { config, store, backend, teams, now, uploadRate });
+  mountBackendRoutes(app, { config, store, backend, teams, now, uploadRate, teamAuth });
+  const agentDeps = { config, teams, members, agentKeys, notify: notices, limiter, teamAuth };
+  mountAgentInviteRoutes(app, agentDeps);
+  const recipeDeps = { publicUrl: config.publicUrl, recipes, members, teamAuth };
+  mountRecipeRoutes(app, recipeDeps);
+  mountUserKeyRoutes(
+    app,
+    { config, teams, members, workers: workerSvc, userKeys, notify: notices, limiter, teamAuth },
+    ukOps,
+  );
 
   // ---- optional self-host admin (enabled only when ADMIN_TOKEN is set) -----
   app.use("/api/admin/*", async (c, next) => {
@@ -678,7 +806,17 @@ export function createApp({
     }
     await next();
   });
-  mountWorkerRoutes(app, { config, teams, members, workers: workerSvc, limiter, now });
+  mountWorkerRoutes(app, {
+    config,
+    teams,
+    members,
+    workers: workerSvc,
+    limiter,
+    now,
+    teamAuth,
+  });
+  mountAgentRoutes(app, agentDeps);
+  mountAdminRecipeRoutes(app, recipeDeps);
   app.get("/api/admin/backend/check", async (c) =>
     c.json(backend ? { enabled: true, ...(await probeBackend(backend)) } : { enabled: false }),
   );
@@ -807,6 +945,7 @@ export function createApp({
   app.post("/api/admin/teams/:id/rotate", async (c) => {
     const r = await teams.rotate(c.req.param("id"), now());
     if (!r) return apiError(c, 404, "NOT_FOUND", "team not found");
+    await audit({ teamId: r.team.id, actor: ADMIN_ACTOR, action: "team-key-rotate" });
     return c.json({ team: teamView(r.team), key: r.key });
   });
   // Members and invites (no email: the admin hands the invite link over).
@@ -889,6 +1028,10 @@ export function createApp({
     }
     await teams.delete(id);
     await members.purgeTeam(id);
+    await agentKeys.purgeTeam(id);
+    await notices.purgeTeam(id);
+    await userKeys.purgeTeam(id);
+    await recipes.purgeTeam(id);
     invalidateDirectory();
     return c.json({ deleted: id, removedSites, removedWorkers });
   });
@@ -968,7 +1111,45 @@ export function createApp({
     invalidateDirectory,
     siteCounts,
     workers: workerSvc,
+    agentKeys,
+    notify: notices,
+    recipes,
+    userKeys,
+    userKeyOps: ukOps,
   });
+  app.get("/privacy", (c) => appPage(c, privacyHtml("en", config)));
+  app.get("/ar/privacy", (c) => appPage(c, privacyHtml("ar", config)));
+  for (const prefix of ["", "/ar"] as const) {
+    const lang: Lang = prefix ? "ar" : "en";
+    app.get(`${prefix}/docs/recipes`, async (c) => {
+      await recipes.ready();
+      return appPage(
+        c,
+        recipesIndexHtml(
+          lang,
+          config,
+          recipes.visible(null).map((r) => summaryOf(r, lang)),
+        ),
+      );
+    });
+    app.get(`${prefix}/docs/recipes/:slug`, async (c) => {
+      await recipes.ready();
+      const r = recipes.get(c.req.param("slug"), null);
+      if (!r) return appPage(c, notFoundHtml(lang, config), 404);
+      const served = servedLang(r, lang);
+      return appPage(
+        c,
+        recipePageHtml(
+          lang,
+          config,
+          r,
+          recipeHtml(r, served),
+          served,
+          recipes.visible(null).map((x) => summaryOf(x, lang)),
+        ),
+      );
+    });
+  }
   app.get("/docs", (c) => appPage(c, docsIndexHtml("en", config, docs)));
   app.get("/ar/docs", (c) => appPage(c, docsIndexHtml("ar", config, docs)));
   for (const prefix of ["", "/ar"] as const) {

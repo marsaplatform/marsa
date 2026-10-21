@@ -80,7 +80,13 @@ describe("MCP per space", () => {
     const c = await connect(t, site.id, secret);
     expect(c.getServerVersion()?.name).toBe("marsa-spaces");
     const names = (await c.listTools()).tools.map((x) => x.name).sort();
-    expect(names).toEqual(["get_site_info", "list_files", "read_file"]);
+    expect(names).toEqual([
+      "get_recipe",
+      "get_site_info",
+      "list_files",
+      "list_recipes",
+      "read_file",
+    ]);
     const info = await call(c, "get_site_info");
     expect(info.data.id).toBe(site.id);
     expect(info.data.title).toBe("Hello");
@@ -134,7 +140,14 @@ describe("MCP per space", () => {
     const { site, secret } = await setup(t, {}, "rw");
     const c = await connect(t, site.id, secret);
     const names = (await c.listTools()).tools.map((x) => x.name).sort();
-    expect(names).toEqual(["get_site_info", "list_files", "read_file", "replace_site_files"]);
+    expect(names).toEqual([
+      "get_recipe",
+      "get_site_info",
+      "list_files",
+      "list_recipes",
+      "read_file",
+      "replace_site_files",
+    ]);
     expect((await call(c, "kv_put", { key: "a", value: 1 })).text).toMatch(/BACKEND_NOT_ALLOWED/);
     await c.close();
   });

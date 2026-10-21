@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createApp } from "../src/app.js";
+import { type AppDeps, createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { SiteStore } from "../src/store.js";
 import { VisitCounter } from "../src/visits.js";
@@ -63,7 +63,10 @@ export class Browser {
 /** A fresh app on a temp dir with a controllable clock and an in-memory backend. */
 export async function makeApp(
   env: Record<string, string> = {},
-  opts: { cfFetch?: (i: string, init?: RequestInit) => Promise<Response> } = {},
+  opts: {
+    cfFetch?: (i: string, init?: RequestInit) => Promise<Response>;
+    app?: Partial<AppDeps>;
+  } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "marsa-t-"));
   const clock = { now: Date.parse("2026-01-01T00:00:00Z") };
@@ -85,6 +88,7 @@ export async function makeApp(
     visits,
     now: () => clock.now,
     ...(opts.cfFetch ? { cfFetch: opts.cfFetch } : {}),
+    ...(opts.app ?? {}),
   });
   const api = (
     method: string,

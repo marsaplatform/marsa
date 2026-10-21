@@ -4,6 +4,71 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.14.1] - 2026-10-21
+
+### Changed
+- **Exact Worker API-key limits by default.** `requireKey()` now asks Spaces on every request. Caching
+  is opt-in with `requireKey(request, env, { cache: 30 })`. Each Worker isolate keeps its own cache, so
+  with caching a key can go over its per-minute limit by up to its remaining quota per isolate
+  (documented in the docs and the recipe, AR and EN).
+- **Versioned helper URL** `/api/keys/helper.v2.js`. The old `/api/keys/helper.js` redirects there
+  (302, no-cache), so CDNs cannot keep serving an old copy. The dashboard, docs and recipe use the new URL.
+- **Fewer duplicate "new address" alerts for agent keys.** Uses are grouped by network (IPv4 /24,
+  IPv6 /64, stored as keyed hashes). A network alerts at most once in 24 h, and is forgotten after
+  30 days unused. A new network of the other IP family seen within 2 minutes of a known network (the
+  same dual-stack client) is recorded without an alert. Keys from 0.14.0 adopt their next network
+  without an alert.
+- **Privacy policy (GDPR)** now names the controller (marsaplatform, Bologna, Italy,
+  info@marsaplatform.com, Italian law). It also covers the purposes and legal bases, processors
+  (Cloudflare), international transfers, retention, data-subject rights, and complaints to the Garante.
+  Self-hosters set `OPERATOR_NAME`, `OPERATOR_ADDRESS`, `OPERATOR_LAW`, `OPERATOR_EMAIL`,
+  `OPERATOR_AUTHORITY` and `OPERATOR_AUTHORITY_URL`.
+
+## [0.14.0] - 2026-10-21
+
+### Added
+- **Worker versions, one-click redeploy and rollback.** Every deploy stores a version (code, vars,
+  secret *names* only, who, when, size, SHA-256, note); the last 10 per Worker are kept. The Workers
+  page has **Redeploy** and **Versions** (roll back with a confirmation, download the code). API:
+  `GET …/workers/<name>/versions[/<n>[/code]]`, `POST …/redeploy`, `POST …/rollback`; MCP:
+  `list_worker_versions`, `get_worker_version`, `redeploy_worker`, `rollback_worker`.
+- **Agent keys**: per-team keys with scopes (`workers:read`, `workers:deploy`, `spaces:read`,
+  `spaces:write`, `kv:read`, `kv:write`, `mcp`) and a required expiry (7/30/90 days or custom, max
+  1 year). Shown once, stored hashed, prefix and last use visible, revocable. Accepted wherever the
+  team key is (uploads, sites, KV/files, Workers, MCP) with the scopes enforced (`403
+  INSUFFICIENT_SCOPE`). New `GET /api/teams/<team>/sites`.
+- **Agent invite links**: one-time, 24 h; `GET` shows onboarding (Markdown or JSON), `POST
+  …/claim` returns the key once. Rate-limited and audited.
+- **Notification center**: a bell with an unread count for owners and the admin (deploys,
+  rollbacks, deletes, agent keys, team key rotation, members, Cloudflare token, storage check).
+  Optional team and platform **webhooks** (Slack/Discord-compatible JSON, HMAC-SHA256 signed, test
+  button, 3 attempts).
+- **API keys for a Worker's end users** (e.g. a team's public MCP server). Per Worker, opt-in
+  **Require API keys**: Spaces sets the Worker secrets `MARSA_KEYS_URL` and `MARSA_KEYS_SECRET`;
+  owners/editors create keys (`msk_…`, shown once, hashed, prefix visible) with a label, optional
+  email, expiry, per-minute/per-day limits (or the Worker default), allowed tools; revoke; usage
+  (today, 7 days, last use, 429s). The Worker checks each request with `POST /api/keys/verify`
+  through a dependency-free helper (`/api/keys/helper.js`, `requireKey()`), which may cache an allow
+  for up to 30 s and reports cached uses on the next check. API `…/workers/<name>/keys[/settings|/<id>]`,
+  MCP `list_user_keys`, `create_user_key`, `revoke_user_key`, a dashboard tab, and alerts on key
+  create/revoke and 429 spikes (10/100/1000 a day).
+- **Agent recipes**: step-by-step playbooks (goal, when to use, steps, starter template, checklist,
+  pitfalls) in Arabic and English. Five built-ins shipped in `docs/recipes/` (MCP server on a Worker,
+  bilingual project page, security rules for agents, site KV & files, protecting an MCP with
+  keys), plus team recipes (owners/editors, or an agent key with `spaces:write`) and platform
+  recipes (admin). `GET /api/recipes[/<slug>?format=md]`, MCP `list_recipes`/`get_recipe`, a
+  Recipes page in the team and admin dashboards, public `/docs/recipes`, and links in the agent
+  invite onboarding.
+- **Privacy policy** in English and Arabic at `/privacy` and `/ar/privacy`, linked from the footer,
+  sign-in and join pages. Operator, address, jurisdiction and contact are marked placeholders.
+
+### Changed
+- A plain deploy of new code is recorded as `deploy` in the version history (one-click redeploy and
+  rollback keep their own labels).
+- Worker vars: 32 KB per var and 64 KB in total (was 5 KB per var). Vars over Cloudflare's 5 KB
+  binding limit are delivered in a generated module merged into `env` by a small wrapper.
+- Admin overview: the Workers count sits next to the Workers switch instead of under it.
+
 ## [0.13.1] - 2026-10-21
 
 ### Fixed

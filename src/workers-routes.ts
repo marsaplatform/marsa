@@ -1,10 +1,12 @@
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import type { Scope } from "./agent-keys.js";
 import type { Config } from "./config.js";
 import type { Actor, MemberStore } from "./members.js";
 import type { RateLimiter } from "./rate-limit.js";
-import { isTeamKey, type Team, type TeamStore } from "./teams.js";
-import { bearer } from "./tokens.js";
+import { can, scopeError, type TeamAuth, type TeamCred } from "./team-auth.js";
+import type { Team, TeamStore } from "./teams.js";
+import { versionMeta } from "./worker-versions.js";
 import {
   PLATFORM_AUDIT,
   WorkerError,
@@ -20,13 +22,13 @@ export interface WorkerRouteDeps {
   workers: WorkerService;
   limiter: RateLimiter;
   now: () => number;
+  teamAuth: TeamAuth;
 }
 
 const err = (c: Context, status: number, code: string, message: string) =>
   c.json({ error: { code, message } }, status as 400);
 
 export const ADMIN_ACTOR: Actor = { kind: "admin", label: "admin" };
-const KEY_ACTOR: Actor = { kind: "api", label: "team key" };
 
 /** Turn a thrown WorkerError into a JSON error; rethrow anything else. */
 export function workerErr(c: Context, e: unknown) {
@@ -134,19 +136,22 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
   };
 
   // ---- team API ------------------------------------------------------------------------
-  const teamOf = (c: Context): Team | Response => {
-    const header = c.req.header("x-team-key")?.trim();
-    const auth = bearer(c.req.header("authorization"));
-    const key = header || (auth && isTeamKey(auth) ? auth : "");
-    const team = key ? teams.byTeamKey(key) : null;
-    if (!team) {
-      return err(c, 401, "UNAUTHORIZED", "send the team key (X-Team-Key or Authorization: Bearer)");
+  const teamOf = async (c: Context, scope: Scope): Promise<TeamCred | Response> => {
+    const cred = await d.teamAuth(c);
+    if (!cred || cred === "invalid") {
+      return err(
+        c,
+        401,
+        "UNAUTHORIZED",
+        "send the team key or an agent key (X-Team-Key or Authorization: Bearer)",
+      );
     }
     const want = c.req.param("team") ?? "";
-    if (want !== team.id && want !== team.slug) {
+    if (want !== cred.team.id && want !== cred.team.slug) {
       return err(c, 404, "NOT_FOUND", "this key does not belong to that team");
     }
-    return team;
+    if (!can(cred, scope)) return scopeError(c, scope);
+    return cred;
   };
   const MAX_BODY = 12 * 1024 * 1024;
   const limit = bodyLimit({
@@ -177,17 +182,19 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
       code: body.code,
       ...("vars" in body ? { vars: body.vars } : {}),
       ...("secrets" in body ? { secrets: body.secrets } : {}),
+      ...("note" in body ? { note: body.note } : {}),
     };
   };
 
-  app.get("/api/teams/:team/workers", (c) => {
-    const team = teamOf(c);
-    if (team instanceof Response) return team;
-    return c.json(teamWorkersInfo(svc, team));
+  app.get("/api/teams/:team/workers", async (c) => {
+    const cr = await teamOf(c, "workers:read");
+    if (cr instanceof Response) return cr;
+    return c.json(teamWorkersInfo(svc, cr.team));
   });
   app.post("/api/teams/:team/workers", limit, async (c) => {
-    const team = teamOf(c);
-    if (team instanceof Response) return team;
+    const cr = await teamOf(c, "workers:deploy");
+    if (cr instanceof Response) return cr;
+    const team = cr.team;
     const limited = deployRate(c, team);
     if (limited) return limited;
     try {
@@ -200,40 +207,114 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
           "a Worker with this name exists; PUT /api/teams/<team>/workers/<name> to redeploy",
         );
       }
-      return c.json({ worker: await svc.deploy(team, input, KEY_ACTOR) }, 201);
+      return c.json({ worker: await svc.deploy(team, input, cr.actor) }, 201);
     } catch (e) {
       return workerErr(c, e);
     }
   });
   app.put("/api/teams/:team/workers/:name", limit, async (c) => {
-    const team = teamOf(c);
-    if (team instanceof Response) return team;
-    const limited = deployRate(c, team);
+    const cr = await teamOf(c, "workers:deploy");
+    if (cr instanceof Response) return cr;
+    const limited = deployRate(c, cr.team);
     if (limited) return limited;
     try {
-      const existed = !!svc.find(team.id, c.req.param("name"));
-      const w = await svc.deploy(team, await readDeploy(c, c.req.param("name")), KEY_ACTOR);
+      const existed = !!svc.find(cr.team.id, c.req.param("name"));
+      const input = await readDeploy(c, c.req.param("name"));
+      const note = c.req.header("x-marsa-note");
+      const w = await svc.deploy(
+        cr.team,
+        note && input.note === undefined ? { ...input, note } : input,
+        cr.actor,
+      );
       return c.json({ worker: w }, existed ? 200 : 201);
     } catch (e) {
       return workerErr(c, e);
     }
   });
   app.get("/api/teams/:team/workers/:name", async (c) => {
-    const team = teamOf(c);
-    if (team instanceof Response) return team;
-    const rec = svc.find(team.id, c.req.param("name"));
+    const cr = await teamOf(c, "workers:read");
+    if (cr instanceof Response) return cr;
+    const rec = svc.find(cr.team.id, c.req.param("name"));
     if (!rec) return err(c, 404, "NOT_FOUND", "no such Worker");
     const live = c.req.query("probe") === "0" ? null : await svc.probe(rec);
     return c.json({ worker: workerView(rec), ...(live ? { live } : {}) });
   });
   app.delete("/api/teams/:team/workers/:name", async (c) => {
-    const team = teamOf(c);
-    if (team instanceof Response) return team;
-    const rec = svc.find(team.id, c.req.param("name"));
+    const cr = await teamOf(c, "workers:deploy");
+    if (cr instanceof Response) return cr;
+    const rec = svc.find(cr.team.id, c.req.param("name"));
     if (!rec) return err(c, 404, "NOT_FOUND", "no such Worker");
     try {
-      await svc.remove(rec, KEY_ACTOR);
+      await svc.remove(rec, cr.actor);
       return c.body(null, 204);
+    } catch (e) {
+      return workerErr(c, e);
+    }
+  });
+
+  // ---- versions, one-click redeploy, rollback (0.14.0) ----------------------------------
+  const recOf = async (c: Context, scope: Scope) => {
+    const cr = await teamOf(c, scope);
+    if (cr instanceof Response) return cr;
+    const rec = svc.find(cr.team.id, c.req.param("name") ?? "");
+    if (!rec) return err(c, 404, "NOT_FOUND", "no such Worker");
+    return { cr, rec };
+  };
+  app.get("/api/teams/:team/workers/:name/versions", async (c) => {
+    const r = await recOf(c, "workers:read");
+    if (r instanceof Response) return r;
+    const versions = (await svc.listVersions(r.rec)).map(versionMeta);
+    return c.json({
+      worker: r.rec.name,
+      current: r.rec.version ?? null,
+      versions,
+      ...(versions.length ? {} : { note: "no stored version — the next deploy will be saved" }),
+    });
+  });
+  app.get("/api/teams/:team/workers/:name/versions/:n", async (c) => {
+    const r = await recOf(c, "workers:read");
+    if (r instanceof Response) return r;
+    const v = await svc.getVersion(r.rec, Number(c.req.param("n")));
+    if (!v) return err(c, 404, "VERSION_NOT_FOUND", "no such stored version");
+    return c.json({ version: { ...versionMeta(v), vars: v.vars } });
+  });
+  app.get("/api/teams/:team/workers/:name/versions/:n/code", async (c) => {
+    const r = await recOf(c, "workers:read");
+    if (r instanceof Response) return r;
+    const v = await svc.getVersion(r.rec, Number(c.req.param("n")));
+    if (!v) return err(c, 404, "VERSION_NOT_FOUND", "no such stored version");
+    return codeDownload(c, r.rec.name, v.n, v.code);
+  });
+  app.post("/api/teams/:team/workers/:name/redeploy", async (c) => {
+    const r = await recOf(c, "workers:deploy");
+    if (r instanceof Response) return r;
+    const limited = deployRate(c, r.cr.team);
+    if (limited) return limited;
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+    try {
+      return c.json({ worker: await svc.redeploy(r.cr.team, r.rec, r.cr.actor, body.note) });
+    } catch (e) {
+      return workerErr(c, e);
+    }
+  });
+  app.post("/api/teams/:team/workers/:name/rollback", async (c) => {
+    const r = await recOf(c, "workers:deploy");
+    if (r instanceof Response) return r;
+    const limited = deployRate(c, r.cr.team);
+    if (limited) return limited;
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+    if (!Number.isInteger(body.version)) {
+      return err(c, 400, "INVALID_REQUEST", 'send JSON {"version": <n>, "note"?: "…"}');
+    }
+    try {
+      const out = await svc.rollback(
+        r.cr.team,
+        r.rec,
+        body.version as number,
+        r.cr.actor,
+        body.note,
+      );
+      return c.json(out);
     } catch (e) {
       return workerErr(c, e);
     }
@@ -311,4 +392,13 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
       return workerErr(c, e);
     }
   });
+}
+
+/** A stored version's code as a download. */
+export function codeDownload(c: Context, name: string, n: number, code: string) {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  c.header("Content-Disposition", `attachment; filename="${name}-v${n}.js"`);
+  c.header("Cache-Control", "no-store");
+  c.header("X-Content-Type-Options", "nosniff");
+  return c.body(code);
 }

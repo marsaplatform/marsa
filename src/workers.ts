@@ -1,10 +1,23 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { type CfAccess, CfError, type CloudflareWorkersApi, type FetchFn } from "./cf-workers.js";
+import {
+  CF_BINDING_MAX,
+  type CfAccess,
+  CfError,
+  type CloudflareWorkersApi,
+  type FetchFn,
+} from "./cf-workers.js";
 import type { Actor } from "./members.js";
 import type { SecretBox } from "./secrets.js";
 import type { Team, TeamStore } from "./teams.js";
+import {
+  cleanNote,
+  sha256Hex,
+  type VersionAction,
+  type WorkerVersion,
+  WorkerVersionStore,
+} from "./worker-versions.js";
 
 /**
  * Team Workers: the platform admin stores ONE Cloudflare API token (encrypted
@@ -45,8 +58,11 @@ export const PROTECTED_SCRIPTS = new Set([
   "erx-mcp",
   "mail-worker",
 ]);
-const MAX_VARS = 32;
-const MAX_VAR_BYTES = 5 * 1024;
+export const MAX_VARS = 32;
+/** One var (0.14.0: was 5 KB). Vars over Cloudflare's 5 KB binding limit ride in a module. */
+export const MAX_VAR_BYTES = 32 * 1024;
+/** All vars of one Worker together (names + values). */
+export const MAX_VARS_TOTAL = 64 * 1024;
 export const PLATFORM_AUDIT = "_platform";
 
 export interface CfSettings {
@@ -91,6 +107,8 @@ export interface WorkerRec {
   deployedAt?: string;
   deployedBy: string;
   lastError?: string;
+  /** Newest stored version number (0.14.0); unset = nothing stored yet. */
+  version?: number;
 }
 
 export interface WorkerView {
@@ -108,6 +126,8 @@ export interface WorkerView {
   deployedAt: string | null;
   deployedBy: string;
   lastError: string | null;
+  /** Newest stored version, or null: no stored version yet (the next deploy is saved). */
+  version: number | null;
 }
 
 export const workerView = (r: WorkerRec): WorkerView => ({
@@ -125,6 +145,7 @@ export const workerView = (r: WorkerRec): WorkerView => ({
   deployedAt: r.deployedAt ?? null,
   deployedBy: r.deployedBy,
   lastError: r.lastError ?? null,
+  version: r.version ?? null,
 });
 
 export class WorkerError extends Error {
@@ -142,6 +163,8 @@ export interface DeployInput {
   code: unknown;
   vars?: unknown;
   secrets?: unknown;
+  /** Optional note stored with the version (200 chars). */
+  note?: unknown;
 }
 
 export interface WorkerLimits {
@@ -166,6 +189,7 @@ export class WorkerService {
   private loading: Promise<void> | null = null;
   private writeQ: Promise<void> = Promise.resolve();
   private opQ: Promise<unknown> = Promise.resolve();
+  readonly versions: WorkerVersionStore;
 
   constructor(
     dataDir: string,
@@ -184,6 +208,7 @@ export class WorkerService {
     this.settingsFile = join(root, "settings.json");
     this.workersFile = join(root, "workers.json");
     this.tmpDir = join(root, "tmp");
+    this.versions = new WorkerVersionStore(dataDir);
   }
 
   ready(): Promise<void> {
@@ -476,6 +501,9 @@ export class WorkerService {
       throw new WorkerError(400, "INVALID_REQUEST", `${what}: at most ${MAX_VARS} entries`);
     }
     for (const [k, v] of entries) {
+      if (k.startsWith("MARSA_KEYS_")) {
+        throw new WorkerError(400, "INVALID_REQUEST", `${what}: ${k} is reserved for Spaces`);
+      }
       if (!VAR_NAME_RE.test(k)) {
         throw new WorkerError(
           400,
@@ -489,14 +517,19 @@ export class WorkerService {
         throw new WorkerError(
           400,
           "INVALID_REQUEST",
-          `${what}.${k}: a string up to ${MAX_VAR_BYTES} bytes${allowNull ? " (or null to remove it)" : ""}`,
+          `${what}.${k}: a string up to ${MAX_VAR_BYTES / 1024} KB${allowNull ? " (or null to remove it)" : ""}`,
         );
     }
     return out;
   }
 
-  /** Create or redeploy a team Worker. */
-  async deploy(team: Team, input: DeployInput, actor: Actor): Promise<WorkerView> {
+  /** Create or redeploy a team Worker. Every success is stored as a version. */
+  async deploy(
+    team: Team,
+    input: DeployInput,
+    actor: Actor,
+    opts: { action?: VersionAction; from?: number } = {},
+  ): Promise<WorkerView> {
     if (!this.enabledFor(team)) {
       throw new WorkerError(
         403,
@@ -537,6 +570,7 @@ export class WorkerService {
       if (k in vars)
         throw new WorkerError(400, "INVALID_REQUEST", `${k} is both a var and a secret`);
     }
+    const note = cleanNote(input.note);
     // Throws early (503) when the platform has no token.
     this.token();
 
@@ -549,6 +583,7 @@ export class WorkerService {
       const script = existing?.script ?? this.scriptFor(team, name);
       // Omitted vars keep the current ones on a redeploy.
       const finalVars = input.vars === undefined && existing ? existing.vars : vars;
+      checkVarsFit(finalVars, code);
       if (PROTECTED_SCRIPTS.has(script) || !script.startsWith("team-")) {
         throw new WorkerError(403, "PROTECTED", "this script name is not managed by Spaces");
       }
@@ -656,17 +691,111 @@ export class WorkerService {
         deployedBy: actor.label,
       };
       delete done.lastError;
+      const action: VersionAction = opts.action ?? "deploy";
+      try {
+        const v = await this.versions.add(done.id, {
+          at: done.deployedAt as string,
+          by: actor.label,
+          action,
+          ...(opts.from ? { from: opts.from } : {}),
+          note,
+          bytes,
+          sha256: sha256Hex(code),
+          vars: { ...finalVars },
+          secretNames: [...done.secrets],
+          code,
+        });
+        done.version = v.n;
+      } catch (err) {
+        // The deploy itself succeeded; a failed history write must not undo it.
+        console.error("[workers] could not store the version:", (err as Error)?.message);
+      }
       this.recs.set(done.id, done);
       await this.saveRecs();
       await this.deps.audit({
         teamId: team.id,
         actor,
-        action: existing ? "worker-redeploy" : "worker-deploy",
-        detail: name,
+        action:
+          action === "rollback"
+            ? "worker-rollback"
+            : existing
+              ? "worker-redeploy"
+              : "worker-deploy",
+        detail:
+          action === "rollback" && opts.from
+            ? `${name} → v${opts.from}`
+            : done.version
+              ? `${name} (v${done.version})`
+              : name,
       });
       return workerView(done);
     });
   }
+
+  /** Stored versions of a Worker, newest first. */
+  listVersions(rec: WorkerRec): Promise<WorkerVersion[]> {
+    return this.versions.list(rec.id);
+  }
+  getVersion(rec: WorkerRec, n: number): Promise<WorkerVersion | null> {
+    return this.versions.get(rec.id, n);
+  }
+
+  /**
+   * Push Spaces-managed secrets (API keys: MARSA_KEYS_URL + MARSA_KEYS_SECRET) to a Worker.
+   * They are not listed among the team's own secrets and survive redeploys (keep_bindings).
+   */
+  async putSystemSecrets(rec: WorkerRec, values: Record<string, string>): Promise<void> {
+    this.token();
+    const a = this.access();
+    try {
+      for (const [k, v] of Object.entries(values))
+        await this.deps.api.putSecret(a, rec.script, k, v);
+    } catch (err) {
+      throw this.cfFail(err, "could not set the key secrets on the Worker");
+    }
+  }
+
+  /** One-click redeploy: deploy the newest stored version again (secrets are kept). */
+  async redeploy(team: Team, rec: WorkerRec, actor: Actor, note?: unknown): Promise<WorkerView> {
+    const v = await this.versions.latest(rec.id);
+    if (!v) {
+      throw new WorkerError(
+        409,
+        "NO_STORED_VERSION",
+        "no stored version yet; deploy the code once and it will be saved",
+      );
+    }
+    return this.deploy(
+      team,
+      { name: rec.name, code: v.code, vars: v.vars, note: note ?? `redeploy of v${v.n}` },
+      actor,
+      { action: "redeploy" },
+    );
+  }
+
+  /** Deploy an older stored version again (recorded as a new version). Secrets stay as they are. */
+  async rollback(
+    team: Team,
+    rec: WorkerRec,
+    n: number,
+    actor: Actor,
+    note?: unknown,
+  ): Promise<{ worker: WorkerView; missingSecrets: string[] }> {
+    const v = Number.isInteger(n) ? await this.versions.get(rec.id, n) : null;
+    if (!v)
+      throw new WorkerError(404, "VERSION_NOT_FOUND", `no stored version ${n} for this Worker`);
+    const worker = await this.deploy(
+      team,
+      { name: rec.name, code: v.code, vars: v.vars, note: note ?? `rollback to v${v.n}` },
+      actor,
+      { action: "rollback", from: v.n },
+    );
+    const have = new Set(worker.secrets);
+    return { worker, missingSecrets: v.secretNames.filter((k) => !have.has(k)) };
+  }
+
+  /** Called after a Worker is deleted (API keys are dropped with it). */
+  onRemove: ((rec: WorkerRec) => Promise<void>) | null = null;
 
   /** Delete a tracked Worker: its route, its DNS record, then the script. */
   remove(rec: WorkerRec, actor: Actor): Promise<void> {
@@ -686,6 +815,8 @@ export class WorkerService {
       }
       this.recs.delete(cur.id);
       await this.saveRecs();
+      await this.versions.remove(cur.id).catch(() => {});
+      await this.onRemove?.(cur).catch(() => {});
       await this.deps.audit({
         teamId: cur.teamId,
         actor,
@@ -752,5 +883,30 @@ export class WorkerService {
     } catch {
       return { status: null, ms: Date.now() - t0 };
     }
+  }
+}
+
+/** Vars must fit the per-Worker total; big ones need an object default export (see cf-workers). */
+function checkVarsFit(vars: Record<string, string>, code: string): void {
+  let total = 0;
+  let big = false;
+  for (const [k, v] of Object.entries(vars)) {
+    const n = Buffer.byteLength(v);
+    total += Buffer.byteLength(k) + n;
+    if (n > CF_BINDING_MAX) big = true;
+  }
+  if (total > MAX_VARS_TOTAL) {
+    throw new WorkerError(
+      400,
+      "VARS_TOO_LARGE",
+      `vars: at most ${MAX_VARS_TOTAL / 1024} KB in total per Worker`,
+    );
+  }
+  if (big && /export\s+default\s+class\b/.test(code)) {
+    throw new WorkerError(
+      400,
+      "LARGE_VARS_NEED_OBJECT",
+      'vars over 5 KB need "export default { fetch(request, env) { … } }" (not a class)',
+    );
   }
 }

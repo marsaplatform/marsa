@@ -76,6 +76,13 @@ const PAGES: { slug: string; lang: Lang; file: string; summary: string }[] = [
     summary: "Team Workers: deploy Cloudflare Workers through Spaces without a Cloudflare key.",
   },
   {
+    slug: "agent-keys",
+    lang: "en",
+    file: "agent-keys.md",
+    summary:
+      "Scoped, expiring agent keys, one-time agent invite links, notifications and webhooks.",
+  },
+  {
     slug: "guide",
     lang: "ar",
     file: "ar/guide.md",
