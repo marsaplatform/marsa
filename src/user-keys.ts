@@ -564,14 +564,22 @@ export class UserKeyStore {
   }
 }
 
+/** Bump when the helper source changes, so CDNs never serve an old copy at the new URL. */
+export const HELPER_VERSION = 2;
+export const HELPER_PATH = `/api/keys/helper.v${HELPER_VERSION}.js`;
+
 /**
- * The helper a Worker pastes in (also served at /api/keys/helper.js). It reads the key from
- * Authorization: Bearer or X-Api-Key, asks Spaces, caches allows for cacheSeconds, and
- * reports cached uses on the next check.
+ * The helper a Worker pastes in (served at HELPER_PATH). It reads the key from
+ * Authorization: Bearer or X-Api-Key and asks Spaces on every request (exact counts).
+ * With opts.cache = N seconds it caches an allow for up to N s (capped by Spaces'
+ * cacheSeconds and the remaining minute quota) and reports cached uses on the next check.
  */
 export function keysHelperSource(publicUrl: string): string {
-  return `// Marsa Spaces API keys helper (0.14.0). Paste into your Worker; no dependencies.
+  return `// Marsa Spaces API keys helper v${HELPER_VERSION} (0.14.1). Paste into your Worker; no dependencies.
 // Spaces injects MARSA_KEYS_URL and MARSA_KEYS_SECRET when "Require API keys" is on.
+// Every request is checked by Spaces (exact limits). Opt in to caching with
+// requireKey(request, env, { cache: 30 }): faster, but each Worker isolate caches on its own,
+// so a key can go over its per-minute limit by up to its remaining quota per isolate.
 const __marsaCache = new Map(); // key -> { until, res, uses }
 export async function requireKey(request, env, opts = {}) {
   const url = env.MARSA_KEYS_URL || ${JSON.stringify(`${publicUrl}/api/keys/verify`)};
@@ -603,10 +611,11 @@ export async function requireKey(request, env, opts = {}) {
   }
   __marsaCache.delete(key);
   if (!res || !res.allow) return deny(res?.status || 401, res?.code || "INVALID_KEY", { retryAfter: res?.retryAfter });
-  if (res.cacheSeconds > 0 && opts.cache !== false) {
+  const ttl = Math.min(Number(opts.cache) > 0 ? Number(opts.cache) : 0, res.cacheSeconds || 0);
+  if (ttl > 0) {
     if (__marsaCache.size > 1000) __marsaCache.clear();
     // Serve at most the remaining minute quota from cache.
-    __marsaCache.set(key, { until: now + res.cacheSeconds * 1000, res, uses: 0, left: Math.max(0, Math.min(res.remaining?.minute ?? 0, res.remaining?.day ?? 0)) });
+    __marsaCache.set(key, { until: now + ttl * 1000, res, uses: 0, left: Math.max(0, Math.min(res.remaining?.minute ?? 0, res.remaining?.day ?? 0)) });
   }
   return { ok: true, status: 200, code: "OK", keyId: res.keyId, tools: res.tools, remaining: res.remaining };
 }

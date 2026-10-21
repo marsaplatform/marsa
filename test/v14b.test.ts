@@ -292,8 +292,11 @@ describe("0.14.0 Worker API keys", () => {
     await t.api("PUT", `${base}/settings`, { required: false }, tk);
     expect(await v("")).toMatchObject({ allow: true, required: false });
     // Helper is served and uses the instance URL.
-    const h = await t.api("GET", "/api/keys/helper.js");
+    const h = await t.api("GET", "/api/keys/helper.v2.js");
     expect(await h.text()).toBe(keysHelperSource("https://spaces.test"));
+    const old = await t.api("GET", "/api/keys/helper.js");
+    expect(old.status).toBe(302);
+    expect(old.headers.get("location")).toBe("/api/keys/helper.v2.js");
   });
 
   it("alerts on create/revoke and 429 spikes; MCP tools; dashboard page", async () => {

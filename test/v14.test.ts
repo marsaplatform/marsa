@@ -489,7 +489,15 @@ describe("0.14.0 pages", () => {
       const r = await t.api("GET", p);
       expect(r.status).toBe(200);
       const html = await r.text();
-      expect(html).toMatch(/PLACEHOLDER|نص مؤقت/);
+      expect(html).not.toMatch(/PLACEHOLDER|نص مؤقت/);
+      for (const v of [
+        "marsaplatform",
+        "mailto:info@marsaplatform.com",
+        "garanteprivacy.it",
+        "GDPR",
+      ])
+        expect(html).toContain(v);
+      expect(html).toMatch(p.startsWith("/ar") ? /بولونيا، إيطاليا/ : /Bologna, Italy/);
       expect(html).toContain("AES-256-GCM");
       expect(html).not.toMatch(/ style=|<script>/);
     }

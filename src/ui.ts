@@ -2,7 +2,7 @@ import type { AgentInviteView, AgentKeyView } from "./agent-keys.js";
 import { EXPIRY_MAX_DAYS, SCOPES } from "./agent-keys.js";
 import { ASSET_VERSION } from "./assets.js";
 import { PLATFORM_URL } from "./brand.js";
-import type { Config } from "./config.js";
+import type { Config, Operator } from "./config.js";
 import { hashIndex, initialOf } from "./cover.js";
 import type { DocPage } from "./docs.js";
 import { bytesLabel, hoursLabel, type Lang, type LimitValues, STRINGS } from "./i18n.js";
@@ -3668,116 +3668,143 @@ export function adminNotificationsHtml(lang: Lang, c: Config, o: NotificationsOp
 }
 
 /**
- * The privacy policy. Every statement describes what this code does; facts the code
- * cannot know (who operates the instance, where, how to reach them) are placeholders.
+ * The privacy policy (GDPR). Every statement describes what this code does; who operates
+ * the instance comes from config.operator (OPERATOR_* variables, marsaplatform by default).
  */
-export const PRIVACY_PLACEHOLDER = {
-  en: "[PLACEHOLDER: to be completed by the operator]",
-  ar: "[نص مؤقت: يكمله مشغّل الخدمة]",
-};
+type PolicySection = [string, string[]];
 
-const PRIVACY = {
-  en: {
-    title: "Privacy policy",
-    sub: "What this Marsa Spaces instance stores, why, for how long, and how it is protected. It describes what the software does.",
-    updated: "Last updated: 21 October 2026 (version 0.14.0)",
-    sections: [
-      [
-        "Who runs this service",
+function privacyText(
+  lang: Lang,
+  op: Operator,
+): { title: string; sub: string; updated: string; sections: PolicySection[] } {
+  const auth = op.authority.url ? `${op.authority[lang]}, ${op.authority.url}` : op.authority[lang];
+  if (lang === "en")
+    return {
+      title: "Privacy policy",
+      sub: "What this Marsa Spaces instance stores, why, for how long, who else handles it, and your rights under the EU General Data Protection Regulation (GDPR). It describes what the software does.",
+      updated: "Last updated: 21 October 2026 (version 0.14.1)",
+      sections: [
         [
-          `Operator (legal entity): ${PRIVACY_PLACEHOLDER.en}`,
-          `Address: ${PRIVACY_PLACEHOLDER.en}`,
-          `Applicable law and jurisdiction: ${PRIVACY_PLACEHOLDER.en}`,
-          `Privacy contact: ${PRIVACY_PLACEHOLDER.en}`,
+          "Who is responsible (data controller)",
+          [
+            `Data controller: ${op.name.en}`,
+            `Address: ${op.address.en}`,
+            `Privacy contact: ${op.email}`,
+            `Applicable law and jurisdiction: ${op.law.en}`,
+          ],
+        ],
+        [
+          "What you publish",
+          [
+            "The files you upload (HTML, CSS, images and so on) are stored on this server and served publicly at the site's link until it expires or is deleted. Anyone with the link can see them, and sites of teams that allow it are listed on the home page.",
+            "Expired sites are deleted automatically, with their files, their visit counts and their data. Permanent sites stay until they are deleted.",
+            "When you publish, you get an edit token. Only a SHA-256 hash of it is stored.",
+          ],
+        ],
+        [
+          "Accounts and teams",
+          [
+            "There is no email sign-up. A team member has a username, a display name and a password; the password is stored only as an scrypt hash.",
+            "Team keys, invite links, MCP tokens and agent keys are shown once and stored only as SHA-256 hashes, with a short prefix so you can tell them apart.",
+            "Each team has an activity log of the last 500 actions (who did what and when), visible to its members and the admin.",
+            "Notifications (deploys, key and member changes) are kept for the team's owners and the admin, the newest 200 per team.",
+          ],
+        ],
+        [
+          "Cookies",
+          [
+            "Signing in sets one session cookie (httpOnly, SameSite=Lax, Secure on https). It is strictly necessary for the sign-in to work. It expires after 7 days for teams and 12 hours for the admin by default, and signing out removes it.",
+            "There are no advertising or tracking cookies. Public pages and published sites set no cookies.",
+          ],
+        ],
+        [
+          "Visit counts",
+          [
+            "Page views are counted per site and per day on this server. No cookies are used and no IP address or user agent is stored.",
+            "Visitors are estimated with a hash of an hourly random salt, the site, the IP and the user agent. The salt is kept only in memory and replaced every hour, so the hashes cannot be linked or recomputed. Only daily totals are kept, for 90 days by default.",
+            "Visitors who send Do Not Track or Global Privacy Control are counted as views only. Bots and link previews are not counted.",
+          ],
+        ],
+        [
+          "IP addresses",
+          [
+            "IP addresses are used in memory for rate limits (uploads, sign-in attempts, invite links) and are not written to disk by the application.",
+            "When an agent key is used, a keyed hash (HMAC with a server secret) of the network it came from (IPv4 /24 or IPv6 /64) is kept with the key, at most 20 networks, to warn the team when the key is used from a new network. The IP address itself is not stored.",
+            "If a team turns on API keys for a Worker, Spaces stores each end-user key as a SHA-256 hash with a prefix, the label and optional email the team entered, its limits and allowed tools, and request counts per day (kept 7 days) plus the last-use time. The caller's IP is not stored for these keys. The Worker sends the key to Spaces to check it on each request (or, if the team turns it on, from a short cache).",
+            "Team recipes (markdown written by the team) are stored on the server and shown only to that team; built-in and platform recipes are public.",
+          ],
+        ],
+        [
+          "Team Workers",
+          [
+            "Each deploy is stored as a version on this server: the code, the plain variables, the names of the secrets, who deployed it, when, its size and SHA-256, and an optional note. The last 10 versions per Worker are kept and deleted with the Worker.",
+            "Secret values are never stored by Spaces: they go straight to Cloudflare and only their names are kept.",
+          ],
+        ],
+        [
+          "Purposes and legal bases",
+          [
+            "Running the service you or your team use (accounts, sign-in, publishing sites, Workers, keys, data and files, notifications and webhooks): performance of a contract or steps before one (Art. 6(1)(b) GDPR).",
+            "Security and abuse prevention (rate limits, the activity log, new-network alerts for agent keys, hashed keys and tokens): our legitimate interest in keeping the service and its users safe (Art. 6(1)(f) GDPR).",
+            "Anonymous daily visit totals shown to site owners: our legitimate interest in giving site owners basic statistics without tracking people (Art. 6(1)(f) GDPR).",
+            "End-user API keys: a team may enter a label and an optional email for each key. The team decides whether to enter them and should tell those people; Spaces uses them only to show them to the team and run the key checks.",
+          ],
+        ],
+        [
+          "Service providers (processors) and recipients",
+          [
+            "Cloudflare: if the admin enables the data and files backend, KV values and uploaded files of allowed sites are stored with Cloudflare (Workers KV and R2). Team Workers are deployed to Cloudflare's network through the platform's Cloudflare account, and Cloudflare stores their code, plain variables and secrets.",
+            "This site may be served through Cloudflare, which can add its Web Analytics script; the page security policy allows it. Fonts and other assets are served from this server.",
+            "Outgoing webhooks send notification text (team name, who did what) only to the URLs the team owner or admin sets.",
+            "Published sites are public by design: anyone with the link can see them.",
+          ],
+        ],
+        [
+          "International transfers",
+          [
+            "Cloudflare runs a global network, so data handled by Cloudflare (above) may be processed outside the European Economic Area. Such transfers rely on the safeguards in Cloudflare's data processing terms, such as the EU Standard Contractual Clauses.",
+          ],
+        ],
+        [
+          "How long data is kept",
+          [
+            "Sites: until they expire or are deleted. Accounts, keys and team recipes: until they are deleted or revoked, or the team is deleted.",
+            "Visit totals: 90 days by default. Activity log: the last 500 actions per team. Notifications: the newest 200 per team. Worker versions: the last 10 per Worker. End-user key counts: 7 days.",
+            "Session cookies: 7 days (teams) or 12 hours (admin) at most. Rate-limit data stays in memory only.",
+          ],
+        ],
+        [
+          "Security",
+          [
+            "The platform's Cloudflare API token and webhook signing secrets are encrypted at rest with AES-256-GCM, using a key that is not stored with the data.",
+            "Keys and tokens are stored only as hashes (SHA-256), and passwords as scrypt hashes.",
+            "Agent keys carry scopes (for example workers:read or spaces:write) and a required expiry of at most one year; calls outside a key's scopes are refused. Keys can be revoked at any time.",
+            "Webhooks are signed with HMAC-SHA256. Published sites run in a sandbox with a strict content security policy, separate from the app.",
+          ],
+        ],
+        [
+          "Your rights",
+          [
+            "You can delete your sites, KV values and files, and revoke keys and tokens from the dashboard or the API at any time. A team owner can remove members; the admin can delete a team, which removes its members, keys, notifications and Workers.",
+            "Under the GDPR you have the right to access your personal data, to have it corrected or erased, to restrict its processing, to receive it in a portable format, and to object to processing based on legitimate interests (Articles 15 to 21).",
+            `To use these rights, write to ${op.email}. We answer within one month, as the GDPR requires.`,
+            `You also have the right to lodge a complaint with a data protection supervisory authority: ${auth}.`,
+          ],
         ],
       ],
-      [
-        "What you publish",
-        [
-          "The files you upload (HTML, CSS, images and so on) are stored on this server and served publicly at the site's link until it expires or is deleted. Anyone with the link can see them, and sites of teams that allow it are listed on the home page.",
-          "Expired sites are deleted automatically, with their files, their visit counts and their data. Permanent sites stay until they are deleted.",
-          "When you publish, you get an edit token. Only a SHA-256 hash of it is stored.",
-        ],
-      ],
-      [
-        "Accounts and teams",
-        [
-          "There is no email sign-up. A team member has a username, a display name and a password; the password is stored only as an scrypt hash.",
-          "Team keys, invite links, MCP tokens and agent keys are shown once and stored only as SHA-256 hashes, with a short prefix so you can tell them apart.",
-          "Each team has an activity log of the last 500 actions (who did what and when), visible to its members and the admin.",
-          "Notifications (deploys, key and member changes) are kept for the team's owners and the admin, the newest 200 per team.",
-        ],
-      ],
-      [
-        "Cookies",
-        [
-          "Signing in sets one session cookie (httpOnly, SameSite=Lax, Secure on https). It expires after 7 days for teams and 12 hours for the admin by default, and signing out removes it.",
-          "There are no advertising or tracking cookies. Public pages and published sites set no cookies.",
-        ],
-      ],
-      [
-        "Visit counts",
-        [
-          "Page views are counted per site and per day on this server. No cookies are used and no IP address or user agent is stored.",
-          "Visitors are estimated with a hash of an hourly random salt, the site, the IP and the user agent. The salt is kept only in memory and replaced every hour, so the hashes cannot be linked or recomputed. Only daily totals are kept, for 90 days by default.",
-          "Visitors who send Do Not Track or Global Privacy Control are counted as views only. Bots and link previews are not counted.",
-        ],
-      ],
-      [
-        "IP addresses",
-        [
-          "IP addresses are used in memory for rate limits (uploads, sign-in attempts, invite links) and are not written to disk by the application.",
-          "When an agent key is used, a keyed hash of the IP (HMAC with a server secret) is kept with the key, the last 20, to warn the team when the key is used from a new address. The IP itself is not stored.",
-          "If a team turns on API keys for a Worker, Spaces stores each end-user key as a SHA-256 hash with a prefix, the label and optional email the team entered, its limits and allowed tools, and request counts per day (kept 7 days) plus the last-use time. The caller's IP is not stored for these keys. The Worker sends the key to Spaces to check it on each request (or from a short cache).",
-          "Team recipes (markdown written by the team) are stored on the server and shown only to that team; built-in and platform recipes are public.",
-        ],
-      ],
-      [
-        "Service providers",
-        [
-          "If the admin enables the data and files backend, KV values and uploaded files of allowed sites are stored with Cloudflare (Workers KV and R2).",
-          "Team Workers are deployed to Cloudflare's network through the platform's Cloudflare account. Their code, plain variables and secrets are stored by Cloudflare.",
-          "This site may be served through Cloudflare, which can add its Web Analytics script; the page security policy allows it. Fonts and other assets are served from this server.",
-          "Outgoing webhooks send notification text (team name, who did what) only to the URLs the team owner or admin sets.",
-        ],
-      ],
-      [
-        "Team Workers",
-        [
-          "Each deploy is stored as a version on this server: the code, the plain variables, the names of the secrets, who deployed it, when, its size and SHA-256, and an optional note. The last 10 versions per Worker are kept and deleted with the Worker.",
-          "Secret values are never stored by Spaces: they go straight to Cloudflare and only their names are kept.",
-        ],
-      ],
-      [
-        "Security",
-        [
-          "The platform's Cloudflare API token and webhook signing secrets are encrypted at rest with AES-256-GCM, using a key that is not stored with the data.",
-          "Keys and tokens are stored only as hashes (SHA-256), and passwords as scrypt hashes.",
-          "Agent keys carry scopes (for example workers:read or spaces:write) and a required expiry of at most one year; calls outside a key's scopes are refused. Keys can be revoked at any time.",
-          "Webhooks are signed with HMAC-SHA256. Published sites run in a sandbox with a strict content security policy, separate from the app.",
-        ],
-      ],
-      [
-        "Your choices",
-        [
-          "You can delete your sites, KV values and files, and revoke keys and tokens from the dashboard or the API at any time. A team owner can remove members; the admin can delete a team, which removes its members, keys, notifications and Workers.",
-          `For other requests about your data, contact the operator: ${PRIVACY_PLACEHOLDER.en}`,
-        ],
-      ],
-    ] as [string, string[]][],
-  },
-  ar: {
+    };
+  return {
     title: "سياسة الخصوصية",
-    sub: "ما الذي تحفظه نسخة Marsa Spaces هذه، ولماذا، وإلى متى، وكيف تحميه. تصف السياسة ما يفعله البرنامج فعليًا.",
-    updated: "آخر تحديث: 21 أكتوبر 2026 (الإصدار 0.14.0)",
+    sub: "ما الذي تحفظه نسخة Marsa Spaces هذه، ولماذا، وإلى متى، ومن يتعامل معه أيضًا، وحقوقك بموجب اللائحة الأوروبية العامة لحماية البيانات (GDPR). تصف السياسة ما يفعله البرنامج فعليًا.",
+    updated: "آخر تحديث: 21 أكتوبر 2026 (الإصدار 0.14.1)",
     sections: [
       [
-        "من يشغّل الخدمة",
+        "المسؤول عن البيانات (المتحكّم)",
         [
-          `المشغّل (الكيان القانوني): ${PRIVACY_PLACEHOLDER.ar}`,
-          `العنوان: ${PRIVACY_PLACEHOLDER.ar}`,
-          `القانون والاختصاص القضائي: ${PRIVACY_PLACEHOLDER.ar}`,
-          `التواصل بشأن الخصوصية: ${PRIVACY_PLACEHOLDER.ar}`,
+          `المتحكّم في البيانات: ${op.name.ar}`,
+          `العنوان: ${op.address.ar}`,
+          `التواصل بشأن الخصوصية: ${op.email}`,
+          `القانون والاختصاص القضائي: ${op.law.ar}`,
         ],
       ],
       [
@@ -3800,7 +3827,7 @@ const PRIVACY = {
       [
         "ملفات تعريف الارتباط (الكوكيز)",
         [
-          "تسجيل الدخول يضع كوكي جلسة واحدًا (httpOnly وSameSite=Lax وSecure على https). تنتهي افتراضيًا بعد 7 أيام للفرق و12 ساعة للمدير، ويحذفها تسجيل الخروج.",
+          "تسجيل الدخول يضع كوكي جلسة واحدًا (httpOnly وSameSite=Lax وSecure على https)، وهو ضروري لعمل تسجيل الدخول. تنتهي افتراضيًا بعد 7 أيام للفرق و12 ساعة للمدير، ويحذفها تسجيل الخروج.",
           "لا توجد كوكيز إعلانية أو للتتبع. الصفحات العامة والمواقع المنشورة لا تضع أي كوكيز.",
         ],
       ],
@@ -3816,18 +3843,9 @@ const PRIVACY = {
         "عناوين IP",
         [
           "تُستخدم عناوين IP في الذاكرة لحدود المعدل (الرفع ومحاولات الدخول وروابط الدعوة) ولا يكتبها التطبيق على القرص.",
-          "عند استخدام مفتاح وكيل تُحفظ بصمة مفتاحية لعنوان IP (HMAC بسر الخادم) مع المفتاح، آخر 20 بصمة، لتنبيه الفريق إذا استُخدم المفتاح من عنوان جديد. لا يُحفظ العنوان نفسه.",
-          "إذا فعّل فريق مفاتيح API لوركر، تحفظ مساحات كل مفتاح للمستخدمين كبصمة SHA-256 مع بادئة، والاسم والبريد الاختياري اللذين أدخلهما الفريق، وحدوده وأدواته المسموحة، وعدد الطلبات لكل يوم (لمدة 7 أيام) ووقت آخر استخدام. لا يُحفظ عنوان IP للمتصل لهذه المفاتيح. يرسل الوركر المفتاح إلى مساحات للتحقق منه في كل طلب (أو من ذاكرة مؤقتة قصيرة).",
+          "عند استخدام مفتاح وكيل تُحفظ مع المفتاح بصمة مفتاحية (HMAC بسر الخادم) للشبكة التي جاء منها الطلب (IPv4 ‏/24 أو IPv6 ‏/64)، 20 شبكة على الأكثر، لتنبيه الفريق إذا استُخدم المفتاح من شبكة جديدة. لا يُحفظ العنوان نفسه.",
+          "إذا فعّل فريق مفاتيح API لوركر، تحفظ مساحات كل مفتاح للمستخدمين كبصمة SHA-256 مع بادئة، والاسم والبريد الاختياري اللذين أدخلهما الفريق، وحدوده وأدواته المسموحة، وعدد الطلبات لكل يوم (لمدة 7 أيام) ووقت آخر استخدام. لا يُحفظ عنوان IP للمتصل لهذه المفاتيح. يرسل الوركر المفتاح إلى مساحات للتحقق منه في كل طلب (أو من ذاكرة مؤقتة قصيرة إن فعّلها الفريق).",
           "وصفات الفريق (نصوص markdown يكتبها الفريق) تُحفظ على الخادم وتظهر لذلك الفريق فقط؛ الوصفات المدمجة ووصفات المنصة عامة.",
-        ],
-      ],
-      [
-        "مزودو الخدمة",
-        [
-          "إذا فعّل المدير خلفية البيانات والملفات، تُحفظ قيم KV والملفات المرفوعة للمواقع المسموح لها لدى Cloudflare ‏(Workers KV وR2).",
-          "تُنشر وركرز الفرق على شبكة Cloudflare عبر حساب Cloudflare الخاص بالمنصة، وتحفظ Cloudflare كودها ومتغيراتها وأسرارها.",
-          "قد يُقدَّم هذا الموقع عبر Cloudflare التي يمكن أن تضيف سكربت Web Analytics الخاص بها، وسياسة أمان الصفحات تسمح به. الخطوط وبقية الملفات تُقدَّم من هذا الخادم.",
-          "ترسل الـ Webhooks الصادرة نص الإشعار (اسم الفريق ومن فعل ماذا) فقط إلى الروابط التي يحددها مالك الفريق أو المدير.",
         ],
       ],
       [
@@ -3835,6 +3853,38 @@ const PRIVACY = {
         [
           "كل نشر يُحفظ كإصدار على هذا الخادم: الكود والمتغيرات العادية وأسماء الأسرار ومن نشره ومتى وحجمه وبصمته SHA-256 وملاحظة اختيارية. تُحفظ آخر 10 إصدارات لكل وركر وتُحذف معه.",
           "لا تحفظ Spaces قيم الأسرار أبدًا: تذهب مباشرة إلى Cloudflare ونحفظ أسماءها فقط.",
+        ],
+      ],
+      [
+        "الأغراض والأسس القانونية",
+        [
+          "تشغيل الخدمة التي تستخدمها أنت أو فريقك (الحسابات وتسجيل الدخول ونشر المواقع والوركرز والمفاتيح والبيانات والملفات والإشعارات والـ Webhooks): تنفيذ عقد أو خطوات تسبقه (المادة 6(1)(ب) من GDPR).",
+          "الأمان ومنع إساءة الاستخدام (حدود المعدل وسجل النشاط وتنبيهات الشبكات الجديدة لمفاتيح الوكلاء وحفظ المفاتيح والرموز كبصمات): مصلحتنا المشروعة في حماية الخدمة ومستخدميها (المادة 6(1)(و) من GDPR).",
+          "مجاميع الزيارات اليومية المجهولة التي يراها أصحاب المواقع: مصلحتنا المشروعة في تقديم إحصاءات أساسية دون تتبع الأشخاص (المادة 6(1)(و) من GDPR).",
+          "مفاتيح API للمستخدمين: يمكن للفريق إدخال اسم وبريد اختياري لكل مفتاح. الفريق يقرر إدخالهما وعليه إبلاغ أصحابهما؛ وتستخدمهما مساحات فقط لعرضهما على الفريق وللتحقق من المفاتيح.",
+        ],
+      ],
+      [
+        "مزودو الخدمة (المعالجون) والجهات المتلقية",
+        [
+          "Cloudflare: إذا فعّل المدير خلفية البيانات والملفات، تُحفظ قيم KV والملفات المرفوعة للمواقع المسموح لها لدى Cloudflare ‏(Workers KV وR2). وتُنشر وركرز الفرق على شبكة Cloudflare عبر حساب Cloudflare الخاص بالمنصة، وتحفظ Cloudflare كودها ومتغيراتها وأسرارها.",
+          "قد يُقدَّم هذا الموقع عبر Cloudflare التي يمكن أن تضيف سكربت Web Analytics الخاص بها، وسياسة أمان الصفحات تسمح به. الخطوط وبقية الملفات تُقدَّم من هذا الخادم.",
+          "ترسل الـ Webhooks الصادرة نص الإشعار (اسم الفريق ومن فعل ماذا) فقط إلى الروابط التي يحددها مالك الفريق أو المدير.",
+          "المواقع المنشورة عامة بطبيعتها: يستطيع أي شخص لديه الرابط رؤيتها.",
+        ],
+      ],
+      [
+        "النقل الدولي للبيانات",
+        [
+          "تشغّل Cloudflare شبكة عالمية، لذا قد تُعالَج البيانات التي تتعامل معها Cloudflare (أعلاه) خارج المنطقة الاقتصادية الأوروبية. يستند هذا النقل إلى الضمانات الواردة في شروط معالجة البيانات لدى Cloudflare، مثل البنود التعاقدية القياسية للاتحاد الأوروبي.",
+        ],
+      ],
+      [
+        "مدة الاحتفاظ بالبيانات",
+        [
+          "المواقع: حتى تنتهي مدتها أو تُحذف. الحسابات والمفاتيح ووصفات الفريق: حتى تُحذف أو تُلغى أو يُحذف الفريق.",
+          "مجاميع الزيارات: 90 يومًا افتراضيًا. سجل النشاط: آخر 500 عملية لكل فريق. الإشعارات: آخر 200 لكل فريق. إصدارات الوركر: آخر 10 لكل وركر. عدّادات مفاتيح المستخدمين: 7 أيام.",
+          "كوكي الجلسة: 7 أيام (للفرق) أو 12 ساعة (للمدير) على الأكثر. بيانات حدود المعدل في الذاكرة فقط.",
         ],
       ],
       [
@@ -3847,26 +3897,43 @@ const PRIVACY = {
         ],
       ],
       [
-        "اختياراتك",
+        "حقوقك",
         [
           "تستطيع حذف مواقعك وقيم KV والملفات، وإلغاء المفاتيح والرموز، من لوحة التحكم أو الـ API في أي وقت. يستطيع مالك الفريق إزالة الأعضاء، ويستطيع المدير حذف فريق فتُحذف معه أعضاؤه ومفاتيحه وإشعاراته ووركرزه.",
-          `لأي طلب آخر يخص بياناتك، تواصل مع المشغّل: ${PRIVACY_PLACEHOLDER.ar}`,
+          "بموجب GDPR لك الحق في الاطلاع على بياناتك الشخصية، وتصحيحها أو محوها، وتقييد معالجتها، والحصول عليها بصيغة قابلة للنقل، والاعتراض على المعالجة القائمة على المصلحة المشروعة (المواد 15 إلى 21).",
+          `لممارسة هذه الحقوق راسلنا على ${op.email}. نرد خلال شهر واحد كما تشترط اللائحة.`,
+          `ولك أيضًا الحق في تقديم شكوى إلى سلطة رقابية لحماية البيانات: ${auth}.`,
         ],
       ],
-    ] as [string, string[]][],
-  },
-};
+    ],
+  };
+}
+
+/** Escape a policy line, then turn the contact email and authority URL into links. */
+function policyLine(x: string, op: Operator): string {
+  let h = esc(x);
+  const mail = esc(op.email);
+  if (op.email)
+    h = h.split(mail).join(`<a class="text-link ltr" dir="ltr" href="mailto:${mail}">${mail}</a>`);
+  const url = op.authority.url;
+  if (url && /^https:\/\/[^\s"<>]+$/.test(url))
+    h = h
+      .split(esc(url))
+      .join(
+        `<a class="text-link ltr" dir="ltr" href="${esc(url)}" rel="noopener">${esc(url.replace(/^https:\/\//, ""))}</a>`,
+      );
+  return h;
+}
 
 export function privacyHtml(lang: Lang, c: Config): string {
-  const p = PRIVACY[lang];
+  const op = c.operator;
+  const p = privacyText(lang, op);
+  const shieldAt = p.sections.findIndex(([h]) => h === (lang === "en" ? "Security" : "الأمان"));
   const sections = p.sections
     .map(
       ([h, items], i) =>
-        `<section class="policy-section" aria-labelledby="p-${i}"><h2 id="p-${i}">${i === 8 ? `${icon("shield")} ` : ""}${esc(h)}</h2><ul>${items
-          .map((x) => {
-            const ph = PRIVACY_PLACEHOLDER[lang];
-            return `<li>${x.includes(ph) ? esc(x).replace(esc(ph), `<mark class="placeholder">${esc(ph)}</mark>`) : esc(x)}</li>`;
-          })
+        `<section class="policy-section" aria-labelledby="p-${i}"><h2 id="p-${i}">${i === shieldAt ? `${icon("shield")} ` : ""}${esc(h)}</h2><ul>${items
+          .map((x) => `<li>${policyLine(x, op)}</li>`)
           .join("")}</ul></section>`,
     )
     .join("");
@@ -4213,7 +4280,7 @@ export const K14 = {
       "Paste the helper into the Worker and call requireKey(request, env, { tool }) before any work.",
     verify: "Verify endpoint",
     cache: (n: number) =>
-      `Workers may cache an allow for up to ${n} s; counts catch up on the next check.`,
+      `The helper checks every request (exact limits). Optional { cache: ${n} } is faster but each Worker isolate caches on its own, so a key can go a little over its limit.`,
     readOnly: "Only owners and editors can manage keys.",
     notConfigured: "Workers are not configured on this instance.",
     rowActions: "Actions",
@@ -4261,7 +4328,8 @@ export const K14 = {
     helper: "المساعد للوركر",
     helperText: "الصقوا المساعد في الوركر واستدعوا requireKey(request, env, { tool }) قبل أي عمل.",
     verify: "عنوان التحقق",
-    cache: (n: number) => `يمكن للوركر تخزين السماح حتى ${n} ثانية؛ يلحق العدّ في الفحص التالي.`,
+    cache: (n: number) =>
+      `يتحقق المساعد من كل طلب (حدود دقيقة). الخيار { cache: ${n} } أسرع، لكن لكل نسخة من الوركر ذاكرتها فقد يتجاوز المفتاح حدّه قليلًا.`,
     readOnly: "يدير المفاتيح المالكون والمحررون فقط.",
     notConfigured: "الوركرز غير مضبوطة على هذا الخادم.",
     rowActions: "إجراءات",

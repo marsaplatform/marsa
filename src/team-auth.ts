@@ -75,7 +75,7 @@ export function makeTeamAuth(d: TeamAuthDeps) {
             teamId: team.id,
             kind: "agent-key-new-ip",
             actor: `agent key ${key.name}`,
-            detail: `${key.name} (${key.prefix}…)${use.first ? " · first use" : ""} · ip#${use.ipHash.slice(0, 8)}`,
+            detail: `${key.name} (${key.prefix}…)${use.first ? " · first use" : ""} · ${use.fam ? `IPv${use.fam} net` : "ip"}#${use.ipHash.slice(0, 8)}`,
           })
           .catch(() => {});
       }

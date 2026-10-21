@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.14.1] - 2026-10-21
+
+### Changed
+- **Exact Worker API-key limits by default.** `requireKey()` now asks Spaces on every request. Caching
+  is opt-in with `requireKey(request, env, { cache: 30 })`. Each Worker isolate keeps its own cache, so
+  with caching a key can go over its per-minute limit by up to its remaining quota per isolate
+  (documented in the docs and the recipe, AR and EN).
+- **Versioned helper URL** `/api/keys/helper.v2.js`. The old `/api/keys/helper.js` redirects there
+  (302, no-cache), so CDNs cannot keep serving an old copy. The dashboard, docs and recipe use the new URL.
+- **Fewer duplicate "new address" alerts for agent keys.** Uses are grouped by network (IPv4 /24,
+  IPv6 /64, stored as keyed hashes). A network alerts at most once in 24 h, and is forgotten after
+  30 days unused. A new network of the other IP family seen within 2 minutes of a known network (the
+  same dual-stack client) is recorded without an alert. Keys from 0.14.0 adopt their next network
+  without an alert.
+- **Privacy policy (GDPR)** now names the controller (marsaplatform, Bologna, Italy,
+  info@marsaplatform.com, Italian law). It also covers the purposes and legal bases, processors
+  (Cloudflare), international transfers, retention, data-subject rights, and complaints to the Garante.
+  Self-hosters set `OPERATOR_NAME`, `OPERATOR_ADDRESS`, `OPERATOR_LAW`, `OPERATOR_EMAIL`,
+  `OPERATOR_AUTHORITY` and `OPERATOR_AUTHORITY_URL`.
+
 ## [0.14.0] - 2026-10-21
 
 ### Added

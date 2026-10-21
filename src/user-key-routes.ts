@@ -7,7 +7,7 @@ import type { RateLimiter } from "./rate-limit.js";
 import { can, scopeError, type TeamAuth, type TeamCred } from "./team-auth.js";
 import type { Team, TeamStore } from "./teams.js";
 import { bearer } from "./tokens.js";
-import { keysHelperSource, UserKeyError, type UserKeyStore } from "./user-keys.js";
+import { HELPER_PATH, keysHelperSource, UserKeyError, type UserKeyStore } from "./user-keys.js";
 import { WorkerError, type WorkerRec, type WorkerService } from "./workers.js";
 
 /**
@@ -47,7 +47,7 @@ export function userKeyOps(d: Omit<UserKeyDeps, "limiter" | "teamAuth">) {
         worker: rec.name,
         settings: d.userKeys.settingsView(rec.id),
         verifyUrl: verifyUrl(d.config),
-        helperUrl: `${d.config.publicUrl}/api/keys/helper.js`,
+        helperUrl: `${d.config.publicUrl}${HELPER_PATH}`,
         keys: d.userKeys.list(rec.id).map((k) => d.userKeys.view(k)),
       };
     },
@@ -174,10 +174,15 @@ export function mountUserKeyRoutes(app: Hono, d: UserKeyDeps, ops: UserKeyOps): 
     if (r.retryAfter) c.header("Retry-After", String(r.retryAfter));
     return c.json({ ...r, required: true });
   });
-  app.get("/api/keys/helper.js", (c) => {
+  // Versioned URL: content only changes with HELPER_VERSION, so it may be cached.
+  app.get(HELPER_PATH, (c) => {
     c.header("Content-Type", "text/javascript; charset=utf-8");
-    // no-cache: the edge must not hand out an old helper after a Spaces update.
-    c.header("Cache-Control", "no-cache");
+    c.header("Cache-Control", "public, max-age=3600");
     return c.body(keysHelperSource(config.publicUrl));
+  });
+  // Old unversioned URL (0.14.0): CDNs may still hold an old copy, so point to the new one.
+  app.get("/api/keys/helper.js", (c) => {
+    c.header("Cache-Control", "no-cache");
+    return c.redirect(HELPER_PATH, 302);
   });
 }

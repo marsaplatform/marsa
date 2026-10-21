@@ -33,7 +33,44 @@ export const MAX_AGENT_KEYS = 25;
 export const MAX_OPEN_AGENT_INVITES = 10;
 export const AGENT_INVITE_TTL_HOURS = 24;
 const DAY = 86_400_000;
-const IP_HASHES_KEEP = 20;
+const IP_NETS_KEEP = 20;
+/** A network not seen for this long counts as new again. */
+const IP_NET_FORGET = 30 * DAY;
+/** Never alert twice for the same network within this window. */
+const IP_ALERT_GAP = DAY;
+/**
+ * A dual-stack client often alternates IPv4 and IPv6 within one session. A new network of
+ * the other family used within this window of a known network is recorded without an alert.
+ */
+const DUAL_STACK_WINDOW = 2 * 60_000;
+
+/** Network prefix of an address: IPv4 /24, IPv6 /64 (IPv4-mapped IPv6 counts as IPv4). */
+export function ipNetwork(ip: string): { net: string; fam: 4 | 6 } | null {
+  let a = (ip || "").trim().toLowerCase();
+  if (a.startsWith("[")) a = a.slice(1, a.indexOf("]") > 0 ? a.indexOf("]") : undefined);
+  const zone = a.indexOf("%");
+  if (zone >= 0) a = a.slice(0, zone);
+  const mapped = /^(?:0{0,4}:){0,5}(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/.exec(a);
+  if (mapped?.[1] && a.includes(":")) a = mapped[1];
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(a);
+  if (v4) {
+    const p = v4.slice(1, 5).map(Number);
+    if (p.some((x) => x > 255)) return null;
+    return { net: `${p[0]}.${p[1]}.${p[2]}.0/24`, fam: 4 };
+  }
+  if (!a.includes(":") || !/^[0-9a-f:.]+$/.test(a)) return null;
+  const halves = a.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  if (tail.some((x) => x.includes(".")) || head.some((x) => x.includes("."))) return null;
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0 || (halves.length === 1 && head.length !== 8)) return null;
+  const groups = [...head, ...Array(fill).fill("0"), ...tail];
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  const top = groups.slice(0, 4).map((g) => Number.parseInt(g, 16).toString(16));
+  return { net: `${top.join(":")}::/64`, fam: 6 };
+}
 
 export interface AgentKey {
   id: string;
@@ -49,12 +86,24 @@ export interface AgentKey {
   revokedAt?: string;
   revokedBy?: string;
   lastUsedAt?: string;
-  /** Keyed hashes of the client IPs seen (never the IPs). */
+  /** Legacy (0.14.0): keyed hashes of full client IPs. Kept for old files, no longer used. */
   ipHashes: string[];
+  /** Networks seen (IPv4 /24, IPv6 /64) as keyed hashes, never the IPs (0.14.1). */
+  ipNets?: IpNetSeen[];
   /** Set once the "expired" alert went out. */
   expiryNotified?: boolean;
   /** Created by claiming an agent invite. */
   inviteId?: string;
+}
+
+export interface IpNetSeen {
+  /** Keyed hash of the network prefix. */
+  h: string;
+  fam: 4 | 6;
+  /** Last time this network used the key. */
+  seen: string;
+  /** Last time a new-address alert went out for this network. */
+  alerted?: string;
 }
 
 export interface AgentInvite {
@@ -349,24 +398,50 @@ export class AgentKeyStore {
     return createHmac("sha256", this.ipSalt).update(`ip:${ip}`).digest("hex").slice(0, 16);
   }
 
-  /** Record a use. Returns whether this IP (hash) is new for the key, and whether it is the first use. */
+  /**
+   * Record a use. `newIp` is true when the key should raise a "new address" alert:
+   * the network (IPv4 /24, IPv6 /64) was not seen in the last 30 days, no alert went out
+   * for it in the last 24 h, and it is not just the other IP family of a client that used
+   * a known network in the last 2 minutes (dual-stack).
+   */
   async touch(
     k: AgentKey,
     ip: string,
-  ): Promise<{ newIp: boolean; first: boolean; ipHash: string }> {
-    const ipHash = this.ipHash(ip || "unknown");
+  ): Promise<{ newIp: boolean; first: boolean; ipHash: string; fam: 4 | 6 | 0 }> {
+    const t = this.now();
+    const net = ipNetwork(ip);
+    const ipHash = this.ipHash(net ? `net:${net.net}` : `raw:${ip || "unknown"}`);
+    const fam = net?.fam ?? 0;
     const first = !k.lastUsedAt;
-    const newIp = !k.ipHashes.includes(ipHash);
     const prev = k.lastUsedAt ? Date.parse(k.lastUsedAt) : 0;
-    k.lastUsedAt = this.iso();
-    if (newIp) {
-      k.ipHashes.push(ipHash);
-      if (k.ipHashes.length > IP_HASHES_KEEP)
-        k.ipHashes.splice(0, k.ipHashes.length - IP_HASHES_KEEP);
+    // Keys from 0.14.0 only have full-IP hashes: adopt the current network quietly once.
+    const migrating = !k.ipNets && k.ipHashes.length > 0;
+    if (!k.ipNets) k.ipNets = [];
+    const nets = k.ipNets;
+    const known = nets.filter((n) => t - Date.parse(n.seen) < IP_NET_FORGET);
+    let rec = nets.find((n) => n.h === ipHash);
+    const isKnown = !!rec && t - Date.parse(rec.seen) < IP_NET_FORGET;
+    let newIp = false;
+    if (!isKnown) {
+      const recentlyAlerted = !!rec?.alerted && t - Date.parse(rec.alerted) < IP_ALERT_GAP;
+      const dualStack =
+        fam !== 0 && known.some((n) => n.fam !== fam && t - Date.parse(n.seen) < DUAL_STACK_WINDOW);
+      newIp = !recentlyAlerted && !dualStack && !migrating;
     }
-    // Write at most once a minute for plain use; always for a new IP.
-    if (newIp || this.now() - prev > 60_000) await this.save();
-    return { newIp, first, ipHash };
+    if (!rec) {
+      rec = { h: ipHash, fam: (fam || 4) as 4 | 6, seen: this.iso(t) };
+      nets.push(rec);
+    }
+    rec.seen = this.iso(t);
+    if (newIp) rec.alerted = this.iso(t);
+    if (nets.length > IP_NETS_KEEP) {
+      nets.sort((a, b) => Date.parse(a.seen) - Date.parse(b.seen));
+      nets.splice(0, nets.length - IP_NETS_KEEP);
+    }
+    k.lastUsedAt = this.iso(t);
+    // Write at most once a minute for plain use; always for a new network.
+    if (!isKnown || t - prev > 60_000) await this.save();
+    return { newIp, first, ipHash, fam };
   }
 
   /** Keys that expired and were not reported yet (marks them reported). */
