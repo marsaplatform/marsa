@@ -13,6 +13,7 @@ import { probeBackend } from "./backend/health.js";
 import type { SiteBackend } from "./backend/types.js";
 import type { BackupService } from "./backup.js";
 import { APP_VERSION } from "./brand.js";
+import type { PermReport } from "./cf-permissions.js";
 import { clientIp } from "./client-ip.js";
 import type { Config } from "./config.js";
 import { UploadError } from "./errors.js";
@@ -106,6 +107,7 @@ import { intervalForm, OX, permsSection } from "./ui-ops.js";
 import type { UserKeyOps } from "./user-key-routes.js";
 import { UserKeyError, type UserKeyStore } from "./user-keys.js";
 import type { VisitCounter, VisitSummary } from "./visits.js";
+import { healthRule } from "./worker-health.js";
 import { insightOf, type ProbeCache, stackLabel } from "./worker-insight.js";
 import type { WorkerOps } from "./worker-ops.js";
 import { versionMeta } from "./worker-versions.js";
@@ -681,8 +683,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           opsData.env = await ops.envView(rec, refresh);
           const name = q("name");
           if (/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name)) opsData.prefill = name;
-        } else if (tab === "health") opsData.health = ops.health.view(rec.id);
-        else if (tab === "logs")
+        } else if (tab === "health") {
+          opsData.health = ops.health.view(rec.id);
+          opsData.healthTarget = {
+            path: rec.meta?.healthPath ?? "",
+            expect: rec.meta?.healthExpect ?? "",
+          };
+        } else if (tab === "logs")
           opsData.logs = await ops.analytics.logs(rec.script, !!rec.logs, refresh);
         else if (tab === "usage") {
           const range = (["24h", "7d", "30d"] as const).find((r) => r === q("range")) ?? "24h";
@@ -1653,6 +1660,22 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             actor,
             op === "on" ? "worker-health-on" : "worker-health-off",
           );
+        } else if (op === "target") {
+          const meta: Record<string, unknown> = { ...(rec.meta ?? {}) };
+          for (const k of ["healthPath", "healthExpect"] as const) {
+            const v = field(form, k).trim();
+            if (v) meta[k] = v;
+            else delete meta[k];
+          }
+          try {
+            await d.workers.setLinks(rec, { meta }, actor);
+          } catch (e) {
+            if (e instanceof WorkerError) return done(c, s, back, { kind: "err", text: e.message });
+            throw e;
+          }
+          const fresh = d.workers.get(rec.id) ?? rec;
+          await d.workers.auditOf(fresh, actor, "worker-health-target", healthRule(fresh));
+          return done(c, s, back, { kind: "ok", text: t.admin.saved });
         } else if (op === "check" && rec.status === "active" && rec.url) {
           const lim = limiter.hit(`health-now:${rec.id}`, 12, 3_600_000);
           if (!lim.allowed) return done(c, s, back, { kind: "err", text: t.badRequest });
@@ -3222,8 +3245,10 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           extra: d.ops
             ? permsSection(
                 lang,
-                d.workers.configured ? await d.ops.workersPermissions().catch(() => null) : null,
-                await d.ops.backendPermissions().catch(() => null),
+                d.workers.configured
+                  ? permOrPending(d.ops.permissionsNow("workers"), "workers")
+                  : null,
+                permOrPending(d.ops.permissionsNow("backend"), "backend"),
                 href("/admin/settings/permissions"),
                 sessions.csrfFor(s),
                 href("/admin/settings"),
@@ -3352,6 +3377,11 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       return done(c, s, back, { kind: "ok", text: t.admin.siteDeleted });
     });
   }
+}
+
+/** 0.16.0: a placeholder while the first permission probe runs in the background. */
+function permOrPending(r: PermReport | null, token: "workers" | "backend"): PermReport {
+  return r ?? { token, configured: true, checks: [], granted: 0, required: 0, at: "" };
 }
 
 /** 0.16.0: "backend on, maxSites 10" for a team update's audit entry. */

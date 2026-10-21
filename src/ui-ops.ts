@@ -80,7 +80,15 @@ export const OX = {
     enable: "Turn monitoring on",
     disable: "Turn monitoring off",
     healthHelp:
-      "One request per interval: a GET of the URL (any answer below 500 counts as up), or MCP initialize for MCP servers without their own auth. Two failures in a row = down; you get one notification (bell + webhooks) when it goes down and one when it recovers.",
+      "One request per interval: a GET of the URL (web Workers: any answer below 400 counts as up; MCP servers: below 500), or MCP initialize for MCP servers without their own auth. Set a health path or expected status below if / is not a good check. Two failures in a row = down; you get one notification (bell + webhooks) when it goes down and one when it recovers.",
+    target: "What the check asks",
+    healthPath: "Health path",
+    healthPathHint: "e.g. /health (empty = the Worker's URL)",
+    healthExpect: "Expected status",
+    healthExpectHint: "e.g. 2xx, 200-399, 200,404 or <400 (empty = default)",
+    saveTarget: "Save check",
+    legacy: (s: string) =>
+      `This Worker answered ${s} at / before 0.16.0, so it still counts as up with the old "below 500" rule. Set a health path or expected status to use the new rule.`,
     latencyChart: "Latency over the last 24h (red = failed check)",
     logsHelp:
       "Recent errors for the last 24h. Exception counts by hour come from Cloudflare analytics; full log lines need Workers Logs on this Worker. Messages are scrubbed of anything that looks like a secret; query strings are dropped.",
@@ -130,6 +138,8 @@ export const OX = {
     unlocks: "Unlocks",
     result: "Result",
     recheck: "Recheck",
+    checked: "checked",
+    checking: "Checking the token now. Reload in a few seconds to see the result.",
     granted: "Granted",
     missing: "Missing",
     unchecked: "Not checked",
@@ -219,7 +229,15 @@ export const OX = {
     enable: "تشغيل المراقبة",
     disable: "إيقاف المراقبة",
     healthHelp:
-      "طلب واحد كل فترة: GET للرابط (أي رد أقل من 500 يعني أنه يعمل)، أو MCP initialize لسيرفرات MCP التي ليس لها مصادقة خاصة. فشلان متتاليان = متوقف؛ يصلك إشعار واحد (الجرس + الويب هوك) عند التوقف وواحد عند العودة.",
+      "طلب واحد كل فترة: GET للرابط (وركرات الويب: أي رد أقل من 400 يعني أنه يعمل؛ خوادم MCP: أقل من 500)، أو MCP initialize لخوادم MCP التي ليس لها مصادقة خاصة. حدّد مسار فحص أو حالة متوقعة أدناه إن لم يكن / مناسبًا للفحص. فشلان متتاليان = متوقف؛ يصلك إشعار واحد (الجرس + الويب هوك) عند التوقف وواحد عند العودة.",
+    target: "ماذا يطلب الفحص",
+    healthPath: "مسار الفحص",
+    healthPathHint: "مثل ‎/health (فارغ = رابط الوركر)",
+    healthExpect: "الحالة المتوقعة",
+    healthExpectHint: "مثل 2xx أو 200-399 أو 200,404 أو ‎<400 (فارغ = الافتراضي)",
+    saveTarget: "حفظ الفحص",
+    legacy: (s: string) =>
+      `ردّ هذا الوركر بـ ${s} على / قبل الإصدار 0.16.0، لذا ما زال يُعدّ عاملًا بالقاعدة القديمة «أقل من 500». حدّد مسار فحص أو حالة متوقعة لتطبيق القاعدة الجديدة.`,
     latencyChart: "زمن الاستجابة خلال آخر ٢٤ ساعة (الأحمر = فحص فاشل)",
     logsHelp:
       "آخر الأخطاء خلال ٢٤ ساعة. أعداد الاستثناءات بالساعة من تحليلات Cloudflare؛ أسطر السجل الكاملة تحتاج تشغيل Workers Logs لهذا الوركر. تُنقّى الرسائل من أي شيء يشبه سرًّا، وتُحذف معاملات الاستعلام من الروابط.",
@@ -269,6 +287,8 @@ export const OX = {
     unlocks: "ما تتيحه",
     result: "النتيجة",
     recheck: "إعادة الفحص",
+    checked: "آخر فحص",
+    checking: "يجري فحص المفتاح الآن. أعد تحميل الصفحة بعد ثوانٍ لترى النتيجة.",
     granted: "ممنوحة",
     missing: "ناقصة",
     unchecked: "لم تُفحص",
@@ -414,6 +434,8 @@ export interface OpsTabCtx {
   canVars: boolean;
   /** Prefill for the secret name (?name=…). */
   prefill?: string;
+  /** 0.16.0: declared health path and expected statuses. */
+  healthTarget?: { path: string; expect: string };
 }
 
 const back = (p: string) => `<input type="hidden" name="back" value="${esc(p)}">`;
@@ -579,7 +601,26 @@ ${stat(x.lastCheck, h.last ? `${timeTag(lang, h.last.at)} <span class="meta">${h
 </div>
 ${latencyChart(lang, h)}
 <section class="panel"><h2 class="h3">${esc(x.incidents)}</h2>${dataTable({ lang, id: "incidents", caption: x.incidents, headLabel: x.from, cols: [{ label: x.to }, { label: x.checks, sort: "num" }, { label: x.status }], rows: incRows, empty: x.noIncidents, search: false })}</section>
+${healthTargetPanel(o, h)}
 <p class="meta">${esc(x.healthHelp)}</p>`;
+}
+
+/** 0.16.0: the rule the check uses, the legacy note, and the path/expected-status form. */
+function healthTargetPanel(o: OpsTabCtx, h: HealthView): string {
+  const x = OX[o.lang];
+  const legacy =
+    h.legacy && h.last
+      ? `<p class="notice">${esc(x.legacy(h.last.s ? `HTTP ${h.last.s}` : "4xx"))}</p>`
+      : "";
+  const rule = h.rule ? `<p class="meta"><code class="ltr">${esc(h.rule)}</code></p>` : "";
+  const form =
+    o.canEdit && o.healthTarget
+      ? `<form method="post" action="${esc(o.act("health"))}" class="health-target">${csrfField(o.csrf)}${back(o.self)}<input type="hidden" name="op" value="target">
+<div class="field"><label for="hc-path">${esc(x.healthPath)}</label><input id="hc-path" name="healthPath" dir="ltr" maxlength="200" placeholder="/health" value="${esc(o.healthTarget.path)}" aria-describedby="hc-path-h"><p class="meta" id="hc-path-h">${esc(x.healthPathHint)}</p></div>
+<div class="field"><label for="hc-exp">${esc(x.healthExpect)}</label><input id="hc-exp" name="healthExpect" dir="ltr" maxlength="60" placeholder="2xx" value="${esc(o.healthTarget.expect)}" aria-describedby="hc-exp-h"><p class="meta" id="hc-exp-h">${esc(x.healthExpectHint)}</p></div>
+<button class="button small" type="submit">${esc(x.saveTarget)}</button></form>`
+      : "";
+  return `<section class="panel" aria-labelledby="hc-target"><h2 class="h3" id="hc-target">${esc(x.target)}</h2>${rule}${legacy}${form}</section>`;
 }
 
 export function logsTab(o: OpsTabCtx, logsOn: boolean, r: LogsResult): string {
@@ -626,7 +667,7 @@ export function logsTab(o: OpsTabCtx, logsOn: boolean, r: LogsResult): string {
     filters: { level: e.level, source: e.source, kind: e.kind },
   }));
   const uniq = (k: "level" | "source" | "kind") => [...new Set(r.entries.map((e) => e[k]))];
-  return `<div class="detail-head slim"><div>${badge(logsOn ? x.logsOn : x.logsOff, logsOn ? "on" : "muted")} <span class="meta">${relTime(r.at, lang)}</span></div><div class="row-acts"><a class="button small ghost" href="${esc(`${o.self}${o.self.includes("?") ? "&" : "?"}refresh=1`)}">${icon("redeploy")}${esc(x.refresh)}</a>${toggle}</div></div>
+  return `<div class="detail-head slim"><div>${badge(logsOn ? x.logsOn : x.logsOff, logsOn ? "on" : "muted")} <span class="meta">${esc(x.checked)} ${relTime(r.at, lang)}</span></div><div class="row-acts"><a class="button small ghost" href="${esc(`${o.self}${o.self.includes("?") ? "&" : "?"}refresh=1`)}">${icon("redeploy")}${esc(x.refresh)}</a>${toggle}</div></div>
 ${notes}${dataTable({
   lang,
   id: "logs-table",
@@ -710,6 +751,9 @@ export function permsPanel(
   const x = OX[lang];
   if (!r.configured)
     return `<section class="panel perms"><h2 class="h3">${esc(title)}</h2><p class="meta">${esc(x.notConfigured)}</p></section>`;
+  const head = `<div class="detail-head slim"><h2 class="h3">${esc(title)}</h2>${postForm(recheck, csrf, `${back(self)}<button class="button small ghost" type="submit" data-busy>${icon("redeploy")}${esc(x.recheck)}</button>`)}</div>`;
+  if (!r.at)
+    return `<section class="panel perms" aria-busy="true">${head}<p class="meta">${esc(x.checking)}</p></section>`;
   const pct = r.required ? Math.round((r.granted / r.required) * 100) : 0;
   const items = r.checks
     .map((c) => {

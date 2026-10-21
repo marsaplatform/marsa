@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { CF_TOKEN, FakeCfWorkers, ZONE_NAME } from "./fake-cf-workers.js";
 import { makeApp } from "./helpers.js";
 
 type App = Awaited<ReturnType<typeof makeApp>>;
 let t: App | null = null;
 afterEach(async () => {
+  vi.restoreAllMocks();
   await t?.cleanup();
   t = null;
 });
@@ -41,7 +43,7 @@ describe("0.16.0 activity API and downloads", () => {
     const jl = await t.api("GET", `/api/teams/${id}/activity?format=jsonl`, undefined, tk);
     const lines = (await jl.text()).trim().split("\n");
     expect(lines.length).toBe(j.count);
-    expect(JSON.parse(lines[0]).action).toBeTruthy();
+    expect(JSON.parse(lines[0] ?? "{}").action).toBeTruthy();
 
     const ak = await t.api(
       "POST",
@@ -123,7 +125,7 @@ describe("0.16.0 every admin mutation writes an audit entry", () => {
     const inv = await app.admin("POST", `/teams/${id}/invites`, { role: "editor" });
     const invite = (await inv.json()) as { invite: { id: string } };
 
-    const cases: [string, () => Promise<Response>, string, number][] = [
+    const cases: [string, () => Response | Promise<Response>, string, number][] = [
       ["team-create", () => app.admin("POST", "/teams", { name: "Second" }), "platform", 201],
       ["team-update", () => app.admin("PATCH", `/teams/${id}`, { maxSites: 9 }), id, 200],
       ["invite-revoke", () => app.admin("DELETE", `/teams/${id}/invites/${invite.invite.id}`), id, 204],
@@ -169,5 +171,104 @@ describe("0.16.0 every admin mutation writes an audit entry", () => {
     await a.post(`/admin/teams/${id}/update`, { _csrf: csrf, directory: "0" });
     const upd = await (await t.admin("GET", `/activity?team=${id}&action=team-update`)).json();
     expect(upd.entries[0].detail).toBe("directory off");
+  });
+});
+
+describe("0.16.0 admin Settings renders without waiting on the token probes", () => {
+  it("shows a checking note first, then the cached report with its age", async () => {
+    const cf = new FakeCfWorkers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    t = await makeApp({ MARSA_SECRETS_KEY: "k".repeat(48) }, { cfFetch: cf.fetch });
+    await t.admin("PUT", "/workers/settings", { token: CF_TOKEN, zone: ZONE_NAME });
+    const a = await t.adminBrowser();
+    const before = cf.calls.length;
+    const first = await (await a.get("/admin/settings")).text();
+    expect(first).toContain("Checking the token now");
+    // The probes run in the background; the next load has the report.
+    await vi.waitFor(() => expect(cf.calls.length).toBeGreaterThan(before + 5));
+    await new Promise((r) => setTimeout(r, 50));
+    const next = await (await a.get("/admin/settings")).text();
+    expect(next).not.toContain("Checking the token now");
+    expect(next).toMatch(/checked/);
+    expect(next).not.toContain(CF_TOKEN);
+  });
+});
+
+describe("0.16.0 health checks treat 4xx by Worker type and honour a declared target", () => {
+  it("web < 400, MCP GET < 500, declared path/expect, and legacy 4xx Workers stay quiet", async () => {
+    const { HealthMonitor, readHealthExpect, statusMatches } = await import(
+      "../src/worker-health.js"
+    );
+    const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = await mkdtemp(join(tmpdir(), "hm-"));
+    const status: Record<string, number> = {};
+    const hits: string[] = [];
+    const m = new HealthMonitor(dir, {
+      now: () => 1_000_000,
+      fetch: async (u) => {
+        hits.push(String(u));
+        return new Response(null, { status: status[String(u)] ?? 200 });
+      },
+      kindOf: (r) => ((r as { id: string }).id.startsWith("mcp") ? "mcp" : "web"),
+    });
+    const rec = (id: string, meta: object = {}) =>
+      ({ id, teamId: "t", name: id, url: `https://${id}.test`, status: "active", meta }) as never;
+    status["https://web.test"] = 404;
+    expect((await m.checkOne(rec("web"))).ok).toBe(0);
+    expect(m.view("web").rule).toBe("GET / · <400");
+    status["https://mcp1.test"] = 401;
+    expect((await m.checkOne(rec("mcp1"))).ok).toBe(1);
+    status["https://web2.test/health"] = 204;
+    expect((await m.checkOne(rec("web2", { healthPath: "/health", healthExpect: "2xx" }))).ok).toBe(1);
+    expect(hits).toContain("https://web2.test/health");
+    status["https://web3.test"] = 404;
+    expect((await m.checkOne(rec("web3", { healthExpect: "200,404" }))).ok).toBe(1);
+
+    expect(readHealthExpect(" 2XX, 404 ")).toBe("2xx,404");
+    expect(() => readHealthExpect("abc")).toThrow();
+    expect(() => readHealthExpect("300-200")).toThrow();
+    expect(statusMatches("<400", 399)).toBe(true);
+    expect(statusMatches("200-299", 300)).toBe(false);
+    expect(statusMatches("2xx", 0)).toBe(false);
+
+    // Upgrade: a Worker whose last GET answered 404 keeps "< 500" until a target is declared.
+    await writeFile(
+      join(dir, "health.json"),
+      JSON.stringify({
+        workers: {
+          old: {
+            enabled: true,
+            state: "up",
+            since: 1,
+            fails: 0,
+            checks: [{ t: 999_000, ok: 1, ms: 5, s: 404, via: "get" }],
+            days: {},
+          },
+        },
+      }),
+    );
+    const m2 = new HealthMonitor(dir, {
+      now: () => 1_000_000,
+      fetch: async () => new Response("", { status: 404 }),
+    });
+    await m2.ready();
+    expect(m2.view("old").legacy).toBe(true);
+    expect((await m2.checkOne(rec("old"))).ok).toBe(1);
+    expect((await m2.checkOne(rec("old", { healthPath: "/" }))).ok).toBe(0);
+    expect(m2.view("old").legacy).toBe(false);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("validates health meta on deploy-time metadata", async () => {
+    const { readMeta } = await import("../src/worker-insight.js");
+    expect(readMeta({ healthPath: "/ping", healthExpect: "200-399" })).toEqual({
+      healthPath: "/ping",
+      healthExpect: "200-399",
+    });
+    expect(() => readMeta({ healthPath: "ping" })).toThrow(/healthPath/);
+    expect(() => readMeta({ healthPath: "//evil.example" })).toThrow(/healthPath/);
+    expect(() => readMeta({ healthExpect: "ok" })).toThrow(/healthExpect/);
   });
 });

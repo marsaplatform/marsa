@@ -31,6 +31,13 @@ export interface HealthCheck {
 
 interface HealthRec {
   enabled: boolean;
+  /** 0.16.0: rules version (2 = web Workers need < 400 unless they declare otherwise). */
+  rules?: number;
+  /** Answered 4xx at / before 0.16.0: still counted with the old "< 500" rule until the owner
+   * declares a health path or expected status (so the upgrade raises no false alerts). */
+  legacy?: boolean;
+  /** What the last check asked and accepted ("GET / · < 400"). */
+  rule?: string;
   state: "up" | "down" | "unknown";
   since: number | null;
   fails: number;
@@ -49,6 +56,10 @@ export interface HealthView {
   series: HealthCheck[];
   incidents: { from: string; to: string | null; checks: number; status: number }[];
   intervalSec: number;
+  /** 0.16.0: the request and the accepted statuses ("GET /health · 200-299"). */
+  rule: string | null;
+  /** Counted with the pre-0.16.0 "< 500" rule (answers 4xx at /); see HealthRec.legacy. */
+  legacy: boolean;
 }
 
 export interface HealthDeps {
@@ -57,7 +68,51 @@ export interface HealthDeps {
   now: () => number;
   /** MCP endpoint to check with initialize (null = plain GET). */
   mcpTarget?: (rec: WorkerRec) => string | null;
+  /** 0.16.0: declared or detected type (MCP servers keep "< 500" for a plain GET). */
+  kindOf?: (rec: WorkerRec) => "mcp" | "web" | "other";
   defaultIntervalSec?: number;
+}
+
+/** "/health · 2xx" for the audit log. */
+export const healthRule = (rec: WorkerRec) =>
+  `${rec.meta?.healthPath ?? "/"} · ${rec.meta?.healthExpect ?? "default"}`;
+
+/** 0.16.0: a health path ("/health", "/api/ping?x=1"). */
+export function readHealthPath(raw: unknown): string {
+  const p = typeof raw === "string" ? raw.trim() : "";
+  if (!/^\/(?!\/)[A-Za-z0-9._~!$&'()*+,;=:@%/?-]{0,199}$/.test(p))
+    throw new RangeError('healthPath: a path starting with "/" (up to 200 characters)');
+  return p;
+}
+
+/** 0.16.0: expected statuses: "2xx", "200-299", "200,404" or "<400" (comma-separated). */
+export function readHealthExpect(raw: unknown): string {
+  const v = typeof raw === "string" ? raw.replace(/\s+/g, "").toLowerCase() : "";
+  const ok = (part: string) => {
+    let m = /^([1-5])xx$/.exec(part);
+    if (m) return true;
+    m = /^(\d{3})-(\d{3})$/.exec(part);
+    if (m) return valid(Number(m[1])) && valid(Number(m[2])) && Number(m[1]) <= Number(m[2]);
+    m = /^<(\d{3})$/.exec(part);
+    if (m) return Number(m[1]) > 100 && Number(m[1]) <= 600;
+    return /^\d{3}$/.test(part) && valid(+part);
+  };
+  const valid = (n: number) => n >= 100 && n <= 599;
+  if (!v || v.length > 60 || !v.split(",").every(ok))
+    throw new RangeError('healthExpect: e.g. "2xx", "200-299", "200,404" or "<400"');
+  return v;
+}
+
+/** Does status s match an expect spec (already validated)? */
+export function statusMatches(spec: string, s: number): boolean {
+  if (s <= 0) return false;
+  return spec.split(",").some((part) => {
+    if (/^[1-5]xx$/.test(part)) return Math.floor(s / 100) === Number(part[0]);
+    const r = /^(\d{3})-(\d{3})$/.exec(part);
+    if (r) return s >= Number(r[1]) && s <= Number(r[2]);
+    if (part.startsWith("<")) return s < Number(part.slice(1));
+    return s === Number(part);
+  });
 }
 
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
@@ -88,7 +143,16 @@ export class HealthMonitor {
           workers?: Record<string, HealthRec>;
         };
         if (j.intervalSec) this.intervalSec = clampInterval(j.intervalSec);
-        for (const [id, r] of Object.entries(j.workers ?? {})) this.recs.set(id, r);
+        for (const [id, r] of Object.entries(j.workers ?? {})) {
+          // 0.16.0 upgrade: Workers that answered 4xx to a plain GET keep the old rule
+          // until their owner declares a health path or expected status.
+          if (!r.rules) {
+            const last = r.checks.at(-1);
+            if (last?.via === "get" && last.s >= 400 && last.s < 500) r.legacy = true;
+            r.rules = 2;
+          }
+          this.recs.set(id, r);
+        }
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
       }
@@ -127,7 +191,15 @@ export class HealthMonitor {
   private rec(id: string): HealthRec {
     let r = this.recs.get(id);
     if (!r) {
-      r = { enabled: true, state: "unknown", since: null, fails: 0, checks: [], days: {} };
+      r = {
+        enabled: true,
+        rules: 2,
+        state: "unknown",
+        since: null,
+        fails: 0,
+        checks: [],
+        days: {},
+      };
       this.recs.set(id, r);
     }
     return r;
@@ -185,7 +257,11 @@ export class HealthMonitor {
   /** Check one Worker now (also used by the "check now" button). */
   async checkOne(w: WorkerRec, persist = true): Promise<HealthCheck> {
     await this.ready();
-    const endpoint = this.deps.mcpTarget?.(w) ?? null;
+    // A declared health path always gets a plain GET; otherwise MCP servers get initialize.
+    const path = w.meta?.healthPath ?? null;
+    const expect = w.meta?.healthExpect ?? null;
+    const endpoint = path ? null : (this.deps.mcpTarget?.(w) ?? null);
+    const target = path ? `${w.url.replace(/\/$/, "")}${path}` : w.url;
     const t0 = this.deps.now();
     let s = 0;
     try {
@@ -210,7 +286,7 @@ export class HealthMonitor {
             redirect: "manual",
             signal: AbortSignal.timeout(10_000),
           })
-        : await this.deps.fetch(w.url, {
+        : await this.deps.fetch(target, {
             method: "GET",
             headers: { "user-agent": "MarsaSpaces-Health/1.0" },
             redirect: "manual",
@@ -222,10 +298,15 @@ export class HealthMonitor {
       s = 0;
     }
     const ms = Math.max(0, this.deps.now() - t0);
-    // Any answer below 500 means the Worker runs (401/404 are the app's own answers);
-    // for MCP initialize only 2xx, or 401/403 (own auth), count.
-    const ok =
-      s > 0 && (endpoint ? (s >= 200 && s < 300) || s === 401 || s === 403 : s < 500) ? 1 : 0;
+    // 0.16.0: a declared expected status wins. Otherwise: MCP initialize needs 2xx or 401/403
+    // (own auth); a plain GET needs < 400 for web Workers and < 500 for MCP servers (whose
+    // own auth answers 401). Pre-0.16.0 Workers that answered 4xx keep "< 500" (legacy).
+    const rec = this.rec(w.id);
+    if (path || expect) rec.legacy = false;
+    const isMcp = (this.deps.kindOf?.(w) ?? "web") === "mcp";
+    const spec = expect ?? (endpoint ? "2xx,401,403" : isMcp || rec.legacy ? "<500" : "<400");
+    const ok = statusMatches(spec, s) ? 1 : 0;
+    rec.rule = `${endpoint ? "MCP initialize" : `GET ${path ?? "/"}`} · ${spec}`;
     const c: HealthCheck = { t: t0, ok: ok as 0 | 1, ms, s, via: endpoint ? "mcp" : "get" };
     await this.record(w, c);
     if (persist) await this.save();
@@ -291,6 +372,8 @@ export class HealthMonitor {
       series: [],
       incidents: [],
       intervalSec: this.intervalSec,
+      rule: r?.rule ?? null,
+      legacy: !!r?.legacy,
     };
     if (!r) return base;
     const last = r.checks.at(-1);

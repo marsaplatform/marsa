@@ -534,6 +534,8 @@ export interface WorkerDetailOpts {
     logs?: LogsResult;
     usage?: { range: UsageRange; series: UsageSeries; keys: KeyUsageRow[] };
     prefill?: string;
+    /** 0.16.0: declared health path / expected status (prefill). */
+    healthTarget?: { path: string; expect: string };
     /** Health summary for the overview. */
     healthCell?: { state: HealthView["state"]; d7: number | null };
   };
@@ -596,6 +598,7 @@ export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): st
     canEdit: o.canEdit,
     canVars: o.canEdit && !!w.version,
     ...(o.ops?.prefill ? { prefill: o.ops.prefill } : {}),
+    ...(o.ops?.healthTarget ? { healthTarget: o.ops.healthTarget } : {}),
   };
   if (tab === "env" && o.ops?.env) body = envTab(opsCtx, o.ops.env);
   else if (tab === "health" && o.ops?.health)
