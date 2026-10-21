@@ -50,7 +50,7 @@ export function openapi(config: Config) {
     openapi: "3.1.0",
     info: {
       title: `${APP_NAME} API`,
-      version: "0.11.3",
+      version: "0.12.0",
       description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site. Teams can also sign in in a browser at /login (team key) to manage their sites; the admin signs in at /admin/login. Those browser routes use session cookies and are not part of this API. Each site also has an MCP server (Streamable HTTP, JSON-RPC) at /mcp/s/{siteId} with per-site bearer tokens; see /docs/mcp.`,
       license: { name: "MIT", identifier: "MIT" },
     },
@@ -239,6 +239,60 @@ export function openapi(config: Config) {
       },
     },
     paths: {
+      "/api/teams/{team}/workers": {
+        get: {
+          summary: "List the team's Workers",
+          operationId: "listWorkers",
+          description:
+            "Team Workers (see /docs/workers). Needs the team key; {team} is the team slug or id.",
+          security: [{ teamKey: [] }],
+          parameters: [{ name: "team", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "200": { description: "Workers and quota" } },
+        },
+        post: {
+          summary: "Create a Worker",
+          operationId: "createWorker",
+          description:
+            'JSON {"name","code","vars"?,"secrets"?}. code is one ES module. Spaces deploys it to Cloudflare as team-<slug>-<name> at https://<slug>-<name>.<zone>.',
+          security: [{ teamKey: [] }],
+          parameters: [{ name: "team", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "201": { description: "Deployed" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}": {
+        put: {
+          summary: "Create or redeploy a Worker",
+          operationId: "putWorker",
+          description:
+            'JSON {"code","vars"?,"secrets"?} or the raw script as application/javascript. Omitted vars are kept; secrets are write-only (null removes one).',
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "Redeployed" }, "201": { description: "Created" } },
+        },
+        get: {
+          summary: "One Worker, with a live check",
+          operationId: "getWorker",
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "The Worker" } },
+        },
+        delete: {
+          summary: "Delete a Worker (route, DNS record, script)",
+          operationId: "deleteWorker",
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "204": { description: "Deleted" } },
+        },
+      },
       "/api/sites": {
         post: {
           summary: "Create a site",

@@ -61,7 +61,10 @@ export class Browser {
 }
 
 /** A fresh app on a temp dir with a controllable clock and an in-memory backend. */
-export async function makeApp(env: Record<string, string> = {}) {
+export async function makeApp(
+  env: Record<string, string> = {},
+  opts: { cfFetch?: (i: string, init?: RequestInit) => Promise<Response> } = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), "marsa-t-"));
   const clock = { now: Date.parse("2026-01-01T00:00:00Z") };
   const config = loadConfig({
@@ -75,7 +78,14 @@ export async function makeApp(env: Record<string, string> = {}) {
   await store.init();
   const backend = new MemoryBackend();
   const visits = new VisitCounter(config.dataDir, config.visits, () => clock.now);
-  const app = createApp({ config, store, backend, visits, now: () => clock.now });
+  const app = createApp({
+    config,
+    store,
+    backend,
+    visits,
+    now: () => clock.now,
+    ...(opts.cfFetch ? { cfFetch: opts.cfFetch } : {}),
+  });
   const api = (
     method: string,
     path: string,

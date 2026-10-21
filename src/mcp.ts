@@ -13,6 +13,7 @@ import type { RateLimiter } from "./rate-limit.js";
 import type { SiteMeta, SiteStore } from "./store.js";
 import type { TeamStore } from "./teams.js";
 import { bearer, hashToken, safeEqual } from "./tokens.js";
+import { WorkerError, type WorkerService, workerView } from "./workers.js";
 
 /**
  * One MCP server per space: POST /mcp/s/<siteId> speaks MCP over Streamable
@@ -79,6 +80,8 @@ export interface McpDeps {
   now: () => number;
   siteUrl: (id: string) => string;
   replaceSite: (meta: SiteMeta, entries: UploadEntry[]) => Promise<SiteMeta>;
+  /** Team Workers (tools appear only when the admin enabled Workers for the space's team). */
+  workers?: WorkerService;
 }
 
 type Json = Record<string, unknown>;
@@ -90,6 +93,7 @@ interface Tool {
   annotations?: Json;
   write?: boolean;
   needsBackend?: boolean;
+  needsWorkers?: boolean;
   run: (args: Json, ctx: CallCtx) => Promise<ToolResult>;
 }
 interface CallCtx {
@@ -370,7 +374,90 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
         return ok({ id, deleted: await kv().fileDelete(meta.id, id) });
       },
     },
+    {
+      name: "list_workers",
+      title: "List team Workers",
+      description:
+        "The Cloudflare Workers this space's team deployed through Marsa Spaces (name, URL, status, env var names and values, secret names), and the team's quota. No Cloudflare key is needed: Spaces deploys on the team's behalf.",
+      inputSchema: obj({}),
+      annotations: { readOnlyHint: true },
+      needsWorkers: true,
+      run: async (_a, { meta }) => {
+        const team = teams.get(meta.teamId);
+        const w = d.workers as WorkerService;
+        if (!team) throw new ToolError("this space has no team");
+        return ok({
+          slug: team.slug,
+          quota: w.quotaOf(team),
+          workers: w.list(team.id).map(workerView),
+        });
+      },
+    },
+    {
+      name: "deploy_worker",
+      title: "Deploy a Worker",
+      description:
+        "Create or redeploy a Cloudflare Worker for this space's team. `code` is one ES module (export default { async fetch(request, env) { … } }). It is published at https://<team-slug>-<name>.<platform domain> (script team-<slug>-<name>). `vars` are plain env vars (shown in listings); `secrets` are write-only (null removes one). Omitting `vars` on a redeploy keeps the current ones.",
+      inputSchema: obj(
+        {
+          name: { type: "string", description: "1-30 chars: a-z 0-9 and single hyphens" },
+          code: { type: "string", description: "The Worker's JavaScript ES module" },
+          vars: { type: "object", additionalProperties: { type: "string" } },
+          secrets: { type: "object", additionalProperties: { type: ["string", "null"] } },
+        },
+        ["name", "code"],
+      ),
+      annotations: { destructiveHint: false },
+      write: true,
+      needsWorkers: true,
+      run: async (a, { meta, token }) => {
+        const team = teams.get(meta.teamId);
+        if (!team) throw new ToolError("this space has no team");
+        try {
+          const w = await (d.workers as WorkerService).deploy(
+            team,
+            {
+              name: a.name,
+              code: a.code,
+              ...("vars" in a ? { vars: a.vars } : {}),
+              ...("secrets" in a ? { secrets: a.secrets } : {}),
+            },
+            { kind: "mcp", label: token.name },
+          );
+          return ok({ worker: w });
+        } catch (err) {
+          if (err instanceof WorkerError) return fail(`${err.code}: ${err.message}`);
+          throw err;
+        }
+      },
+    },
+    {
+      name: "delete_worker",
+      title: "Delete a Worker",
+      description: "Delete one of the team's Workers (its route, DNS record and script).",
+      inputSchema: obj({ name: { type: "string" } }, ["name"]),
+      annotations: { destructiveHint: true },
+      write: true,
+      needsWorkers: true,
+      run: async (a, { meta, token }) => {
+        const team = teams.get(meta.teamId);
+        const w = d.workers as WorkerService;
+        const rec = team ? w.find(team.id, str(a, "name")) : null;
+        if (!rec) return fail("no such Worker");
+        try {
+          await w.remove(rec, { kind: "mcp", label: token.name });
+          return ok({ deleted: rec.name });
+        } catch (err) {
+          if (err instanceof WorkerError) return fail(`${err.code}: ${err.message}`);
+          throw err;
+        }
+      },
+    },
   ];
+
+  function workersOn(meta: SiteMeta) {
+    return !!d.workers?.configured && d.workers.enabledFor(teams.get(meta.teamId));
+  }
 
   function backendOn(meta: SiteMeta) {
     return !!backend && (limits.guestAccess || !!teams.get(meta.teamId)?.backend);
@@ -384,7 +471,12 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
     return k;
   }
   const available = (meta: SiteMeta, token: McpToken) =>
-    tools.filter((t) => (!t.write || token.scope === "rw") && (!t.needsBackend || backendOn(meta)));
+    tools.filter(
+      (t) =>
+        (!t.write || token.scope === "rw") &&
+        (!t.needsBackend || backendOn(meta)) &&
+        (!t.needsWorkers || workersOn(meta)),
+    );
 
   const rpc = (id: unknown, result: unknown) => ({ jsonrpc: "2.0", id, result });
   const rpcErr = (id: unknown, code: number, message: string) => ({
@@ -510,6 +602,11 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
               rpc(id, fail("BACKEND_NOT_ALLOWED: this space has no data/files backend")),
             );
           }
+          if (tool.needsWorkers && !workersOn(meta)) {
+            return c.json(
+              rpc(id, fail("WORKERS_NOT_ALLOWED: Workers are not enabled for this team")),
+            );
+          }
           if (tool.write) {
             const w = limiter.hit(`mcpw:${token.hash}`, config.mcp.writesPerHour, 3_600_000);
             const isKv = tool.name === "kv_put" || tool.name === "kv_delete";
@@ -531,7 +628,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
             // Fresh meta for writes that change it (replace_site_files).
             const fresh = (await store.get(meta.id)) ?? meta;
             const out = await tool.run(args, { meta: fresh, token });
-            if (tool.write && !(out as { isError?: boolean }).isError) {
+            if (tool.write && !tool.needsWorkers && !(out as { isError?: boolean }).isError) {
               await d.audit?.({
                 teamId: meta.teamId,
                 siteId: meta.id,

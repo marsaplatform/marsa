@@ -70,6 +70,12 @@ const PAGES: { slug: string; lang: Lang; file: string; summary: string }[] = [
     summary: "An MCP server per space: scoped tokens, client config and tools for AI agents.",
   },
   {
+    slug: "workers",
+    lang: "en",
+    file: "workers.md",
+    summary: "Team Workers: deploy Cloudflare Workers through Spaces without a Cloudflare key.",
+  },
+  {
     slug: "guide",
     lang: "ar",
     file: "ar/guide.md",

@@ -788,7 +788,7 @@ function teamHead(
   lang: Lang,
   o: { team: TeamPageOpts["team"]; csrf: string; me?: MeView },
   sub = "",
-  active: "sites" | "members" = "sites",
+  active: "sites" | "members" | "workers" = "sites",
 ): string {
   const t = STRINGS[lang];
   const out = postForm(
@@ -797,7 +797,7 @@ function teamHead(
     `<button class="button small ghost" type="submit">${esc(t.common.signOut)}</button>`,
   );
   const cur = (k: string) => (k === active ? ' aria-current="page"' : "");
-  const nav = `<nav class="segmented" aria-label="${esc(t.team.eyebrow)}"><a class="button small ghost" href="${localePath(lang, "/team")}"${cur("sites")}>${esc(t.team.sites)}</a><a class="button small ghost" href="${localePath(lang, "/team/members")}"${cur("members")}>${esc(t.members.nav)}</a></nav>`;
+  const nav = `<nav class="segmented" aria-label="${esc(t.team.eyebrow)}"><a class="button small ghost" href="${localePath(lang, "/team")}"${cur("sites")}>${esc(t.team.sites)}</a><a class="button small ghost" href="${localePath(lang, "/team/workers")}"${cur("workers")}>${esc(WS[lang].nav)}</a><a class="button small ghost" href="${localePath(lang, "/team/members")}"${cur("members")}>${esc(t.members.nav)}</a></nav>`;
   const who = o.me
     ? t.members.signedInAs(
         o.me.viaKey ? t.members.viaKey : o.me.name,
@@ -1417,11 +1417,11 @@ export interface AdminTeamRow {
 }
 
 /** Section switch + sign-out, shown in the page heading like the team dashboard's tools. */
-function adminTools(lang: Lang, active: "teams" | "sites", csrf: string): string {
+function adminTools(lang: Lang, active: "teams" | "sites" | "workers", csrf: string): string {
   const t = STRINGS[lang];
   const href = (p: string) => localePath(lang, p);
   const cur = (k: string) => (k === active ? ' aria-current="page"' : "");
-  return `<div class="head-tools"><nav class="segmented" aria-label="${esc(t.admin.tabsLabel)}"><a class="button small ghost" href="${href("/admin")}"${cur("teams")}>${esc(t.admin.teamsTab)}</a><a class="button small ghost" href="${href("/admin/sites")}"${cur("sites")}>${esc(t.admin.sitesTab)}</a></nav>${postForm(
+  return `<div class="head-tools"><nav class="segmented" aria-label="${esc(t.admin.tabsLabel)}"><a class="button small ghost" href="${href("/admin")}"${cur("teams")}>${esc(t.admin.teamsTab)}</a><a class="button small ghost" href="${href("/admin/sites")}"${cur("sites")}>${esc(t.admin.sitesTab)}</a><a class="button small ghost" href="${href("/admin/workers")}"${cur("workers")}>${esc(WS[lang].nav)}</a></nav>${postForm(
     href("/logout"),
     csrf,
     `<button class="button small ghost" type="submit">${esc(t.common.signOut)}</button>`,
@@ -1741,3 +1741,429 @@ export const goneHtml = (lang: Lang, c: Config) =>
   messageHtml(lang, c, "410", STRINGS[lang].gone, STRINGS[lang].goneSub);
 
 export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="13" fill="#145a49"/><text x="32" y="44" text-anchor="middle" font-family="Tahoma,sans-serif" font-size="48" fill="#f6faf7">م</text></svg>`;
+
+// ---- team Workers (0.12.0) ---------------------------------------------------------------
+
+/** Strings for the Workers pages (kept here, next to the markup). */
+export const WS = {
+  en: {
+    nav: "Workers",
+    title: "Workers",
+    sub: "Deploy small Cloudflare Workers (APIs, MCP servers) for your team. Spaces publishes them for you; you never need a Cloudflare key.",
+    off: "Workers are off for this team. Ask the admin to turn them on.",
+    notConfigured: "The admin has not connected Cloudflare yet.",
+    none: "No Workers yet",
+    noneSub: "Deploy one with the form below, the API or the space MCP.",
+    name: "Name",
+    url: "Address",
+    status: "Status",
+    size: "Size",
+    env: "Vars and secrets",
+    deployed: "Deployed",
+    statuses: {
+      active: "Live",
+      disabled: "Disabled by the admin",
+      failed: "Failed",
+      deploying: "Deploying",
+    } as Record<string, string>,
+    deployTitle: "Deploy a Worker",
+    deploySub:
+      "One JavaScript ES module (export default { fetch(request, env) { … } }). Deploying an existing name replaces its code.",
+    nameHelp: (slug: string, zone: string) =>
+      `1-30 characters: a-z, 0-9 and hyphens. Address: ${slug}-<name>.${zone}`,
+    file: "Script file (.js)",
+    code: "…or paste the code",
+    vars: "Env vars (NAME=value, one per line)",
+    varsHelp:
+      "Plain values, visible to the team. Leave empty on a redeploy to keep the current ones.",
+    secrets: "Secrets (NAME=value, one per line)",
+    secretsHelp:
+      "Write-only: stored as Worker secrets on Cloudflare and never shown again. Use NAME= (empty) to remove one.",
+    deploy: "Deploy",
+    del: "Delete",
+    confirmDelete: "Delete this Worker? Its address stops working at once.",
+    deployed1: "Deployed.",
+    deleted: "Worker deleted.",
+    quota: (n: number, max: number, kb: number) =>
+      `${n} of ${max} Workers · up to ${kb} KB per script`,
+    agentsTitle: "For agents",
+    agentsSub:
+      "Agents use the team key (or a read-write space MCP token: tools list_workers, deploy_worker, delete_worker). They never need a Cloudflare key.",
+    viewOnly: "Viewers can see Workers but not change them.",
+    // admin
+    adminTitle: "Workers",
+    adminSub:
+      "One Cloudflare token for the whole platform. Teams deploy through Spaces and never see it.",
+    settings: "Cloudflare connection",
+    tokenSet: (l4: string) => `Token set (…${l4})`,
+    tokenUnset: "No token set",
+    noKey:
+      "MARSA_SECRETS_KEY is not set on the server, so the token cannot be stored. Add it to the server env and restart.",
+    token: "API token",
+    tokenHelp:
+      "Needs Workers Scripts: Edit (account), Workers Routes: Edit and DNS: Edit (zone). Write-only: it is encrypted on the server and never shown again.",
+    account: "Account id",
+    accountHelp: "Optional when the token sees one account or the zone.",
+    zone: "Zone (domain)",
+    zoneHelp: "Workers get <team>-<name>.<zone>. Empty = workers.dev addresses.",
+    save: "Save and verify",
+    verify: "Verify token",
+    clear: "Remove token",
+    confirmClear: "Remove the Cloudflare token? (Only possible when no team Workers exist.)",
+    verified: "Last check",
+    saved: "Saved. The token was verified with Cloudflare.",
+    verifiedFlash: (s: string) => `Cloudflare says the token is: ${s}`,
+    cleared: "Token removed.",
+    teamsTitle: "Teams",
+    enabled: "Workers",
+    slug: "Slug",
+    slugHelp:
+      "2-20 lowercase letters/digits; used in script names and addresses. Fixed while the team has Workers.",
+    maxWorkers: "Max Workers",
+    maxKb: "Max KB",
+    count: "Workers",
+    turnOffConfirm: "Turn Workers off for this team? Every Worker of the team will be deleted.",
+    allTitle: "All team Workers",
+    team: "Team",
+    disable: "Disable",
+    enable: "Enable",
+    teamSaved: "Team Workers settings saved.",
+    platformLog: "Platform activity",
+    left: "Defaults: WORKERS_DEFAULT_MAX Workers and WORKER_MAX_KB KB per team.",
+  },
+  ar: {
+    nav: "الوركرز",
+    title: "الوركرز",
+    sub: "انشر وركرز صغيرة على كلاودفلير (واجهات API أو خوادم MCP) لفريقك. المساحات تنشرها نيابةً عنك، ولا تحتاج أبدًا مفتاح كلاودفلير.",
+    off: "الوركرز غير مفعّلة لهذا الفريق. اطلب من المسؤول تفعيلها.",
+    notConfigured: "لم يربط المسؤول حساب كلاودفلير بعد.",
+    none: "لا توجد وركرز بعد",
+    noneSub: "انشر واحدًا من النموذج بالأسفل أو من الـ API أو من MCP المساحة.",
+    name: "الاسم",
+    url: "العنوان",
+    status: "الحالة",
+    size: "الحجم",
+    env: "المتغيرات والأسرار",
+    deployed: "آخر نشر",
+    statuses: {
+      active: "يعمل",
+      disabled: "أوقفه المسؤول",
+      failed: "فشل",
+      deploying: "جارٍ النشر",
+    } as Record<string, string>,
+    deployTitle: "انشر وركر",
+    deploySub:
+      "ملف JavaScript واحد بصيغة ES module ‏(export default { fetch(request, env) { … } }). النشر باسم موجود يستبدل الكود.",
+    nameHelp: (slug: string, zone: string) =>
+      `من 1 إلى 30 حرفًا: a-z و0-9 والشرطة. العنوان: ${slug}-<name>.${zone}`,
+    file: "ملف السكربت (.js)",
+    code: "…أو الصق الكود",
+    vars: "متغيرات البيئة (NAME=value في كل سطر)",
+    varsHelp: "قيم عادية يراها الفريق. اتركها فارغة عند إعادة النشر للإبقاء على الحالية.",
+    secrets: "الأسرار (NAME=value في كل سطر)",
+    secretsHelp:
+      "للكتابة فقط: تُحفظ كأسرار للوركر على كلاودفلير ولا تظهر مرة أخرى. اكتب NAME= فارغة لحذف سر.",
+    deploy: "انشر",
+    del: "احذف",
+    confirmDelete: "تحذف هذا الوركر؟ سيتوقف عنوانه فورًا.",
+    deployed1: "تم النشر.",
+    deleted: "تم حذف الوركر.",
+    quota: (n: number, max: number, kb: number) =>
+      `${n} من ${max} وركرز · حتى ${kb} كيلوبايت للسكربت`,
+    agentsTitle: "للإيجنتس",
+    agentsSub:
+      "الإيجنت يستخدم مفتاح الفريق (أو رمز MCP للمساحة بصلاحية قراءة وكتابة: الأدوات list_workers وdeploy_worker وdelete_worker). لا يحتاج أبدًا مفتاح كلاودفلير.",
+    viewOnly: "المشاهد يرى الوركرز ولا يستطيع تعديلها.",
+    adminTitle: "الوركرز",
+    adminSub: "مفتاح كلاودفلير واحد للمنصة كلها. الفرق تنشر عبر المساحات ولا تراه أبدًا.",
+    settings: "ربط كلاودفلير",
+    tokenSet: (l4: string) => `المفتاح محفوظ (…${l4})`,
+    tokenUnset: "لا يوجد مفتاح",
+    noKey:
+      "المتغير MARSA_SECRETS_KEY غير مضبوط على السيرفر، فلا يمكن حفظ المفتاح. أضفه لملف البيئة وأعد التشغيل.",
+    token: "مفتاح API",
+    tokenHelp:
+      "يحتاج صلاحيات: Workers Scripts: Edit على الحساب، وWorkers Routes: Edit وDNS: Edit على النطاق. للكتابة فقط: يُشفَّر على السيرفر ولا يظهر مرة أخرى.",
+    account: "معرّف الحساب",
+    accountHelp: "اختياري إذا كان المفتاح يرى حسابًا واحدًا أو النطاق.",
+    zone: "النطاق (الدومين)",
+    zoneHelp: "كل وركر يأخذ <team>-<name>.<zone>. فارغ = عناوين workers.dev.",
+    save: "احفظ وتحقّق",
+    verify: "تحقّق من المفتاح",
+    clear: "احذف المفتاح",
+    confirmClear: "تحذف مفتاح كلاودفلير؟ (ممكن فقط إذا لم توجد وركرز للفرق.)",
+    verified: "آخر تحقّق",
+    saved: "تم الحفظ، وتحقّقت كلاودفلير من المفتاح.",
+    verifiedFlash: (s: string) => `حالة المفتاح عند كلاودفلير: ${s}`,
+    cleared: "تم حذف المفتاح.",
+    teamsTitle: "الفرق",
+    enabled: "الوركرز",
+    slug: "الاسم المختصر",
+    slugHelp:
+      "من 2 إلى 20 حرفًا إنجليزيًا صغيرًا أو رقمًا؛ يُستخدم في أسماء السكربتات والعناوين. لا يتغير طالما للفريق وركرز.",
+    maxWorkers: "أقصى عدد",
+    maxKb: "أقصى حجم KB",
+    count: "الوركرز",
+    turnOffConfirm: "توقف الوركرز لهذا الفريق؟ سيتم حذف كل وركرز الفريق.",
+    allTitle: "كل وركرز الفرق",
+    team: "الفريق",
+    disable: "أوقف",
+    enable: "شغّل",
+    teamSaved: "تم حفظ إعدادات وركرز الفريق.",
+    platformLog: "سجل المنصة",
+    left: "الافتراضي: WORKERS_DEFAULT_MAX وركرز وWORKER_MAX_KB كيلوبايت لكل فريق.",
+  },
+} as const;
+
+export interface WorkerRowView {
+  id: string;
+  name: string;
+  url: string;
+  status: string;
+  bytes: number;
+  vars: Record<string, string>;
+  secrets: string[];
+  deployedAt: string | null;
+  deployedBy: string;
+  lastError: string | null;
+  team?: { id: string; name: string | null };
+}
+
+function workerStatus(lang: Lang, st: string): string {
+  const w = WS[lang];
+  const cls = st === "active" ? "on" : st === "disabled" ? "muted" : "warn";
+  return `<span class="badge ${cls}">${esc(w.statuses[st] ?? st)}</span>`;
+}
+
+function workerEnvCell(x: WorkerRowView): string {
+  const vars = Object.keys(x.vars).map((k) => `<code class="ltr">${esc(k)}</code>`);
+  const secrets = x.secrets.map((k) => `<code class="ltr">${esc(k)}</code> 🔒`);
+  return [...vars, ...secrets].join(" ") || "—";
+}
+
+export interface TeamWorkersOpts extends TeamPageOpts {
+  info: {
+    enabled: boolean;
+    configured: boolean;
+    slug: string | null;
+    quota: { workers: number; kb: number };
+    workers: WorkerRowView[];
+  };
+  zone: string | null;
+}
+
+export function teamWorkersHtml(lang: Lang, c: Config, o: TeamWorkersOpts): string {
+  const t = STRINGS[lang];
+  const w = WS[lang];
+  const href = (p: string) => localePath(lang, p);
+  const edit = canEdit(o.me);
+  const i = o.info;
+  const rows = i.workers
+    .map(
+      (x) =>
+        `<tr><th scope="row"><code class="ltr">${esc(x.name)}</code></th>${td(w.url, x.url ? `<a class="text-link" href="${esc(x.url)}" target="_blank" rel="noopener" dir="ltr">${esc(hostless(x.url))}</a>` : "—")}${td(w.status, `${workerStatus(lang, x.status)}${x.lastError ? `<div class="meta">${esc(x.lastError)}</div>` : ""}`)}${td(w.size, esc(bytesLabel(lang, x.bytes)))}${td(w.env, workerEnvCell(x))}${td(w.deployed, x.deployedAt ? `${timeTag(lang, x.deployedAt)} <span class="meta"><bdi>${esc(t.members.actorLabels[x.deployedBy] ?? x.deployedBy)}</bdi></span>` : "—")}<td class="cell-actions">${
+          edit
+            ? postForm(
+                href(`/team/workers/${x.name}/delete`),
+                o.csrf,
+                `<button class="button small danger" type="submit" aria-label="${esc(`${w.del}: ${x.name}`)}">${esc(w.del)}</button>`,
+                { confirm: w.confirmDelete },
+              )
+            : ""
+        }</td></tr>`,
+    )
+    .join("");
+  const table = i.workers.length
+    ? `<div class="table-wrap"><table class="data stack" aria-labelledby="workers-title"><thead><tr><th scope="col">${esc(w.name)}</th><th scope="col">${esc(w.url)}</th><th scope="col">${esc(w.status)}</th><th scope="col">${esc(w.size)}</th><th scope="col">${esc(w.env)}</th><th scope="col">${esc(w.deployed)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
+    : emptyState(w.none, w.noneSub);
+  const zone = o.zone ?? "workers.dev";
+  const form =
+    i.enabled && i.configured && edit
+      ? `<section class="block" aria-labelledby="deploy-title">
+    <form method="post" action="${href("/team/workers/deploy")}" enctype="multipart/form-data" class="panel">
+      ${csrfField(o.csrf)}
+      <h2 class="h3" id="deploy-title">${esc(w.deployTitle)}</h2>
+      <p>${esc(w.deploySub)}</p>
+      <label for="wname">${esc(w.name)}</label>
+      <input id="wname" name="name" type="text" dir="ltr" required maxlength="30" pattern="[a-z0-9](?:[a-z0-9\\-]{0,28}[a-z0-9])?" aria-describedby="wname-help" autocomplete="off">
+      <p class="form-help" id="wname-help">${esc(w.nameHelp(i.slug ?? "team", zone))}</p>
+      <label for="wfile">${esc(w.file)}</label>
+      <input id="wfile" name="file" type="file" accept=".js,.mjs,text/javascript,application/javascript">
+      <label for="wcode">${esc(w.code)}</label>
+      <textarea id="wcode" name="code" rows="8" dir="ltr" spellcheck="false" class="code-input" placeholder="export default { async fetch(request, env) { return new Response('hello'); } };"></textarea>
+      <label for="wvars">${esc(w.vars)}</label>
+      <textarea id="wvars" name="vars" rows="3" dir="ltr" spellcheck="false" aria-describedby="wvars-help"></textarea>
+      <p class="form-help" id="wvars-help">${esc(w.varsHelp)}</p>
+      <label for="wsecrets">${esc(w.secrets)}</label>
+      <textarea id="wsecrets" name="secrets" rows="2" dir="ltr" spellcheck="false" autocomplete="off" aria-describedby="wsecrets-help"></textarea>
+      <p class="form-help" id="wsecrets-help">${esc(w.secretsHelp)}</p>
+      <button class="button" type="submit">${esc(w.deploy)}</button>
+    </form>
+  </section>`
+      : "";
+  const teamRef = i.slug ?? o.team.id;
+  const agents = `<section class="block two-col" aria-labelledby="agents-title">
+    <div>
+      <h2 id="agents-title">${esc(w.agentsTitle)}</h2>
+      <p>${esc(w.agentsSub)}</p>
+      <div class="actions"><a class="text-link" href="${href("/docs/workers")}">${esc(t.admin.docsLink)}</a></div>
+    </div>
+    <pre class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
+curl -s -X PUT "${esc(c.publicUrl)}/api/teams/${esc(teamRef)}/workers/hello" \\
+  -H "X-Team-Key: $MARSA_TEAM_KEY" \\
+  -H "Content-Type: application/javascript" --data-binary @worker.js
+
+curl -s "${esc(c.publicUrl)}/api/teams/${esc(teamRef)}/workers" -H "X-Team-Key: $MARSA_TEAM_KEY"</code></pre>
+  </section>`;
+  const state = !i.configured
+    ? `<p class="notice">${esc(w.notConfigured)}</p>`
+    : !i.enabled
+      ? `<p class="notice">${esc(w.off)}</p>`
+      : `<ul class="status-list"><li><span class="dot-status ${i.workers.length >= i.quota.workers ? "warn" : "on"}" aria-hidden="true"></span>${esc(w.quota(i.workers.length, i.quota.workers, i.quota.kb))}</li></ul>${edit ? "" : `<p class="meta">${esc(w.viewOnly)}</p>`}`;
+  const body = `<div class="wrap page-wide">
+  ${teamHead(lang, o, w.sub, "workers")}
+  ${flashBox(lang, o.flash)}
+  ${state}
+  <section class="block" aria-labelledby="workers-title">
+    <h2 id="workers-title">${esc(w.title)} <span class="count">${esc(String(i.workers.length))}</span></h2>
+    ${table}
+  </section>
+  ${form}
+  ${i.enabled ? agents : ""}
+</div>`;
+  return layout({
+    lang,
+    title: `${w.title} · ${o.team.name} · ${t.product}`,
+    description: w.sub,
+    path: "/team/workers",
+    body,
+    config: c,
+    active: "team",
+    noindex: true,
+  });
+}
+
+export interface AdminWorkersOpts {
+  settings: {
+    configured: boolean;
+    encryption: boolean;
+    last4: string | null;
+    accountId: string | null;
+    zoneName: string | null;
+    verifiedAt: string | null;
+    status: string | null;
+  };
+  teams: {
+    id: string;
+    name: string;
+    workers: boolean;
+    slug: string | null;
+    maxWorkers: number | null;
+    maxWorkerKb: number | null;
+    quota: { workers: number; kb: number };
+    count: number;
+  }[];
+  workers: WorkerRowView[];
+  audit: AuditView[];
+  csrf: string;
+  flash?: Flash | null;
+}
+
+export function adminWorkersHtml(lang: Lang, c: Config, o: AdminWorkersOpts): string {
+  const t = STRINGS[lang];
+  const w = WS[lang];
+  const href = (p: string) => localePath(lang, p);
+  const st = o.settings;
+  const settings = `<section class="block two-col" aria-labelledby="cf-title">
+    <div>
+      <h2 id="cf-title">${esc(w.settings)}</h2>
+      ${st.encryption ? "" : `<p class="notice">${esc(w.noKey)}</p>`}
+      <ul class="status-list">
+        <li><span class="dot-status ${st.configured ? "on" : "warn"}" aria-hidden="true"></span>${esc(st.last4 ? w.tokenSet(st.last4) : w.tokenUnset)}</li>
+        ${st.accountId ? `<li><strong>${esc(w.account)}:</strong> <code class="ltr">${esc(st.accountId)}</code></li>` : ""}
+        ${st.configured ? `<li><strong>${esc(w.zone)}:</strong> <code class="ltr">${esc(st.zoneName ?? "workers.dev")}</code></li>` : ""}
+        ${st.verifiedAt ? `<li><strong>${esc(w.verified)}:</strong> ${timeTag(lang, st.verifiedAt)} · <span dir="ltr">${esc(st.status ?? "")}</span></li>` : ""}
+      </ul>
+      ${st.configured ? `<div class="acts">${postForm(href("/admin/workers/settings/verify"), o.csrf, `<button class="button small ghost" type="submit">${esc(w.verify)}</button>`)}${postForm(href("/admin/workers/settings/clear"), o.csrf, `<button class="button small danger" type="submit">${esc(w.clear)}</button>`, { confirm: w.confirmClear })}</div>` : ""}
+    </div>
+    <form method="post" action="${href("/admin/workers/settings")}" class="panel" autocomplete="off">
+      ${csrfField(o.csrf)}
+      <label for="cftoken">${esc(w.token)}</label>
+      <input id="cftoken" name="token" type="password" dir="ltr" autocomplete="off" maxlength="200" ${st.configured ? `placeholder="…${esc(st.last4 ?? "")}"` : "required"} aria-describedby="cftoken-help">
+      <p class="form-help" id="cftoken-help">${esc(w.tokenHelp)}</p>
+      <label for="cfacct">${esc(w.account)}</label>
+      <input id="cfacct" name="accountId" type="text" dir="ltr" maxlength="32" value="${esc(st.accountId ?? "")}" aria-describedby="cfacct-help">
+      <p class="form-help" id="cfacct-help">${esc(w.accountHelp)}</p>
+      <label for="cfzone">${esc(w.zone)}</label>
+      <input id="cfzone" name="zone" type="text" dir="ltr" maxlength="253" value="${esc(st.zoneName ?? (st.configured ? "" : "marsaplatform.com"))}" aria-describedby="cfzone-help">
+      <p class="form-help" id="cfzone-help">${esc(w.zoneHelp)}</p>
+      <button class="button" type="submit"${st.encryption ? "" : " disabled"}>${esc(w.save)}</button>
+    </form>
+  </section>`;
+  const teamRows = o.teams
+    .map(
+      (x) =>
+        `<tr><th scope="row"><bdi>${esc(x.name)}</bdi><div class="meta ltr">${esc(x.id)}</div></th><td colspan="5">${postForm(
+          href(`/admin/workers/teams/${x.id}`),
+          o.csrf,
+          `<label class="check small"><input type="checkbox" name="enabled" value="1"${x.workers ? " checked" : ""}> ${esc(w.enabled)}</label>
+          <label class="quota-field"><span class="sr-only">${esc(`${w.slug} · ${x.name}`)}</span><input name="slug" type="text" dir="ltr" maxlength="20" placeholder="${esc(w.slug)}" value="${esc(x.slug ?? "")}" title="${esc(w.slugHelp)}"${x.count ? " readonly" : ""}></label>
+          <label class="quota-field"><span class="sr-only">${esc(`${w.maxWorkers} · ${x.name}`)}</span><input name="maxWorkers" type="number" min="0" max="100" placeholder="${x.quota.workers}" value="${x.maxWorkers ?? ""}" title="${esc(w.maxWorkers)}"></label>
+          <label class="quota-field"><span class="sr-only">${esc(`${w.maxKb} · ${x.name}`)}</span><input name="maxWorkerKb" type="number" min="0" max="10240" placeholder="${x.quota.kb}" value="${x.maxWorkerKb ?? ""}" title="${esc(w.maxKb)}"></label>
+          <span class="meta">${esc(`${w.count}: ${x.count}`)}</span>
+          <button type="submit" class="button small ghost">${esc(t.common.save)}</button>`,
+          {
+            cls: "inline-form quota-form",
+            ...(x.workers && x.count ? { confirm: w.turnOffConfirm } : {}),
+          },
+        )}</td></tr>`,
+    )
+    .join("");
+  const teams = `<section class="block" aria-labelledby="wteams-title">
+    <h2 id="wteams-title">${esc(w.teamsTitle)}</h2>
+    <div class="table-wrap"><table class="data stack" aria-labelledby="wteams-title"><thead><tr><th scope="col">${esc(t.admin.name)}</th><th scope="col" colspan="5">${esc(`${w.enabled} · ${w.slug} · ${w.maxWorkers} · ${w.maxKb}`)}</th></tr></thead><tbody>${teamRows}</tbody></table></div>
+    <p class="meta table-note">${esc(w.slugHelp)}</p>
+  </section>`;
+  const wRows = o.workers
+    .map((x) => {
+      const base = `/admin/workers/${x.id}`;
+      const toggle =
+        x.status === "disabled"
+          ? postForm(
+              href(`${base}/enable`),
+              o.csrf,
+              `<button class="button small ghost" type="submit">${esc(w.enable)}</button>`,
+            )
+          : postForm(
+              href(`${base}/disable`),
+              o.csrf,
+              `<button class="button small ghost" type="submit">${esc(w.disable)}</button>`,
+            );
+      return `<tr><th scope="row"><code class="ltr">${esc(x.name)}</code></th>${td(w.team, `<bdi>${esc(x.team?.name ?? "—")}</bdi>`)}${td(w.url, x.url ? `<a class="text-link" href="${esc(x.url)}" target="_blank" rel="noopener" dir="ltr">${esc(hostless(x.url))}</a>` : "—")}${td(w.status, `${workerStatus(lang, x.status)}${x.lastError ? `<div class="meta">${esc(x.lastError)}</div>` : ""}`)}${td(w.size, esc(bytesLabel(lang, x.bytes)))}${td(w.deployed, x.deployedAt ? timeTag(lang, x.deployedAt) : "—")}<td class="cell-actions"><div class="acts">${toggle}${postForm(href(`${base}/delete`), o.csrf, `<button class="button small danger" type="submit">${esc(w.del)}</button>`, { confirm: w.confirmDelete })}</div></td></tr>`;
+    })
+    .join("");
+  const all = `<section class="block" aria-labelledby="wall-title">
+    <h2 id="wall-title">${esc(w.allTitle)} <span class="count">${esc(String(o.workers.length))}</span></h2>
+    ${o.workers.length ? `<div class="table-wrap"><table class="data stack" aria-labelledby="wall-title"><thead><tr><th scope="col">${esc(w.name)}</th><th scope="col">${esc(w.team)}</th><th scope="col">${esc(w.url)}</th><th scope="col">${esc(w.status)}</th><th scope="col">${esc(w.size)}</th><th scope="col">${esc(w.deployed)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${wRows}</tbody></table></div>` : `<p class="meta">${esc(w.none)}</p>`}
+  </section>`;
+  const body = `<div class="wrap page-wide">
+  ${pageHead(t.admin.eyebrow, esc(w.adminTitle), w.adminSub, adminTools(lang, "workers", o.csrf))}
+  ${flashBox(lang, o.flash)}
+  ${settings}
+  ${teams}
+  ${all}
+  <section class="block audit-block" aria-labelledby="plog-title">
+    <h2 id="plog-title">${esc(w.platformLog)}</h2>
+    ${auditTable(lang, o.audit, false, "plog-title")}
+  </section>
+</div>`;
+  return layout({
+    lang,
+    title: `${w.adminTitle} · ${t.admin.eyebrow} · ${t.product}`,
+    description: w.adminSub,
+    path: "/admin/workers",
+    body,
+    config: c,
+    noindex: true,
+  });
+}

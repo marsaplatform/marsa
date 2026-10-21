@@ -37,6 +37,10 @@ export interface Config {
   /** Default per-team quotas (the admin can override them per team). */
   teamMaxSites: number;
   teamMaxBytes: number;
+  /** Key for encrypting platform secrets at rest (MARSA_SECRETS_KEY, >= 32 chars). Empty = Workers off. */
+  secretsKey: string;
+  /** Team Workers defaults (0.12.0). */
+  workers: { defaultMax: number; defaultMaxKb: number; compatibilityDate: string; apiBase: string };
   /** Site ids spotlighted on the home page (FEATURED_SITES, comma-separated). */
   featuredSites: string[];
 }
@@ -136,6 +140,15 @@ export function loadConfig(env: Env = process.env): Config {
       flushSeconds: int(env, "VISITS_FLUSH_SECONDS", 60, 5),
     },
     teamMaxSites: int(env, "TEAM_MAX_SITES", 50, 1),
+    secretsKey: env.MARSA_SECRETS_KEY?.trim() ?? "",
+    workers: {
+      defaultMax: int(env, "WORKERS_DEFAULT_MAX", 3, 1),
+      defaultMaxKb: int(env, "WORKER_MAX_KB", 1024, 1),
+      compatibilityDate: /^\d{4}-\d\d-\d\d$/.test(env.WORKERS_COMPAT_DATE?.trim() ?? "")
+        ? (env.WORKERS_COMPAT_DATE?.trim() as string)
+        : "2025-09-01",
+      apiBase: url(env, "CLOUDFLARE_API_BASE", "https://api.cloudflare.com/client/v4"),
+    },
     teamMaxBytes: int(env, "TEAM_MAX_MB", 200, 1) * MB,
     featuredSites: (env.FEATURED_SITES ?? "")
       .split(",")
@@ -166,6 +179,11 @@ export function loadConfig(env: Env = process.env): Config {
   cfg.defaultTtlHours = Math.min(Math.max(cfg.defaultTtlHours, cfg.minTtlHours), cfg.maxTtlHours);
   if (cfg.adminToken && cfg.adminToken.length < 24) {
     throw new Error("ADMIN_TOKEN must be at least 24 characters (or empty to disable admin)");
+  }
+  if (cfg.secretsKey && cfg.secretsKey.length < 32) {
+    throw new Error(
+      "MARSA_SECRETS_KEY must be at least 32 characters (or empty to turn Workers off)",
+    );
   }
   if (cfg.maxFileBytes > cfg.maxSiteBytes) cfg.maxFileBytes = cfg.maxSiteBytes;
   return cfg;
