@@ -600,7 +600,7 @@ progress.quota.full::-moz-progress-bar{background:var(--danger)}
 .feed time{font-size:12.5px;color:var(--muted)}
 .feed-dot{flex:none;width:9px;height:9px;border-radius:50%;margin-top:8px;background:var(--accent)}
 .feed-dot.k-key,.badge.k-key{background:#c9a227}
-.feed-dot.k-api,.badge.k-api{background:#3f7cc4}
+.feed-dot.k-api,.badge.k-api{background:#356aa8}
 .feed-dot.k-mcp,.badge.k-mcp{background:#8a5cc2}
 .feed-dot.k-admin,.badge.k-admin{background:var(--danger)}
 .badge.k-member{background:var(--soft);color:var(--accent);border-color:transparent}

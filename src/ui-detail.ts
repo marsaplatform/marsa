@@ -865,7 +865,7 @@ function workerKeysTab(lang: Lang, o: WorkerDetailOpts, self: string, teamBase: 
       },
     ],
   });
-  const helper = `<section class="block panel" aria-labelledby="uk-helper"><h2 id="uk-helper" class="h3">${esc(k.helper)}</h2><p class="meta">${esc(k.helperText)} ${esc(k.cache(o.keys.settings.cacheSeconds))}</p><p>${esc(k.verify)}: <code class="ltr">${esc(o.keys.verifyUrl)}</code></p><pre class="ltr" dir="ltr"><code>curl -s ${esc(o.keys.helperUrl)} &gt; marsa-keys.js
+  const helper = `<section class="block panel" aria-labelledby="uk-helper"><h2 id="uk-helper" class="h3">${esc(k.helper)}</h2><p class="meta">${esc(k.helperText)} ${esc(k.cache(o.keys.settings.cacheSeconds))}</p><p>${esc(k.verify)}: <code class="ltr">${esc(o.keys.verifyUrl)}</code></p><pre tabindex="0" class="ltr" dir="ltr"><code>curl -s ${esc(o.keys.helperUrl)} &gt; marsa-keys.js
 const gate = await requireKey(request, env, { tool });
 if (!gate.ok) return gate.response;</code></pre></section>`;
   return `${off}${table}${create}${helper}`;
@@ -1976,7 +1976,7 @@ function siteDataTab(lang: Lang, o: SiteDetailOpts, self: string, teamBase: stri
         html:
           kk.full === undefined
             ? `<span class="meta">—</span>`
-            : `<details class="kv-value"><summary><code dir="ltr">${esc(kk.preview ?? "")}</code></summary><pre dir="ltr">${esc(kk.full)}</pre>${kk.truncated ? `<p class="meta">${esc(t.team.valueTruncated)}</p>` : ""}</details>`,
+            : `<details class="kv-value"><summary><code dir="ltr">${esc(kk.preview ?? "")}</code></summary><pre tabindex="0" dir="ltr">${esc(kk.full)}</pre>${kk.truncated ? `<p class="meta">${esc(t.team.valueTruncated)}</p>` : ""}</details>`,
         cls: "cell-value",
       },
       {

@@ -372,3 +372,33 @@ describe("0.16.0 titles, MCP health column and the Down now card", () => {
     expect(ov).toContain("All checked Workers are up");
   });
 });
+
+describe("0.16.0 accessibility of rendered Markdown", () => {
+  it("labels checklist boxes, makes code focusable and keeps one h1", async () => {
+    t = await makeApp();
+    const team = await t.createTeam("Crew");
+    const { b } = await t.signIn(team.key);
+    for (const p of [
+      "/team/recipes/agent-security-rules",
+      "/ar/team/recipes/agent-security-rules",
+      "/docs/recipes/agent-security-rules",
+    ]) {
+      const res = p.startsWith("/ar/")
+        ? await (await t.signIn(team.key, "/ar")).b.get(p)
+        : await b.get(p);
+      expect(res.status, p).toBe(200);
+      const html = await res.text();
+      const boxes = html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? [];
+      expect(boxes.length, p).toBeGreaterThan(0);
+      for (const x of boxes) expect(x, p).toMatch(/aria-label="[^"]+"/);
+      expect((html.match(/<h1[\s>]/g) ?? []).length, p).toBe(1);
+      expect(html, p).not.toMatch(/<pre(?![^>]*tabindex)[\s>]/);
+    }
+    const { a11yHtml } = await import("../src/docs.js");
+    expect(
+      a11yHtml('<ul><li><input disabled="" type="checkbox"> Check <code>x</code></li></ul>'),
+    ).toBe(
+      '<ul><li><input disabled="" type="checkbox" aria-label="Check x"> Check <code>x</code></li></ul>',
+    );
+  });
+});

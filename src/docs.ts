@@ -136,10 +136,32 @@ export function loadDocs(publicUrl: string): DocPage[] {
     const title = /^#\s+(.+)$/m.exec(src)?.[1]?.trim() ?? p.slug;
     const body = src.replace(/^#\s+.+\n/, "");
     seen = new Map();
-    const html = rewrite(md.parse(body, { async: false }) as string, publicUrl);
+    const html = a11yHtml(rewrite(md.parse(body, { async: false }) as string, publicUrl));
     out.push({ slug: p.slug, lang: p.lang, title, summary: p.summary, html });
   }
   return out;
+}
+
+/**
+ * 0.16.0 accessibility for rendered Markdown: task-list checkboxes get a label (their text),
+ * scrollable code blocks can take keyboard focus, and the page keeps a single <h1>.
+ */
+export function a11yHtml(html: string): string {
+  const text = (s: string) =>
+    s
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 200)
+      .replace(/"/g, "&quot;");
+  return html
+    .replace(
+      /(<input\b[^>]*type="checkbox"[^>]*?)\s*\/?>([\s\S]*?)(?=<\/li>|<\/p>|<ul|<ol)/g,
+      (_m, input: string, rest: string) => `${input} aria-label="${text(rest) || "✓"}">${rest}`,
+    )
+    .replace(/<pre>/g, '<pre tabindex="0">')
+    .replace(/<h1(\s|>)/g, "<h2$1")
+    .replace(/<\/h1>/g, "</h2>");
 }
 
 /** A heading's anchor: lower case, letters/digits (any script) joined by dashes. */

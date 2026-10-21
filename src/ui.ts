@@ -478,7 +478,7 @@ function uploader(lang: Lang, c: Config, headingLevel: "h1" | "h2"): string {
 }
 
 function agentSnippet(c: Config): string {
-  return `<pre class="code" dir="ltr"><code>(cd out &amp;&amp; zip -qr ../site.zip .)
+  return `<pre tabindex="0" class="code" dir="ltr"><code>(cd out &amp;&amp; zip -qr ../site.zip .)
 curl -s -X POST "${esc(c.publicUrl)}/api/sites?ttlHours=24" \\
   -H "Content-Type: application/zip" --data-binary @site.zip
 # =&gt; { "url": "${esc(c.publicUrl)}/s/k3v9x2mq7a/", "expiresAt": "…", "editToken": "…" }</code></pre>`;
@@ -607,7 +607,7 @@ ${uploader(lang, c, "h2")}
     <p>${esc(t.selfhost.sub)}</p>
     <div class="actions"><a class="button small ghost" href="/docs/self-hosting">${esc(t.selfhost.cta)}</a></div>
   </div>
-  <pre class="code" dir="ltr"><code>docker compose up -d --build
+  <pre tabindex="0" class="code" dir="ltr"><code>docker compose up -d --build
 # =&gt; http://localhost:8080</code></pre>
 </section>`;
   return layout({
@@ -965,7 +965,7 @@ function recentTable(lang: Lang, sites: TeamSiteRow[]): string {
 
 const agentPublishSnippet = (
   c: Config,
-) => `<pre class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
+) => `<pre tabindex="0" class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
 (cd out &amp;&amp; zip -qr ../site.zip .)
 curl -s -X POST "${esc(c.publicUrl)}/api/sites?ttlHours=72" \\
   -H "X-Team-Key: $MARSA_TEAM_KEY" \\
@@ -1325,7 +1325,7 @@ export function mcpSection(
     <h3>${esc(t.mcp.snippets)}</h3>
     <p class="meta">${esc(t.mcp.snippetNote)}</p>
     <div class="two-col mcp-snippets">
-      <div><p class="snippet-label">Cursor · <code>.cursor/mcp.json</code></p><pre class="code" dir="ltr"><code>{
+      <div><p class="snippet-label">Cursor · <code>.cursor/mcp.json</code></p><pre tabindex="0" class="code" dir="ltr"><code>{
   "mcpServers": {
     "${esc(server)}": {
       "url": "${ep}",
@@ -1333,13 +1333,13 @@ export function mcpSection(
     }
   }
 }</code></pre></div>
-      <div><p class="snippet-label">Claude Code</p><pre class="code" dir="ltr"><code>claude mcp add --transport http ${esc(server)} \\
+      <div><p class="snippet-label">Claude Code</p><pre tabindex="0" class="code" dir="ltr"><code>claude mcp add --transport http ${esc(server)} \\
   ${ep} \\
   --header "Authorization: Bearer marsa_mcp_…"</code></pre>
-      <p class="snippet-label">VS Code · <code>.vscode/mcp.json</code></p><pre class="code" dir="ltr"><code>{ "servers": { "${esc(server)}": {
+      <p class="snippet-label">VS Code · <code>.vscode/mcp.json</code></p><pre tabindex="0" class="code" dir="ltr"><code>{ "servers": { "${esc(server)}": {
   "type": "http", "url": "${ep}",
   "headers": { "Authorization": "Bearer marsa_mcp_…" } } } }</code></pre>
-      <p class="snippet-label">Claude Desktop · <code>claude_desktop_config.json</code> (mcp-remote)</p><pre class="code" dir="ltr"><code>{ "mcpServers": { "${esc(server)}": {
+      <p class="snippet-label">Claude Desktop · <code>claude_desktop_config.json</code> (mcp-remote)</p><pre tabindex="0" class="code" dir="ltr"><code>{ "mcpServers": { "${esc(server)}": {
   "command": "npx",
   "args": ["-y", "mcp-remote", "${ep}",
            "--header", "Authorization:\${AUTH_HEADER}"],
@@ -1734,7 +1734,7 @@ export function adminTeamsHtml(
       <ul class="checks">${t.admin.how.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
       <div class="actions"><a class="text-link" href="/docs/teams">${esc(t.admin.docsLink)}</a></div>
     </div>
-    <pre class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
+    <pre tabindex="0" class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
 curl -s -X POST "${esc(c.publicUrl)}/api/sites" \\
   -H "X-Team-Key: $MARSA_TEAM_KEY" \\
   -H "Content-Type: application/zip" --data-binary @site.zip
@@ -2261,7 +2261,7 @@ export function teamWorkersHtml(
       <p class="meta">${esc(d.mcpTip)}</p>
       <div class="actions"><button type="button" class="button small ghost js-only" data-copy="#agent-snippet" data-copied="${esc(t.common.copied)}">${icon("copy")}${esc(d.copy)}</button><a class="text-link" href="${href("/docs/workers")}">${esc(t.admin.docsLink)}</a></div>
     </div>
-    <pre class="code" dir="ltr"><code id="agent-snippet"># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
+    <pre tabindex="0" class="code" dir="ltr"><code id="agent-snippet"># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
 curl -s -X PUT "${esc(c.publicUrl)}/api/teams/${esc(teamRef)}/workers/hello" \\
   -H "X-Team-Key: $MARSA_TEAM_KEY" \\
   -H "Content-Type: application/javascript" --data-binary @worker.js
@@ -4083,7 +4083,7 @@ ${recipeCards(lang, list, (r) => localePath(lang, `/docs/recipes/${r.slug}`))}
   });
 }
 
-function recipeArticle(lang: Lang, r: Recipe, html: string, served: Lang): string {
+function recipeArticle(lang: Lang, r: Recipe, html: string, served: Lang, h = "h1"): string {
   const r14 = R14[lang];
   const title = (r.title[served] ?? r.title.en ?? r.title.ar ?? r.slug) as string;
   const summary = (r.summary[served] ?? "") as string;
@@ -4093,7 +4093,7 @@ function recipeArticle(lang: Lang, r: Recipe, html: string, served: Lang): strin
       ? `<p class="notice">${esc(r14.onlyIn(served === "ar" ? r14.arabic : r14.english))}</p>`
       : "";
   const alt = r.body[other] && served === lang ? "" : "";
-  return `${note}<article class="prose recipe" lang="${served}" dir="${served === "ar" ? "rtl" : "ltr"}"><h1>${esc(title)}</h1>${summary ? `<p class="lead">${esc(summary)}</p>` : ""}<p class="meta"><span class="badge muted">${esc(r14.scope[r.scope] ?? r.scope)}</span> ${esc(r14.version(r.version))}${r.updatedAt ? ` · ${esc(r14.updated)} ${esc(r.updatedAt.slice(0, 10))}` : ""} · <code class="ltr">${esc(r.slug)}</code></p>${alt}${html}</article>`;
+  return `${note}<article class="prose recipe" lang="${served}" dir="${served === "ar" ? "rtl" : "ltr"}"><${h}>${esc(title)}</${h}>${summary ? `<p class="lead">${esc(summary)}</p>` : ""}<p class="meta"><span class="badge muted">${esc(r14.scope[r.scope] ?? r.scope)}</span> ${esc(r14.version(r.version))}${r.updatedAt ? ` · ${esc(r14.updated)} ${esc(r.updatedAt.slice(0, 10))}` : ""} · <code class="ltr">${esc(r.slug)}</code></p>${alt}${html}</article>`;
 }
 
 /** Public: /docs/recipes/:slug */
@@ -4113,7 +4113,7 @@ export function recipePageHtml(
     <h2 class="h3" id="starter-h">${icon("download")} ${esc(lang === "ar" ? "القالب الجاهز للتنزيل" : "Starter template")}</h2>
     <p class="meta">${esc(lang === "ar" ? `${starter.count} ملفًا، تبني وتنجح اختباراتها. فكّوا الضغط، ثم npm install وnpm run check.` : `${starter.count} files that build and pass their own tests. Unzip, then npm install and npm run check.`)}</p>
     <p><a class="button" href="${esc(starter.zip)}" download>${icon("download")} <bdi dir="ltr">${esc(starter.name)}.zip</bdi></a></p>
-    <details><summary>${esc(lang === "ar" ? "هيكل الملفات" : "File tree")}</summary><pre dir="ltr" class="tree"><code>${esc(starter.tree)}</code></pre></details>
+    <details><summary>${esc(lang === "ar" ? "هيكل الملفات" : "File tree")}</summary><pre tabindex="0" dir="ltr" class="tree"><code>${esc(starter.tree)}</code></pre></details>
   </section>`
     : "";
   const nav = `<nav class="docs-nav" aria-label="${esc(r14.recipes)}"><ul>${list
@@ -4298,7 +4298,7 @@ export function dashRecipeHtml(
   const body = `<div class="page-wide">
   ${pageHead(o.kind === "team" ? t.team.eyebrow : DS[lang].adminArea, `<bdi>${esc((r.title[o.served] ?? r.slug) as string)}</bdi>`, "", `<div class="head-tools">${tools}<a class="button small ghost" href="${localePath(lang, base)}">${esc(r14.back)}</a></div>`)}
   ${flashBox(lang, o.flash ?? null)}
-  <section class="block panel">${recipeArticle(lang, r, o.html, o.served)}</section>
+  <section class="block panel">${recipeArticle(lang, r, o.html, o.served, "h2")}</section>
   ${o.canWrite ? `<section class="block">${recipeForm(lang, localePath(lang, base), o.csrf, r, o.skeleton)}</section>` : ""}
 </div>`;
   return dashLayout({

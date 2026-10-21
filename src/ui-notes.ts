@@ -240,7 +240,7 @@ export function notesHtml(lang: Lang, c: Config, o: NotesPageOpts): string {
       },
     ],
   });
-  const how = `<details class="panel how-notes"><summary>${icon("info")} ${esc(x.howTitle)}</summary><p class="meta">${esc(x.howBody)}</p><pre class="code ltr" dir="ltr"><code>curl -X POST "${esc(c.publicUrl)}/api/teams/&lt;team&gt;/notes" \\
+  const how = `<details class="panel how-notes"><summary>${icon("info")} ${esc(x.howTitle)}</summary><p class="meta">${esc(x.howBody)}</p><pre tabindex="0" class="code ltr" dir="ltr"><code>curl -X POST "${esc(c.publicUrl)}/api/teams/&lt;team&gt;/notes" \\
   -H "X-Team-Key: $MARSA_AGENT_KEY" -H "content-type: application/json" \\
   -d '{"severity":"bug","stage":"deploy","category":"bindings","message":"…","target":{"type":"worker","id":"news"},"version":"4","agent":"my-agent"}'</code></pre><p><a class="text-link" href="${esc(href("/docs/recipes/agent-notes"))}">${esc(lang === "ar" ? "الدليل" : "Guide")}</a></p></details>`;
   const body = `<div class="page-wide">

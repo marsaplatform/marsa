@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Marked } from "marked";
-import { DOCS_PLACEHOLDER_URL } from "./docs.js";
+import { a11yHtml, DOCS_PLACEHOLDER_URL } from "./docs.js";
 import type { Lang } from "./i18n.js";
 
 /**
@@ -137,7 +137,9 @@ const mdSafe = new Marked({ gfm: true }).use({
 });
 export function recipeHtml(r: Recipe, lang: Lang): string {
   const src = pick(r.body, lang);
-  const html = (r.scope === "builtin" ? md : mdSafe).parse(src, { async: false }) as string;
+  const html = a11yHtml(
+    (r.scope === "builtin" ? md : mdSafe).parse(src, { async: false }) as string,
+  );
   return html
     .replace(/<table>/g, '<div class="table"><table>')
     .replace(/<\/table>/g, "</table></div>")
