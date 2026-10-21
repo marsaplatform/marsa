@@ -43,6 +43,8 @@ export interface Config {
   teamMaxBytes: number;
   /** Key for encrypting platform secrets at rest (MARSA_SECRETS_KEY, >= 32 chars). Empty = Workers off. */
   secretsKey: string;
+  /** Optional, read-only GitHub token for repo status (tells private from missing). Never shown. */
+  githubToken: string | null;
   /** Team Workers defaults (0.12.0). */
   workers: { defaultMax: number; defaultMaxKb: number; compatibilityDate: string; apiBase: string };
   /** Site ids spotlighted on the home page (FEATURED_SITES, comma-separated). */
@@ -192,6 +194,7 @@ export function loadConfig(env: Env = process.env): Config {
     },
     teamMaxSites: int(env, "TEAM_MAX_SITES", 50, 1),
     secretsKey: env.MARSA_SECRETS_KEY?.trim() ?? "",
+    githubToken: env.GITHUB_TOKEN?.trim() || null,
     workers: {
       defaultMax: int(env, "WORKERS_DEFAULT_MAX", 3, 1),
       defaultMaxKb: int(env, "WORKER_MAX_KB", 1024, 1),

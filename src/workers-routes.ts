@@ -24,6 +24,8 @@ export interface WorkerRouteDeps {
   limiter: RateLimiter;
   now: () => number;
   teamAuth: TeamAuth;
+  /** 0.15.1: is this a live space of the team (for linking a Worker to its page)? */
+  siteOfTeam?: (teamId: string, siteId: string) => Promise<boolean>;
 }
 
 const err = (c: Context, status: number, code: string, message: string) =>
@@ -188,6 +190,8 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
       ...("compatibilityDate" in body ? { compatibilityDate: body.compatibilityDate } : {}),
       ...("compatibilityFlags" in body ? { compatibilityFlags: body.compatibilityFlags } : {}),
       ...("bindings" in body ? { bindings: body.bindings } : {}),
+      ...("meta" in body ? { meta: body.meta } : {}),
+      ...("repo" in body ? { repo: body.repo } : {}),
     };
   };
 
@@ -310,6 +314,39 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
       if (k in body) change[k] = body[k];
     try {
       return c.json({ worker: await svc.editRuntime(r.cr.team, r.rec, change, r.cr.actor) });
+    } catch (e) {
+      return workerErr(c, e);
+    }
+  });
+  // 0.15.1: metadata only (no redeploy): declared meta, repo link, linked space.
+  app.post("/api/teams/:team/workers/:name/links", async (c) => {
+    const r = await recOf(c, "workers:deploy");
+    if (r instanceof Response) return r;
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      return err(c, 400, "INVALID_REQUEST", 'send JSON {"meta"?, "repo"?, "spaceId"?}');
+    let spaceId: string | null | undefined;
+    if ("spaceId" in body) {
+      if (body.spaceId === null || body.spaceId === "") spaceId = null;
+      else if (
+        typeof body.spaceId === "string" &&
+        (await d.siteOfTeam?.(r.cr.team.id, body.spaceId))
+      )
+        spaceId = body.spaceId;
+      else return err(c, 400, "INVALID_REQUEST", "spaceId: one of this team's spaces");
+    }
+    try {
+      return c.json({
+        worker: await svc.setLinks(
+          r.rec,
+          {
+            ...("meta" in body ? { meta: body.meta } : {}),
+            ...("repo" in body ? { repo: body.repo } : {}),
+            ...(spaceId !== undefined ? { spaceId } : {}),
+          },
+          r.cr.actor,
+        ),
+      });
     } catch (e) {
       return workerErr(c, e);
     }

@@ -9,6 +9,7 @@ import {
   type FetchFn,
 } from "./cf-workers.js";
 import type { Actor } from "./members.js";
+import { RepoError, type RepoLink, readRepo } from "./repo-status.js";
 import type { SecretBox } from "./secrets.js";
 import type { Team, TeamStore } from "./teams.js";
 import {
@@ -19,6 +20,7 @@ import {
   type ServiceBinding,
   type WorkerRuntime,
 } from "./worker-config.js";
+import { MetaError, readMeta, type WorkerMeta } from "./worker-insight.js";
 import {
   cleanNote,
   sha256Hex,
@@ -124,6 +126,10 @@ export interface WorkerRec {
   compatibilityFlags?: string[];
   /** Service bindings to Workers of the same team. */
   bindings?: ServiceBinding[];
+  /** 0.15.1: declared type/stack/tools, the repo it was deployed from, a linked space. */
+  meta?: WorkerMeta;
+  repo?: RepoLink;
+  spaceId?: string;
 }
 
 export interface WorkerView {
@@ -149,6 +155,9 @@ export interface WorkerView {
   compatibilityDateSet: boolean;
   compatibilityFlags: string[];
   bindings: ServiceBinding[];
+  meta: WorkerMeta;
+  repo: RepoLink | null;
+  spaceId: string | null;
 }
 
 /** Platform default compatibility date, set once by WorkerService (config). */
@@ -174,6 +183,9 @@ export const workerView = (r: WorkerRec): WorkerView => ({
   compatibilityDateSet: !!r.compatibilityDate,
   compatibilityFlags: [...(r.compatibilityFlags ?? [])],
   bindings: (r.bindings ?? []).map((b) => ({ ...b })),
+  meta: { ...(r.meta ?? {}) },
+  repo: r.repo ? { ...r.repo } : null,
+  spaceId: r.spaceId ?? null,
 });
 
 /** A stored version's runtime as deploy input (older versions: keep the current one). */
@@ -207,6 +219,9 @@ export interface DeployInput {
   compatibilityDate?: unknown;
   compatibilityFlags?: unknown;
   bindings?: unknown;
+  /** 0.15.1: {kind, language, framework, toolsCount, spaceSlug}; {url, branch, commitSha}. */
+  meta?: unknown;
+  repo?: unknown;
 }
 
 export interface WorkerLimits {
@@ -600,7 +615,7 @@ export class WorkerService {
         `the script is limited to ${q.kb} KB for this team`,
       );
     }
-    if (!/export\s+default\b/.test(code)) {
+    if (!/export\s+default\b|export\s*\{[^}]*\bas\s+default\b[^}]*\}/.test(code)) {
       throw new WorkerError(
         400,
         "NOT_A_MODULE",
@@ -623,6 +638,16 @@ export class WorkerService {
       wantBindings = readBindings(input.bindings);
     } catch (err) {
       if (err instanceof ConfigError) throw new WorkerError(400, "INVALID_REQUEST", err.message);
+      throw err;
+    }
+    let meta: WorkerMeta | null | undefined;
+    let repo: RepoLink | null | undefined;
+    try {
+      meta = readMeta(input.meta);
+      repo = readRepo(input.repo);
+    } catch (err) {
+      if (err instanceof MetaError || err instanceof RepoError)
+        throw new WorkerError(400, "INVALID_REQUEST", err.message);
       throw err;
     }
     // Throws early (503) when the platform has no token.
@@ -759,6 +784,18 @@ export class WorkerService {
         compatibilityFlags: runtime.compatibilityFlags ?? [],
         bindings: runtime.bindings ?? [],
       };
+      if (meta === null) delete done.meta;
+      else if (meta) done.meta = meta;
+      if (repo === null) delete done.repo;
+      else if (repo) done.repo = repo;
+      else if (done.repo?.commitSha && existing) {
+        // New code without a commit: the old commit no longer describes what runs.
+        const prev = await this.versions.latest(existing.id).catch(() => null);
+        if (!prev || prev.sha256 !== sha256Hex(code)) {
+          const { commitSha: _drop, ...rest } = done.repo;
+          done.repo = rest;
+        }
+      }
       if (runtime.compatibilityDate) done.compatibilityDate = runtime.compatibilityDate;
       else delete done.compatibilityDate;
       delete done.lastError;
@@ -889,6 +926,44 @@ export class WorkerService {
       actor,
       { action: "redeploy" },
     );
+  }
+
+  /** Change metadata only (no redeploy): declared meta, repo link, linked space. */
+  setLinks(
+    rec: WorkerRec,
+    change: { meta?: unknown; repo?: unknown; spaceId?: string | null },
+    actor: Actor,
+  ): Promise<WorkerView> {
+    let meta: WorkerMeta | null | undefined;
+    let repo: RepoLink | null | undefined;
+    try {
+      meta = readMeta(change.meta);
+      repo = readRepo(change.repo);
+    } catch (err) {
+      if (err instanceof MetaError || err instanceof RepoError)
+        throw new WorkerError(400, "INVALID_REQUEST", err.message);
+      throw err;
+    }
+    return this.serial(async () => {
+      const cur = this.recs.get(rec.id);
+      if (!cur) throw new WorkerError(404, "NOT_FOUND", "worker not found");
+      const next: WorkerRec = { ...cur, updatedAt: this.iso() };
+      if (meta === null) delete next.meta;
+      else if (meta) next.meta = meta;
+      if (repo === null) delete next.repo;
+      else if (repo) next.repo = repo;
+      if (change.spaceId === null) delete next.spaceId;
+      else if (typeof change.spaceId === "string") next.spaceId = change.spaceId;
+      this.recs.set(cur.id, next);
+      await this.saveRecs();
+      await this.deps.audit({
+        teamId: cur.teamId,
+        actor,
+        action: "worker-links",
+        detail: cur.name,
+      });
+      return workerView(next);
+    });
   }
 
   /** Stored versions of a Worker, newest first. */

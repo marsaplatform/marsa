@@ -10,6 +10,7 @@ import type { MemberRole } from "./members.js";
 import { currentNavAccount } from "./nav-state.js";
 import { type Notice, noticeText, noticeTone, type WebhookView } from "./notify.js";
 import type { Recipe, RecipeSummary } from "./recipes.js";
+import type { RepoLink, RepoStatus } from "./repo-status.js";
 import { isPermanentIso } from "./store.js";
 import {
   agentKeyCols,
@@ -23,6 +24,7 @@ import {
   workerRows,
   workerStatusFilter,
 } from "./ui-detail.js";
+import { type InsightRow, kindFilter, languageFilter, repoFilter } from "./ui-insight.js";
 import { dataTable, relTime as relTimeTag } from "./ui-table.js";
 import type { VisitSummary } from "./visits.js";
 
@@ -698,6 +700,9 @@ export interface TeamSiteRow {
   unlisted: boolean;
   permanent: boolean;
   visits?: VisitSummary;
+  /** 0.15.1: linked source repo and its cached GitHub status. */
+  repo?: RepoLink | null;
+  repoStatus?: RepoStatus | null;
 }
 
 function sparkline(lang: Lang, v: VisitSummary): string {
@@ -911,7 +916,7 @@ function sitesTable(lang: Lang, o: TeamPageOpts, sites: TeamSiteRow[], id: strin
     rows,
     csrf: o.csrf,
     empty: t.team.sites,
-    filters: [siteStatusFilter(lang)],
+    filters: [siteStatusFilter(lang), repoFilter(lang, sites)],
     search: tools && sites.length > 3,
   });
 }
@@ -1736,6 +1741,8 @@ export interface AdminSiteRow {
   fileCount?: number;
   permanent: boolean;
   visits?: VisitSummary;
+  repo?: RepoLink | null;
+  repoStatus?: RepoStatus | null;
 }
 
 export function adminSitesHtml(
@@ -1775,6 +1782,8 @@ export function adminSitesHtml(
       unlisted: false,
       permanent: s.permanent,
       ...(s.visits ? { visits: s.visits } : {}),
+      repo: s.repo ?? null,
+      repoStatus: s.repoStatus ?? null,
       owner: s.ownerId ? { id: s.ownerId, name: s.owner ?? s.ownerId } : null,
     })),
     {
@@ -1801,7 +1810,11 @@ export function adminSitesHtml(
     rows,
     csrf: o.csrf,
     empty: t.admin.noSites,
-    filters: [siteStatusFilter(lang), { key: "team", label: t.admin.owner, options: ownerOpts }],
+    filters: [
+      siteStatusFilter(lang),
+      { key: "team", label: t.admin.owner, options: ownerOpts },
+      repoFilter(lang, o.sites),
+    ],
   });
   const body = `<div class="page-wide">
   ${pageHead(t.admin.eyebrow, esc(t.admin.sitesTitle), t.admin.sitesSub, adminTools(lang, "sites", o.csrf))}
@@ -2124,6 +2137,7 @@ export interface WorkerRowView {
   keysOn?: boolean;
   keysCount?: number;
   requests7?: number | null;
+  insight?: InsightRow;
 }
 
 export interface TeamWorkersOpts extends TeamPageOpts {
@@ -2165,7 +2179,12 @@ export function teamWorkersHtml(
         rows,
         csrf: o.csrf,
         empty: w.none,
-        filters: [workerStatusFilter(lang, i.workers)],
+        filters: [
+          workerStatusFilter(lang, i.workers),
+          kindFilter(lang, i.workers),
+          languageFilter(lang, i.workers),
+          repoFilter(lang, i.workers),
+        ],
       })
     : emptyState(
         w.none,
@@ -2373,6 +2392,9 @@ export function adminWorkersHtml(lang: Lang, c: Config, o: AdminWorkersOpts): st
       empty: w.none,
       filters: [
         workerStatusFilter(lang, o.workers),
+        kindFilter(lang, o.workers),
+        languageFilter(lang, o.workers),
+        repoFilter(lang, o.workers),
         {
           key: "team",
           label: w.team,
@@ -2622,6 +2644,8 @@ export const DS = {
       overview: "Overview",
       sites: "Spaces",
       workers: "Workers",
+      mcp: "MCP servers",
+      notes: "Agent notes",
       members: "Members",
       agents: "Agent keys",
       recipes: "Recipes",
@@ -2740,6 +2764,8 @@ export const DS = {
       overview: "نظرة عامة",
       sites: "المساحات",
       workers: "الوركرز",
+      mcp: "سيرفرات MCP",
+      notes: "ملاحظات الإيجنتس",
       members: "الأعضاء",
       agents: "مفاتيح الوكلاء",
       recipes: "الوصفات",
@@ -2855,6 +2881,8 @@ const ICONS: Record<string, string> = {
   sites:
     '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 9h16M8 6.5h.01"/>',
   workers: '<path d="M8 9l-3 3 3 3M16 9l3 3-3 3M13.5 6l-3 12"/>',
+  mcp: '<path d="M5 12h4l2-5 2 10 2-5h4"/><circle cx="12" cy="12" r="9.5"/>',
+  repo: '<circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 8.2v7.6M18 10.2c0 4-6 3-11 6"/>',
   members:
     '<path d="M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 10.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6M21 19v-1a4 4 0 0 0-3-3.9M15.5 4.6a3 3 0 0 1 0 5.8"/>',
   activity: '<path d="M3 12h4l3 7 4-14 3 7h4"/>',
@@ -2885,6 +2913,10 @@ const ICONS: Record<string, string> = {
   filter: '<path d="M4 5h16l-6 8v5l-4 2v-7z"/>',
   rotate: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5"/>',
   health: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
+  notes: '<path d="M5 4h14v12l-4 4H5zM15 20v-4h4M8 9h8M8 13h5"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
 };
 export const icon = (name: string, cls = "icon") =>
   `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name] ?? ""}</svg>`;
@@ -2915,6 +2947,8 @@ const TEAM_NAV = [
   ["overview", "/team"],
   ["sites", "/team/sites"],
   ["workers", "/team/workers"],
+  ["mcp", "/team/mcp"],
+  ["notes", "/team/notes"],
   ["members", "/team/members"],
   ["agents", "/team/agents"],
   ["recipes", "/team/recipes"],
@@ -2926,6 +2960,8 @@ const ADMIN_NAV = [
   ["overview", "/admin"],
   ["sites", "/admin/sites"],
   ["workers", "/admin/workers"],
+  ["mcp", "/admin/mcp"],
+  ["notes", "/admin/notes"],
   ["activity", "/admin/activity"],
   ["recipes", "/admin/recipes"],
   ["alerts", "/admin/notifications"],
@@ -3913,10 +3949,23 @@ const recipeCards = (lang: Lang, list: RecipeSummary[], hrefOf: (r: RecipeSummar
 };
 
 /** Public: /docs/recipes */
+/** 0.15.1: "hit a problem? leave a note" on the recipes pages (public and dashboard). */
+export function notesCallout(lang: Lang, dash?: "team" | "admin"): string {
+  const ar = lang === "ar";
+  const guide = localePath(lang, "/docs/recipes/agent-notes");
+  const page = dash ? localePath(lang, dash === "team" ? "/team/notes" : "/admin/notes") : "";
+  return `<aside class="panel notes-callout" aria-label="${ar ? "ملاحظات الإيجنتس" : "Agent notes"}">${icon("notes")}<div><strong>${ar ? "واجهتكم مشكلة أو وصفة غير واضحة؟" : "Hit a problem, or a recipe is unclear?"}</strong> ${
+    ar
+      ? 'اتركوا ملاحظة للمسؤول من أي مرحلة: <code class="ltr">POST /api/teams/&lt;team&gt;/notes</code> أو أداة MCP <code class="ltr">leave_note</code>.'
+      : 'Leave a note for the admin at any stage: <code class="ltr">POST /api/teams/&lt;team&gt;/notes</code> or the MCP tool <code class="ltr">leave_note</code>.'
+  } <a class="text-link" href="${guide}">${ar ? "كيف؟" : "How"}</a>${page ? ` · <a class="text-link" href="${page}">${ar ? "ملاحظات الإيجنتس" : "Agent notes"}</a>` : ""}</div></aside>`;
+}
+
 export function recipesIndexHtml(lang: Lang, c: Config, list: RecipeSummary[]): string {
   const t = STRINGS[lang];
   const r14 = R14[lang];
   const body = `<div class="wrap page-wide">${pageHead(t.footer.product, esc(r14.recipes), r14.publicSub)}
+${notesCallout(lang)}
 ${recipeCards(lang, list, (r) => localePath(lang, `/docs/recipes/${r.slug}`))}
 <p class="meta recipe-api"><strong>${esc(r14.apiHint)}:</strong> <code class="ltr">${esc(r14.apiText)}</code></p>
 </div>`;
@@ -3952,9 +4001,18 @@ export function recipePageHtml(
   html: string,
   served: Lang,
   list: RecipeSummary[],
+  starter?: { name: string; zip: string; tree: string; count: number } | null,
 ): string {
   const t = STRINGS[lang];
   const r14 = R14[lang];
+  const st = starter
+    ? `<section class="panel starter-box" aria-labelledby="starter-h">
+    <h2 class="h3" id="starter-h">${icon("download")} ${esc(lang === "ar" ? "القالب الجاهز للتنزيل" : "Starter template")}</h2>
+    <p class="meta">${esc(lang === "ar" ? `${starter.count} ملفًا، تبني وتنجح اختباراتها. فكّوا الضغط، ثم npm install وnpm run check.` : `${starter.count} files that build and pass their own tests. Unzip, then npm install and npm run check.`)}</p>
+    <p><a class="button" href="${esc(starter.zip)}" download>${icon("download")} <bdi dir="ltr">${esc(starter.name)}.zip</bdi></a></p>
+    <details><summary>${esc(lang === "ar" ? "هيكل الملفات" : "File tree")}</summary><pre dir="ltr" class="tree"><code>${esc(starter.tree)}</code></pre></details>
+  </section>`
+    : "";
   const nav = `<nav class="docs-nav" aria-label="${esc(r14.recipes)}"><ul>${list
     .map(
       (x) =>
@@ -3963,7 +4021,7 @@ export function recipePageHtml(
     .join("")}</ul></nav>`;
   const body = `<div class="wrap docs-layout">
   <aside>${nav}<p><a class="text-link" href="${localePath(lang, "/docs/recipes")}">${esc(r14.back)}</a></p></aside>
-  <div>${recipeArticle(lang, r, html, served)}</div>
+  <div>${st}${recipeArticle(lang, r, html, served)}${notesCallout(lang)}</div>
 </div>`;
   return layout({
     lang,
@@ -4091,6 +4149,7 @@ export function dashRecipesHtml(
   const body = `<div class="page-wide">
   ${pageHead(o.kind === "team" ? t.team.eyebrow : DS[lang].adminArea, esc(r14.recipes), r14.recipesSub)}
   ${flashBox(lang, o.flash ?? null)}
+  ${notesCallout(lang, o.kind)}
   <section class="block" aria-labelledby="rc-title">
     <h2 id="rc-title">${esc(r14.recipes)} <span class="count">${o.list.length}</span></h2>
     ${recipeTable(lang, o, base, own)}

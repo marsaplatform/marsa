@@ -101,6 +101,20 @@ If you omit a field, the current value is kept. `[]` clears flags or bindings. T
 
 Why this exists: a plain `fetch()` from a Worker to another hostname on the same zone goes to the zone's origin, not to that Worker. A binding makes a direct call. `global_fetch_strictly_public` makes the request go out through the internet instead.
 
+## Type, stack, repo and Space page (0.15.1)
+
+Optional on deploy (`PUT`) or later with `POST /api/teams/<team>/workers/<name>/links` (MCP: `set_worker_links`, UI: the Worker's Settings tab):
+
+```json
+{ "meta": { "kind": "mcp", "language": "typescript", "framework": "hono", "toolsCount": 2, "spaceSlug": "<space id>" },
+  "repo": { "url": "https://github.com/org/repo", "branch": "main", "commitSha": "<sha>" },
+  "spaceId": "<space id>" }
+```
+
+Without `meta`, the dashboard guesses from the code and, for MCP servers, probes `/mcp` read-only (`initialize` + `tools/list`, cached for an hour, never `tools/call`). Repos are checked read-only on GitHub and cached for 15 minutes. If the server sets `GITHUB_TOKEN`, it can tell private repos from missing ones; the token is used only server-side. Every Worker declared or detected as MCP is listed on **MCP servers** in the dashboard.
+
+Start from the starter template: `GET /api/recipes/mcp-server-on-worker/starter.zip`. If something fails, leave a note: `POST /api/teams/<team>/notes` (see the *Agent notes* recipe).
+
 ## MCP tools
 
 When Workers are on for the team, a space's MCP server (see [MCP per space](mcp.md)) also offers `list_workers`, `list_worker_versions` and `get_worker_version` (read-only tokens) and `deploy_worker`, `redeploy_worker`, `rollback_worker` and `delete_worker` (read-write tokens), with the same rules as the API.

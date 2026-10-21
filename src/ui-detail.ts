@@ -32,6 +32,18 @@ import {
   type WorkerRowView,
   WS,
 } from "./ui.js";
+import {
+  type InsightRow,
+  IX,
+  kindBadge,
+  kindFilter,
+  languageFilter,
+  repoCell,
+  repoFilter,
+  repoValue,
+  stackCell,
+  toolsCell,
+} from "./ui-insight.js";
 import { badge, type DtAction, type DtRow, dataTable, relTime, tabsNav } from "./ui-table.js";
 import type { UserKeyView } from "./user-keys.js";
 import { ALLOWED_COMPAT_FLAGS } from "./worker-config.js";
@@ -485,6 +497,9 @@ export interface WorkerDetailOpts {
   audit: AuditView[];
   /** Names of the team's Workers (for the bindings help). */
   teamWorkers?: string[];
+  /** 0.15.1: type/stack/tools/repo/space, and the team's spaces for manual linking. */
+  insight?: InsightRow;
+  spaces?: { id: string; title: string }[];
   /** Owner/editor on the team side, or the admin. */
   canEdit: boolean;
 }
@@ -515,6 +530,13 @@ export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): st
   const headActions = [
     w.url && w.status === "active"
       ? `<a class="button small" href="${esc(w.url)}" target="_blank" rel="noopener">${icon("ext")}${esc(x.open)}</a>`
+      : "",
+    o.insight?.kind === "mcp" && w.status === "active" && (admin || o.canEdit)
+      ? postForm(
+          href(admin ? `/admin/workers/${w.id}/probe` : `${teamBase}/probe`),
+          o.csrf,
+          `${backField(self)}<button class="button small ghost" type="submit" data-busy>${icon("redeploy")}${esc(IX[lang].refresh)}</button>`,
+        )
       : "",
     teamEdit && w.version
       ? postForm(
@@ -565,6 +587,7 @@ export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): st
       ${fact(x.requests, esc(reqs))}
       ${fact(x.varNames, codeList(Object.keys(w.vars)) || `<span class="meta">${esc(x.none)}</span>`)}
       ${fact(x.secretNames, codeList(w.secrets, true) || `<span class="meta">${esc(x.none)}</span>`)}
+      ${o.insight ? insightFacts(lang, o.insight, fact, o.keys.settings.required) : ""}
       ${runtimeFacts(lang, w, fact)}
       ${fact(x.keys, o.keys.settings.required ? `${badge(K14[lang].on, "on")} ${esc(x.keysCount(activeKeys.length))}` : badge(K14[lang].off, "muted"))}
       ${fact(x.script, `<code class="ltr">${esc(w.script)}</code>`)}
@@ -793,6 +816,39 @@ if (!gate.ok) return gate.response;</code></pre></section>`;
   return `${off}${table}${create}${helper}`;
 }
 
+function insightFacts(
+  lang: Lang,
+  i: InsightRow,
+  fact: (label: string, html: string) => string,
+  keysOn: boolean,
+): string {
+  const ix = IX[lang];
+  const tools =
+    i.kind === "mcp"
+      ? `${toolsCell(lang, i)}${
+          i.toolNames.length
+            ? `<ul class="chips">${i.toolNames
+                .slice(0, 30)
+                .map((n) => `<li><code class="ltr">${esc(n)}</code></li>`)
+                .join("")}</ul>`
+            : ""
+        }${i.probeNote ? `<div class="meta">${esc(i.probeNote)}</div>` : ""}${i.probeAt ? `<div class="meta">${esc(ix.probeAt)} ${relTime(i.probeAt, lang)}</div>` : ""}`
+      : `<span class="meta">—</span>`;
+  return [
+    fact(ix.type, kindBadge(lang, i)),
+    fact(ix.stack, stackCell(lang, i)),
+    fact(ix.tools, tools),
+    fact(ix.protected, badge(keysOn ? ix.yes : ix.no, keysOn ? "on" : "muted")),
+    fact(ix.repo, repoCell(lang, i)),
+    fact(
+      ix.space,
+      i.space
+        ? `<a class="text-link" href="${esc(localePath(lang, i.space.href))}"><bdi>${esc(i.space.title)}</bdi></a>`
+        : `<span class="meta">${esc(ix.spaceNone)}</span>`,
+    ),
+  ].join("");
+}
+
 function runtimeFacts(
   lang: Lang,
   w: RuntimeView,
@@ -939,7 +995,28 @@ function workerSettingsTab(
     <input type="hidden" name="runtime" value="1">
     ${canChange ? `<button class="button small" type="submit" data-busy>${esc(x.saveRuntime)}</button>` : editable ? `<p class="meta">${esc(x.needVersion)}</p>` : ""}
   </form>`;
-  return `<div class="settings-grid">${keysForm}${envForm}${secretsPanel}${runtimeForm}</div>${danger}`;
+  const ix = IX[lang];
+  const ins = o.insight;
+  const meta =
+    (w as { meta?: { kind?: string; language?: string; framework?: string } }).meta ?? {};
+  const opt = (v: string, label: string, cur: string | undefined) =>
+    `<option value="${esc(v)}"${cur === v ? " selected" : ""}>${esc(label)}</option>`;
+  const linksForm = editable
+    ? `<form method="post" action="${href(`${teamBase}/links`)}" class="panel stack-form">
+    ${csrfField(o.csrf)}${backField(self)}
+    <h2 class="h3">${icon("repo")} ${esc(ix.linksTitle)}</h2>
+    <p class="meta">${esc(ix.linksHelp)}</p>
+    <label class="field">${esc(ix.repoUrl)} <input name="repoUrl" type="url" dir="ltr" placeholder="https://github.com/org/repo" value="${esc(ins?.repo?.url ?? "")}"></label>
+    <div class="inline-fields"><label class="field">${esc(ix.branch)} <input name="branch" dir="ltr" placeholder="main" value="${esc(ins?.repo?.branch ?? "")}"></label>
+    <label class="field">${esc(ix.commit)} <input name="commitSha" dir="ltr" pattern="[0-9a-fA-F]{7,40}" value="${esc(ins?.repo?.commitSha ?? "")}"></label></div>
+    <label class="field">${esc(ix.spacePick)} <select name="spaceId">${opt("", ix.auto, ins?.space?.how === "manual" ? ins.space.id : "")}${(o.spaces ?? []).map((sp) => opt(sp.id, sp.title, ins?.space?.how === "manual" ? ins.space.id : "")).join("")}</select></label>
+    <div class="inline-fields"><label class="field">${esc(ix.declaredMeta)} <select name="kind">${opt("", ix.auto, meta.kind)}${(["mcp", "web", "other"] as const).map((k) => opt(k, ix.kinds[k] ?? k, meta.kind)).join("")}</select></label>
+    <label class="field">${esc(ix.stack)} <select name="language">${opt("", ix.auto, meta.language)}${(["typescript", "javascript", "python"] as const).map((k) => opt(k, ix.languages[k] ?? k, meta.language)).join("")}</select></label>
+    <label class="field">${esc(ix.stackFramework)} <input name="framework" dir="ltr" placeholder="hono" maxlength="30" value="${esc(meta.framework ?? "")}"></label></div>
+    <button class="button small" type="submit">${esc(ix.saveLinks)}</button>
+  </form>`
+    : "";
+  return `<div class="settings-grid">${keysForm}${envForm}${secretsPanel}${runtimeForm}${linksForm}</div>${danger}`;
 }
 
 // ---- rows shared by the list pages and the detail tabs --------------------------------------
@@ -951,6 +1028,8 @@ export interface WorkerListRow extends WorkerRowView {
   keysCount?: number;
   /** Requests in the last 7 days (from API-key usage), null when not known. */
   requests7?: number | null;
+  /** 0.15.1: type, stack, tools, repo, linked space. */
+  insight?: InsightRow;
 }
 
 /** Rows of a Workers table (team list, admin list, admin team detail). */
@@ -1024,7 +1103,13 @@ export function workerRows(
             },
           ]
         : []),
-      { html: r.url ? `<span class="url ltr" dir="ltr">${esc(hostless(r.url))}</span>` : "—" },
+      ...(r.insight
+        ? [
+            { html: kindBadge(lang, r.insight), v: r.insight.kind },
+            { html: stackCell(lang, r.insight), v: r.insight.stack },
+            { html: toolsCell(lang, r.insight), v: r.insight.toolsCount ?? -1, cls: "num" },
+          ]
+        : []),
       { html: r.version ? `v${r.version}` : "—", v: r.version ?? 0, cls: "num" },
       { html: esc(bytesLabel(lang, r.bytes)), v: r.bytes, cls: "num" },
       {
@@ -1047,26 +1132,42 @@ export function workerRows(
           : "—",
         v: r.deployedAt ?? "",
       },
+      ...(r.insight ? [{ html: repoCell(lang, r.insight), v: repoValue(r.insight) }] : []),
     ];
+    if (r.insight?.endpoint)
+      acts.splice(2, 0, { kind: "copy", label: `${IX[lang].endpoint}`, value: r.insight.endpoint });
     return {
       label: r.name,
       href: opts.detail(r),
-      head: `<a class="row-link" href="${esc(opts.detail(r))}"><code class="ltr">${esc(r.name)}</code></a>`,
+      head: `<a class="row-link" href="${esc(opts.detail(r))}"><code class="ltr">${esc(r.name)}</code></a>${r.url ? `<div class="meta url ltr" dir="ltr">${esc(hostless(r.url))}</div>` : ""}`,
       headV: r.name,
       cells,
       actions: acts,
-      filters: { status: r.status, ...(r.team ? { team: r.team.id } : {}) },
+      filters: {
+        status: r.status,
+        ...(r.team ? { team: r.team.id } : {}),
+        ...(r.insight
+          ? { kind: r.insight.kind, lang: r.insight.language, repo: repoValue(r.insight) }
+          : {}),
+      },
     };
   });
   const cols: Col[] = [
     { label: x.status, sort: "text" },
     ...(opts.showTeam ? [{ label: x.team, sort: "text" as const }] : []),
-    { label: x.liveUrl },
+    ...(list.some((r) => r.insight)
+      ? [
+          { label: IX[lang].type, sort: "text" as const },
+          { label: IX[lang].stack, sort: "text" as const },
+          { label: IX[lang].tools, sort: "num" as const },
+        ]
+      : []),
     { label: x.version, sort: "num" },
     { label: x.size, sort: "num" },
     { label: x.keys, sort: "num" },
     { label: x.requests7, sort: "num" },
     { label: x.lastDeploy, sort: "date" },
+    ...(list.some((r) => r.insight) ? [{ label: IX[lang].repo, sort: "text" as const }] : []),
   ];
   return { rows, cols };
 }
@@ -1142,6 +1243,10 @@ export function siteRows(
       { html: visitsCell(lang, s.visits), v: s.visits?.views7 ?? -1 },
       { html: relTime(s.createdAt, lang), v: s.createdAt },
       { html: timeTag(lang, s.expiresAt), v: s.permanent ? "9999" : s.expiresAt },
+      {
+        html: repoCell(lang, { repo: s.repo ?? null, repoStatus: s.repoStatus ?? null }),
+        v: repoValue({ repo: s.repo ?? null, repoStatus: s.repoStatus ?? null }),
+      },
     ];
     return {
       label: s.title,
@@ -1150,7 +1255,11 @@ export function siteRows(
       headV: s.title,
       cells,
       actions: acts,
-      filters: { status, ...(opts.showOwner ? { team: s.owner?.id ?? "guest" } : {}) },
+      filters: {
+        status,
+        repo: repoValue({ repo: s.repo ?? null, repoStatus: s.repoStatus ?? null }),
+        ...(opts.showOwner ? { team: s.owner?.id ?? "guest" } : {}),
+      },
     };
   });
   const cols: Col[] = [
@@ -1162,6 +1271,7 @@ export function siteRows(
     { label: x.visits7, sort: "num" },
     { label: x.created, sort: "date" },
     { label: x.expiry, sort: "date" },
+    { label: IX[lang].repo, sort: "text" },
   ];
   return { rows, cols };
 }
@@ -1435,7 +1545,7 @@ export function adminTeamHtml(lang: Lang, c: Config, o: AdminTeamOpts): string {
       rows,
       csrf: o.csrf,
       empty: x.noSpaces,
-      filters: [siteStatusFilter(lang)],
+      filters: [siteStatusFilter(lang), repoFilter(lang, o.sites)],
     });
   } else if (tab === "workers") {
     const { rows, cols } = workerRows(lang, o.workers, {
@@ -1453,7 +1563,12 @@ export function adminTeamHtml(lang: Lang, c: Config, o: AdminTeamOpts): string {
       rows,
       csrf: o.csrf,
       empty: x.noWorkers,
-      filters: [workerStatusFilter(lang, o.workers)],
+      filters: [
+        workerStatusFilter(lang, o.workers),
+        kindFilter(lang, o.workers),
+        languageFilter(lang, o.workers),
+        repoFilter(lang, o.workers),
+      ],
     })}`;
   } else if (tab === "agents") {
     body = dataTable({
@@ -1733,6 +1848,7 @@ function siteOverviewTab(
       ${fact(x.visits30, s.visits ? esc(fmt(lang, s.visits.views30)) : "—")}
       ${o.owner ? fact(x.owner, `<bdi>${esc(o.owner.name)}</bdi>`) : admin ? fact(x.owner, badge(x.guest, "muted")) : ""}
       ${fact(x.mcp, `<code class="ltr">${esc(hostless(o.mcp.endpoint))}</code>`)}
+      ${fact(IX[lang].repo, repoCell(lang, { repo: s.repo ?? null, repoStatus: s.repoStatus ?? null }))}
     </dl>
   </div>
   ${acts.length ? `<div class="actions site-actions">${acts.join("")}</div>` : ""}
@@ -1906,5 +2022,18 @@ function siteSettingsTab(lang: Lang, o: SiteDetailOpts, self: string, teamBase: 
         ),
       )}</section>`
     : `<p class="notice">${esc(x.readOnly)}</p>`;
-  return `<div class="settings-grid">${replace}${token}</div>${danger}`;
+  const ix = IX[lang];
+  const repoForm =
+    !admin && o.canEdit
+      ? `<form method="post" action="${href(`${teamBase}/repo`)}" class="panel stack-form">
+    ${csrfField(o.csrf)}${backField(self)}
+    <h2 class="h3">${icon("repo")} ${esc(ix.repo)}</h2>
+    <p class="meta">${esc(ix.siteRepoHelp)}</p>
+    <label class="field">${esc(ix.repoUrl)} <input name="repoUrl" type="url" dir="ltr" placeholder="https://github.com/org/repo" value="${esc(s.repo?.url ?? "")}"></label>
+    <div class="inline-fields"><label class="field">${esc(ix.branch)} <input name="branch" dir="ltr" placeholder="main" value="${esc(s.repo?.branch ?? "")}"></label>
+    <label class="field">${esc(ix.commit)} <input name="commitSha" dir="ltr" pattern="[0-9a-fA-F]{7,40}" value="${esc(s.repo?.commitSha ?? "")}"></label></div>
+    <button class="button small" type="submit">${esc(ix.saveLinks)}</button>
+  </form>`
+      : "";
+  return `<div class="settings-grid">${replace}${token}${repoForm}</div>${danger}`;
 }

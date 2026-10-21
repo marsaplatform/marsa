@@ -61,8 +61,10 @@ describe("0.14.0 recipes", () => {
       "mcp-server-on-worker",
       "bilingual-project-page",
       "agent-security-rules",
+      "python-mcp-self-hosted",
       "site-kv-and-files",
       "protect-mcp-with-keys",
+      "agent-notes",
     ]);
     for (const r of rs) {
       for (const l of ["en", "ar"] as const) {
@@ -81,7 +83,7 @@ describe("0.14.0 recipes", () => {
   it("public API, team recipes with a key, scopes, MCP tools and pages", async () => {
     const { tk, agent, team } = await setup();
     const pub = await (await t.api("GET", "/api/recipes?lang=ar")).json();
-    expect(pub.recipes).toHaveLength(5);
+    expect(pub.recipes).toHaveLength(7);
     expect(pub.recipes[0].title).toMatch(/MCP/);
     const md = await t.api("GET", "/api/recipes/agent-security-rules?format=md");
     expect(md.headers.get("content-type")).toMatch(/markdown/);

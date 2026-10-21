@@ -73,7 +73,7 @@ JSON {"error": {"code", "message", "path"?}}. Codes: EMPTY_UPLOAD, INVALID_REQUE
 
 - [API reference](${base}/docs/api)
 - [Guide for AI agents](${base}/docs/agents)
-- [Agent recipes](${base}/docs/recipes): step-by-step playbooks (MCP server on a Worker, security rules, KV/files, bilingual pages, protecting an MCP with keys). As markdown: ${base}/api/recipes/<slug>?format=md
+- [Agent recipes](${base}/docs/recipes): step-by-step playbooks (MCP server on a Worker with a downloadable TypeScript + Hono starter at ${base}/api/recipes/mcp-server-on-worker/starter.zip, security rules, KV/files, bilingual project pages, protecting an MCP with keys, a self-hosted Python MCP, agent notes). As markdown: ${base}/api/recipes/<slug>?format=md\n- Agent notes: hit a problem? POST ${base}/api/teams/<team>/notes (team or agent key) or the MCP tool leave_note; the admin replies
 - [Data & files backend](${base}/docs/backend)
 - [Teams and the public directory](${base}/docs/teams)
 - [OpenAPI spec](${base}/openapi.json)

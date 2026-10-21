@@ -1,0 +1,31 @@
+{
+  "name": "my-mcp-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server on a Marsa Spaces Worker (TypeScript + Hono + the official MCP SDK).",
+  "scripts": {
+    "dev": "tsx scripts/dev.ts",
+    "build": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2022 --minify --outfile=dist/worker.js",
+    "build:bun": "bun build src/index.ts --target=browser --format=esm --minify --outfile=dist/worker.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test && npm run build && node scripts/size.mjs",
+    "deploy": "npm run check && tsx scripts/deploy.ts",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "hono": "^4.9.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.19.0",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

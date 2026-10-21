@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.15.1] - 2026-10-21
+
+### Added
+- **Downloadable MCP starter** (`GET /api/recipes/mcp-server-on-worker/starter.zip`, file tree at
+  `…/starter`): TypeScript + Hono + the official MCP SDK (zod, `CfWorkerJsonSchemaValidator`, stateless
+  JSON Streamable HTTP), `src/tools/<tool>.ts`, `src/lib/http.ts` (fixed User-Agent, timeouts, retries),
+  cache, Arabic normalisation, i18n, vitest tests, esbuild/Bun bundling, size check, wrangler-free
+  `scripts/deploy.ts` (sends `meta` + `repo`) and `scripts/smoke.ts`. Shown on the recipe page.
+- **Recipes**: *MCP server on a Spaces Worker* v3 (honest stack recommendation from the Atlas, Malja
+  and ERX repos, folder tree, naming and tool rules, commands, checklist, live verification, versions,
+  keys, bindings); *Bilingual project page* v2 (folder structure with `index.html`, `ar/index.html`,
+  `assets/`, `cover.png`, repo link); new *Python MCP server, self-hosted (FastMCP)*; new *Agent notes*.
+- **Invite onboarding "Start here"**: stack recommendation, starter link and the top 10 rules (JSON
+  `startHere` and markdown).
+- **Worker insight** in the Workers tables (admin, team, admin team detail) and the Worker Overview: type
+  (MCP server / site/API / other), language and stack, MCP tool count and endpoint, Spaces-keys
+  protection, size, version, with type/language/repo filters. Order: declared `meta` on deploy (API,
+  MCP `deploy_worker`, UI), then code heuristics, then a cached read-only `initialize` + `tools/list`
+  probe (4 s timeout, 1 h cache, never `tools/call`; admin and team "Refresh tools list").
+- **Repo column** for Spaces, Workers and MCP servers, plus detail pages: optional `repo` {url, branch,
+  commitSha} on deploy, `POST /api/teams/<team>/workers/<name>/links`, MCP `set_worker_links`,
+  `PATCH /api/sites/<id>` and the Settings tabs. Checked read-only on GitHub (public / private / not
+  found; with `GITHUB_TOKEN` on the server private and missing are told apart; the token is never shown)
+  and synced / behind / diverged against the branch, cached 15 min.
+- **MCP servers page** (sidebar "MCP servers" / "سيرفرات MCP", admin and team): every Worker declared or
+  detected as MCP with its endpoint (copy), linked Space page (manual, declared `spaceSlug`, or same
+  name), Worker page, keys status and a "User keys" button, tools, stack, repo, status and last deploy,
+  with filters and search.
+- **Agent notes** (sidebar "Agent notes" / "ملاحظات الإيجنتس"): agents leave notes at any stage with
+  `POST /api/teams/<team>/notes` (team key or any agent key), the MCP tool `leave_note`, and read
+  replies with `GET`. Fields: severity, stage, category, message, target, version, agent. 30 per hour
+  per key, 16 KB, control and bidi characters stripped, anything that looks like a secret redacted,
+  escaped on render. Admin: table with filters, acknowledge / resolve / reopen, reply
+  (`GET /api/admin/notes`, `PATCH /api/admin/notes/<id>`). Blockers ring the bell. Teams see their own.
+
 ## [0.15.0] - 2026-10-21
 
 ### Added
