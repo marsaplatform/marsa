@@ -9,8 +9,6 @@ import {
   type FetchFn,
   STORE_BINDING,
 } from "./cf-workers.js";
-import { CronError, readCrons } from "./worker-cron.js";
-import { CodeError, checkWorkerCode } from "./worker-validate.js";
 import type { Actor } from "./members.js";
 import { RepoError, type RepoLink, readRepo } from "./repo-status.js";
 import type { SecretBox } from "./secrets.js";
@@ -23,6 +21,7 @@ import {
   type ServiceBinding,
   type WorkerRuntime,
 } from "./worker-config.js";
+import { CronError, readCrons } from "./worker-cron.js";
 import {
   ENV_NAME_RE,
   EnvError,
@@ -31,6 +30,7 @@ import {
   SYSTEM_SECRETS,
 } from "./worker-env.js";
 import { MetaError, readMeta, type WorkerMeta } from "./worker-insight.js";
+import { CodeError, checkWorkerCode } from "./worker-validate.js";
 import {
   cleanNote,
   sha256Hex,
@@ -671,8 +671,15 @@ export class WorkerService {
     if (err instanceof CfError) {
       // 0.17.0: Cloudflare refused the script itself (10021: script validation, e.g.
       // "No such module", a syntax or startup error). That is the caller's code: 400.
-      if (err.codes.includes(10021) || (err.status === 400 && /uncaught|no such module/i.test(err.message))) {
-        return new WorkerError(400, "VALIDATION_FAILED", `Cloudflare rejected the script: ${err.message}`);
+      if (
+        err.codes.includes(10021) ||
+        (err.status === 400 && /uncaught|no such module/i.test(err.message))
+      ) {
+        return new WorkerError(
+          400,
+          "VALIDATION_FAILED",
+          `Cloudflare rejected the script: ${err.message}`,
+        );
       }
       return new WorkerError(502, "CLOUDFLARE_ERROR", `${what}: ${err.message}`);
     }
@@ -798,11 +805,16 @@ export class WorkerService {
     try {
       crons = readCrons(input.crons, this.limit("cronMinMinutes"));
     } catch (err) {
-      if (err instanceof CronError) throw new WorkerError(400, "INVALID_CRON", `crons: ${err.message}`);
+      if (err instanceof CronError)
+        throw new WorkerError(400, "INVALID_CRON", `crons: ${err.message}`);
       throw err;
     }
     if (input.storage !== undefined && input.storage !== null && input.storage !== "kv") {
-      throw new WorkerError(400, "INVALID_REQUEST", 'storage: "kv" (a private KV namespace as env.STORE) or null');
+      throw new WorkerError(
+        400,
+        "INVALID_REQUEST",
+        'storage: "kv" (a private KV namespace as env.STORE) or null',
+      );
     }
     const storage = input.storage as "kv" | null | undefined;
     // Throws early (503) when the platform has no token.
@@ -812,20 +824,29 @@ export class WorkerService {
     return this.serial(async () => {
       opts.hooks?.started?.();
       try {
-        return await this.deployLocked(team, name, code, bytes, q, {
-          vars,
-          secrets,
-          note,
-          date,
-          flags,
-          wantBindings,
-          meta,
-          repo,
-          requiredEnv,
-          crons,
-          storage,
-          varsGiven: input.vars !== undefined,
-        }, actor, opts);
+        return await this.deployLocked(
+          team,
+          name,
+          code,
+          bytes,
+          q,
+          {
+            vars,
+            secrets,
+            note,
+            date,
+            flags,
+            wantBindings,
+            meta,
+            repo,
+            requiredEnv,
+            crons,
+            storage,
+            varsGiven: input.vars !== undefined,
+          },
+          actor,
+          opts,
+        );
       } catch (err) {
         const e = err instanceof WorkerError ? err : this.cfFail(err, "deploy failed");
         await this.deps
@@ -841,8 +862,16 @@ export class WorkerService {
     }, team.id);
   }
 
-  private limit(k: "cronMinMinutes" | "cronsPerTeam" | "cronAccountMax" | "kvPerTeam" | "kvAccountMax"): number {
-    const d = { cronMinMinutes: 10, cronsPerTeam: 2, cronAccountMax: 5, kvPerTeam: 3, kvAccountMax: 100 };
+  private limit(
+    k: "cronMinMinutes" | "cronsPerTeam" | "cronAccountMax" | "kvPerTeam" | "kvAccountMax",
+  ): number {
+    const d = {
+      cronMinMinutes: 10,
+      cronsPerTeam: 2,
+      cronAccountMax: 5,
+      kvPerTeam: 3,
+      kvAccountMax: 100,
+    };
     return this.deps.limits[k] ?? d[k];
   }
   cronQuotaOf(team: Team): number {
@@ -856,7 +885,8 @@ export class WorkerService {
   private async accountCrons(a: CfAccess): Promise<number> {
     if (this.cronCount && this.deps.now() - this.cronCount.at < 5 * 60_000) return this.cronCount.n;
     let n = 0;
-    for (const sc of await this.deps.api.listScripts(a)) n += (await this.deps.api.getSchedules(a, sc)).length;
+    for (const sc of await this.deps.api.listScripts(a))
+      n += (await this.deps.api.getSchedules(a, sc)).length;
     this.cronCount = { at: this.deps.now(), n };
     return n;
   }
@@ -898,10 +928,15 @@ export class WorkerService {
       // 0.17.0: cron triggers and private KV (undefined = keep what the Worker has).
       const wantCrons = p.crons ?? existing?.crons ?? [];
       const cronsChanged =
-        p.crons !== undefined && JSON.stringify(wantCrons) !== JSON.stringify(existing?.crons ?? []);
+        p.crons !== undefined &&
+        JSON.stringify(wantCrons) !== JSON.stringify(existing?.crons ?? []);
       const wantKv = p.storage === undefined ? !!existing?.kvNamespaceId : p.storage === "kv";
       if (wantKv && (STORE_BINDING in finalVars || STORE_BINDING in secrets)) {
-        throw new WorkerError(400, "RESERVED_NAME", `${STORE_BINDING} is the private KV binding; rename the var or secret`);
+        throw new WorkerError(
+          400,
+          "RESERVED_NAME",
+          `${STORE_BINDING} is the private KV binding; rename the var or secret`,
+        );
       }
       checkVarsFit(finalVars, code);
       if (PROTECTED_SCRIPTS.has(script) || !script.startsWith("team-")) {
@@ -946,12 +981,20 @@ export class WorkerService {
         const kq = this.kvQuotaOf(team);
         const used = this.list(team.id).filter((w) => w.kvNamespaceId && w.name !== name).length;
         if (used + 1 > kq) {
-          throw new WorkerError(409, "KV_QUOTA", `this team can have ${kq} Workers with private storage`);
+          throw new WorkerError(
+            409,
+            "KV_QUOTA",
+            `this team can have ${kq} Workers with private storage`,
+          );
         }
         const n = await this.deps.api.countKvNamespaces(this.access()).catch(() => null);
         const cap = this.limit("kvAccountMax");
         if (n !== null && n >= cap) {
-          throw new WorkerError(409, "KV_ACCOUNT_LIMIT", `the account has ${n} KV namespaces (limit ${cap}); ask the admin`);
+          throw new WorkerError(
+            409,
+            "KV_ACCOUNT_LIMIT",
+            `the account has ${n} KV namespaces (limit ${cap}); ask the admin`,
+          );
         }
       }
       const at = this.iso();
@@ -1169,7 +1212,8 @@ export class WorkerService {
               ? `${name} (v${done.version})`
               : name,
       });
-      if (storageNote) await this.deps.audit({ teamId: team.id, actor, action: storageNote, detail: name });
+      if (storageNote)
+        await this.deps.audit({ teamId: team.id, actor, action: storageNote, detail: name });
       if (cronsChanged)
         await this.deps.audit({
           teamId: team.id,
@@ -1177,7 +1221,8 @@ export class WorkerService {
           action: "worker-crons",
           detail: `${name}: ${wantCrons.join(" | ") || "none"}`,
         });
-      if (!existing && done.host && this.settings?.bic?.enabled) void this.syncBic().catch(() => {});
+      if (!existing && done.host && this.settings?.bic?.enabled)
+        void this.syncBic().catch(() => {});
       return workerView(done);
     }
   }
@@ -1288,9 +1333,7 @@ export class WorkerService {
       compatibilityFlags: v.compatibilityFlags,
       bindings: v.bindings,
       crons: v.crons,
-      storage: v.storage
-        ? { type: "kv", binding: STORE_BINDING, private: true as const }
-        : null,
+      storage: v.storage ? { type: "kv", binding: STORE_BINDING, private: true as const } : null,
       logs: v.logs,
       varNames: Object.keys(v.vars).sort(),
       secretNames: v.secrets,
@@ -1337,7 +1380,13 @@ export class WorkerService {
   }
 
   private bicHosts(): string[] {
-    return [...new Set(this.list().filter((w) => w.host && w.status !== "disabled").map((w) => w.host as string))].sort();
+    return [
+      ...new Set(
+        this.list()
+          .filter((w) => w.host && w.status !== "disabled")
+          .map((w) => w.host as string),
+      ),
+    ].sort();
   }
 
   /**
@@ -1348,7 +1397,8 @@ export class WorkerService {
    */
   async setBic(enabled: boolean, actor: Actor): Promise<ReturnType<WorkerService["bicView"]>> {
     this.token();
-    if (!this.settings?.zoneId) throw new WorkerError(409, "NO_ZONE", "the Workers token has no zone");
+    if (!this.settings?.zoneId)
+      throw new WorkerError(409, "NO_ZONE", "the Workers token has no zone");
     await this.serial(async () => {
       const s = this.settings as CfSettings;
       s.bic = { ...(s.bic ?? {}), enabled };
@@ -1376,7 +1426,9 @@ export class WorkerService {
       const next: BicState = { ...s.bic, at: this.iso() };
       try {
         const ep = await this.deps.api.configRules(a);
-        const mine = ep?.rules.find((r) => r.ref === BIC_RULE_REF || r.description === BIC_RULE_DESC);
+        const mine = ep?.rules.find(
+          (r) => r.ref === BIC_RULE_REF || r.description === BIC_RULE_DESC,
+        );
         if (!s.bic.enabled || !hosts.length) {
           if (ep && mine) await this.deps.api.deleteConfigRule(a, ep.id, mine.id);
           delete next.ruleId;
@@ -1384,7 +1436,9 @@ export class WorkerService {
         } else if (!ep) {
           await this.deps.api.createConfigEntrypoint(a, rule);
           const again = await this.deps.api.configRules(a);
-          const r = again?.rules.find((x) => x.ref === BIC_RULE_REF || x.description === BIC_RULE_DESC);
+          const r = again?.rules.find(
+            (x) => x.ref === BIC_RULE_REF || x.description === BIC_RULE_DESC,
+          );
           if (again && r) Object.assign(next, { rulesetId: again.id, ruleId: r.id });
         } else if (mine) {
           await this.deps.api.updateConfigRule(a, ep.id, mine.id, rule);
@@ -1392,7 +1446,9 @@ export class WorkerService {
         } else {
           await this.deps.api.addConfigRule(a, ep.id, rule);
           const again = await this.deps.api.configRules(a);
-          const r = again?.rules.find((x) => x.ref === BIC_RULE_REF || x.description === BIC_RULE_DESC);
+          const r = again?.rules.find(
+            (x) => x.ref === BIC_RULE_REF || x.description === BIC_RULE_DESC,
+          );
           if (r) Object.assign(next, { rulesetId: ep.id, ruleId: r.id });
         }
         next.hosts = s.bic.enabled ? hosts.length : 0;
@@ -1402,10 +1458,16 @@ export class WorkerService {
         next.lastError = denied
           ? "Cloudflare refused: the token needs Zone · Config Rules: Edit"
           : this.cfFail(err, "could not update the configuration rule").message;
+        // Never left "on" without the permission: it activates only once Cloudflare accepts it.
+        if (denied) next.enabled = false;
         s.bic = next;
         await this.saveSettingsFile();
         if (actor)
-          throw new WorkerError(denied ? 403 : 502, denied ? "BIC_NOT_PERMITTED" : "CLOUDFLARE_ERROR", next.lastError);
+          throw new WorkerError(
+            denied ? 403 : 502,
+            denied ? "BIC_NOT_PERMITTED" : "CLOUDFLARE_ERROR",
+            next.lastError,
+          );
         return;
       }
       s.bic = next;
@@ -1694,7 +1756,13 @@ export class WorkerService {
   }
 
   /** One-click redeploy: deploy the newest stored version again (secrets are kept). */
-  async redeploy(team: Team, rec: WorkerRec, actor: Actor, note?: unknown): Promise<WorkerView> {
+  async redeploy(
+    team: Team,
+    rec: WorkerRec,
+    actor: Actor,
+    note?: unknown,
+    hooks?: DeployHooks,
+  ): Promise<WorkerView> {
     const v = await this.versions.latest(rec.id);
     if (!v) {
       throw new WorkerError(
@@ -1713,7 +1781,7 @@ export class WorkerService {
         note: note ?? `redeploy of v${v.n}`,
       },
       actor,
-      { action: "redeploy" },
+      { action: "redeploy", ...(hooks ? { hooks } : {}) },
     );
   }
 
@@ -1724,6 +1792,7 @@ export class WorkerService {
     n: number,
     actor: Actor,
     note?: unknown,
+    hooks?: DeployHooks,
   ): Promise<{ worker: WorkerView; missingSecrets: string[] }> {
     const v = Number.isInteger(n) ? await this.versions.get(rec.id, n) : null;
     if (!v)
@@ -1738,7 +1807,7 @@ export class WorkerService {
         note: note ?? `rollback to v${v.n}`,
       },
       actor,
-      { action: "rollback", from: v.n },
+      { action: "rollback", from: v.n, ...(hooks ? { hooks } : {}) },
     );
     const have = new Set(worker.secrets);
     return { worker, missingSecrets: v.secretNames.filter((k) => !have.has(k)) };

@@ -96,6 +96,7 @@ import { UserKeyStore } from "./user-keys.js";
 import { VisitCounter } from "./visits.js";
 import { mountWebRoutes } from "./web.js";
 import { ProbeCache } from "./worker-insight.js";
+import { JobStore } from "./worker-jobs.js";
 import { WorkerOps } from "./worker-ops.js";
 import { PLATFORM_AUDIT, WorkerService } from "./workers.js";
 import { ADMIN_ACTOR, mountWorkerRoutes } from "./workers-routes.js";
@@ -1025,6 +1026,7 @@ export function createApp({
     limiter,
     now,
     teamAuth,
+    jobs: new JobStore(config.dataDir, now),
     siteOfTeam: async (teamId, siteId) => {
       const m = await store.get(siteId).catch(() => null);
       return !!m && m.teamId === teamId;

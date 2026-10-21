@@ -157,6 +157,26 @@ export function mountAdminNoteRoutes(app: Hono, d: NoteRouteDeps): void {
       .map((n) => ({ ...noteView(n), teamId: n.teamId, via: n.via }));
     return c.json({ notes });
   });
+  // 0.17.0: the admin posts a note to a team (no notification, no webhook).
+  app.post("/api/admin/teams/:id/notes", async (c) => {
+    const ref = c.req.param("id") ?? "";
+    const team = d.teams.get(ref) ?? d.teams.list().find((t) => t.slug === ref) ?? null;
+    if (!team) return err(c, 404, "NOT_FOUND", "no such team");
+    const body = await c.req.json().catch(() => null);
+    try {
+      const n = await d.notes.add(team.id, readNote(body, "platform admin"), "admin");
+      await d.audit?.({
+        teamId: team.id,
+        actor: { kind: "admin", label: "admin" },
+        action: "note-post",
+        detail: n.id,
+      });
+      return c.json({ note: { ...noteView(n), teamId: n.teamId, via: n.via } }, 201);
+    } catch (e) {
+      if (e instanceof NoteError) return err(c, 400, "INVALID_REQUEST", e.message);
+      throw e;
+    }
+  });
   app.patch("/api/admin/notes/:id", async (c) => {
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body || typeof body !== "object")

@@ -48,7 +48,8 @@ const loadEsbuild = () => {
   return esb;
 };
 
-const DEFAULT_RE = /export\s+default\b|export\s*\{[^}]*\bas\s+["']?default\b|export\s*\{\s*default\b/;
+const DEFAULT_RE =
+  /export\s+default\b|export\s*\{[^}]*\bas\s+["']?default\b|export\s*\{\s*default\b/;
 
 /** Validate one ES module. Throws CodeError; resolves with what was found. */
 export async function checkWorkerCode(code: string): Promise<CodeCheck> {
@@ -85,14 +86,22 @@ export async function checkWorkerCode(code: string): Promise<CodeCheck> {
       ],
     });
   } catch (err) {
-    const first = (err as { errors?: { text: string; location?: { line: number; column: number; lineText?: string } | null }[] })
-      .errors?.[0];
+    const first = (
+      err as {
+        errors?: {
+          text: string;
+          location?: { line: number; column: number; lineText?: string } | null;
+        }[];
+      }
+    ).errors?.[0];
     if (first) {
       const loc = first.location;
       throw new CodeError(
         "SYNTAX_ERROR",
         `code: ${first.text}${loc ? ` (line ${loc.line}, column ${loc.column + 1})` : ""}`,
-        loc ? { line: loc.line, column: loc.column + 1, lineText: (loc.lineText ?? "").slice(0, 160) } : {},
+        loc
+          ? { line: loc.line, column: loc.column + 1, lineText: (loc.lineText ?? "").slice(0, 160) }
+          : {},
       );
     }
     throw new CodeError("SYNTAX_ERROR", "code: could not be parsed as an ES module");

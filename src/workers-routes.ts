@@ -7,8 +7,10 @@ import type { RateLimiter } from "./rate-limit.js";
 import { can, scopeError, type TeamAuth, type TeamCred } from "./team-auth.js";
 import type { Team, TeamStore } from "./teams.js";
 import { ALLOWED_COMPAT_FLAGS } from "./worker-config.js";
+import { type JobKind, type JobStore, jobView } from "./worker-jobs.js";
 import { versionMeta } from "./worker-versions.js";
 import {
+  type DeployHooks,
   listedWorker,
   PLATFORM_AUDIT,
   type VarValuesPolicy,
@@ -17,6 +19,7 @@ import {
   WorkerError,
   type WorkerRec,
   type WorkerService,
+  type WorkerView,
   workerView,
 } from "./workers.js";
 
@@ -30,6 +33,8 @@ export interface WorkerRouteDeps {
   teamAuth: TeamAuth;
   /** 0.15.1: is this a live space of the team (for linking a Worker to its page)? */
   siteOfTeam?: (teamId: string, siteId: string) => Promise<boolean>;
+  /** 0.17.0: deploy jobs (202 + status polling). */
+  jobs: JobStore;
 }
 
 const err = (c: Context, status: number, code: string, message: string) =>
@@ -49,7 +54,7 @@ export function teamWorkersInfo(svc: WorkerService, team: Team) {
     enabled: svc.enabledFor(team),
     configured: svc.configured,
     slug: team.slug ?? null,
-    quota: svc.quotaOf(team),
+    quota: { ...svc.quotaOf(team), crons: svc.cronQuotaOf(team), kvWorkers: svc.kvQuotaOf(team) },
     allowedCompatibilityFlags: [...ALLOWED_COMPAT_FLAGS],
     workers: svc.list(team.id).map(workerView),
   };
@@ -76,13 +81,22 @@ export function readTeamWorkers(
   team: Team,
   body: Record<string, unknown>,
 ):
-  | { enabled?: boolean; slug?: string; maxWorkers?: number | null; maxWorkerKb?: number | null }
+  | {
+      enabled?: boolean;
+      slug?: string;
+      maxWorkers?: number | null;
+      maxWorkerKb?: number | null;
+      maxCrons?: number | null;
+      maxKvWorkers?: number | null;
+    }
   | string {
   const out: {
     enabled?: boolean;
     slug?: string;
     maxWorkers?: number | null;
     maxWorkerKb?: number | null;
+    maxCrons?: number | null;
+    maxKvWorkers?: number | null;
   } = {};
   if ("enabled" in body) {
     if (typeof body.enabled !== "boolean") return "enabled must be true or false";
@@ -94,17 +108,12 @@ export function readTeamWorkers(
     if (p) return p;
     out.slug = slug;
   }
-  for (const k of ["maxWorkers", "maxWorkerKb"] as const) {
+  const MAX = { maxWorkers: 100, maxWorkerKb: 10_240, maxCrons: 250, maxKvWorkers: 100 };
+  for (const k of ["maxWorkers", "maxWorkerKb", "maxCrons", "maxKvWorkers"] as const) {
     if (!(k in body)) continue;
     const v = body[k];
     if (v === null || v === 0 || v === "") out[k] = null;
-    else if (
-      typeof v === "number" &&
-      Number.isInteger(v) &&
-      v > 0 &&
-      v <= (k === "maxWorkers" ? 100 : 10_240)
-    )
-      out[k] = v;
+    else if (typeof v === "number" && Number.isInteger(v) && v > 0 && v <= MAX[k]) out[k] = v;
     else return `${k}: a whole number, or null for the default`;
   }
   const slug = out.slug ?? team.slug;
@@ -132,6 +141,8 @@ export async function applyTeamWorkers(
       ...(patch.slug ? { slug: patch.slug } : {}),
       ...(patch.maxWorkers !== undefined ? { maxWorkers: patch.maxWorkers } : {}),
       ...(patch.maxWorkerKb !== undefined ? { maxWorkerKb: patch.maxWorkerKb } : {}),
+      ...(patch.maxCrons !== undefined ? { maxCrons: patch.maxCrons } : {}),
+      ...(patch.maxKvWorkers !== undefined ? { maxKvWorkers: patch.maxKvWorkers } : {}),
     },
     now,
   );
@@ -223,7 +234,104 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
       ...("meta" in body ? { meta: body.meta } : {}),
       ...("repo" in body ? { repo: body.repo } : {}),
       ...("requiredEnv" in body ? { requiredEnv: body.requiredEnv } : {}),
+      ...("crons" in body ? { crons: body.crons } : {}),
+      ...("storage" in body ? { storage: body.storage } : {}),
     };
+  };
+
+  // ---- 0.17.0: every deploy is a job; answer when done, or 202 + job after the wait --------
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  const runDeploy = async (
+    c: Context,
+    cr: TeamCred,
+    worker: string,
+    kind: JobKind,
+    okStatus: number,
+    run: (hooks: DeployHooks) => Promise<{ worker: WorkerView; extra?: Record<string, unknown> }>,
+  ) => {
+    const asyncWanted =
+      /^(1|true|yes)$/i.test(c.req.query("async") ?? "") ||
+      /\brespond-async\b/i.test(c.req.header("prefer") ?? "");
+    let waitMs = asyncWanted ? 0 : d.config.workers.deployWaitSec * 1000;
+    const w = c.req.query("wait");
+    if (w !== undefined && /^\d{1,3}$/.test(w)) waitMs = Math.min(90, Number(w)) * 1000;
+    const probeHealth = c.req.query("health") !== "0";
+    const job = await d.jobs.create(cr.team.id, worker, kind, cr.actor.label);
+    let accepted = false;
+    let onAccepted: () => void = () => {};
+    const acc = new Promise<void>((r) => {
+      onAccepted = r;
+    });
+    const p = run({
+      accepted: () => {
+        accepted = true;
+        onAccepted();
+      },
+      started: () => void d.jobs.started(job.id),
+    });
+    const finished = p.then(
+      async (out) => {
+        const health = probeHealth
+          ? await svc.healthAfterDeploy(out.worker).catch(() => null)
+          : null;
+        await d.jobs.succeeded(job.id, {
+          version: out.worker.version,
+          health,
+          ...(out.extra ? { extra: out.extra } : {}),
+        });
+        return { out, health };
+      },
+      async (e) => {
+        const er =
+          e instanceof WorkerError
+            ? { status: e.status, code: e.code, message: e.message }
+            : { status: 500, code: "INTERNAL", message: "deploy failed" };
+        if (accepted) await d.jobs.failed(job.id, er);
+        else await d.jobs.drop(job.id);
+        throw e;
+      },
+    );
+    finished.catch(() => {});
+    // Validation errors (400s) are answered right away, before any 202.
+    try {
+      await Promise.race([acc, p]);
+    } catch (e) {
+      await finished.catch(() => {});
+      return workerErr(c, e);
+    }
+    const ref = c.req.param("team") ?? cr.team.id;
+    const r = await Promise.race([
+      finished.then(
+        (x) => ({ done: true as const, x }),
+        (e: unknown) => ({ done: true as const, e }),
+      ),
+      sleep(waitMs).then(() => ({ done: false as const })),
+    ]);
+    c.header("X-Marsa-Job", job.id);
+    if (r.done && "x" in r) {
+      const j = await d.jobs.get(cr.team.id, job.id);
+      return c.json(
+        {
+          worker: r.x.out.worker,
+          ...(r.x.out.extra ?? {}),
+          health: r.x.health,
+          job: j ? jobView(j, d.config.publicUrl, ref) : null,
+        },
+        okStatus as 200,
+      );
+    }
+    if (r.done && "e" in r) return workerErr(c, r.e);
+    const j = await d.jobs.get(cr.team.id, job.id);
+    const view = jobView(j ?? job, d.config.publicUrl, ref);
+    c.header("Location", view.statusUrl);
+    c.header("Retry-After", "5");
+    return c.json(
+      {
+        job: view,
+        message: `the deploy continues in the background; poll ${view.statusUrl}`,
+      },
+      202,
+    );
   };
 
   app.get("/api/teams/:team/workers", async (c) => {
@@ -249,7 +357,10 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
           "a Worker with this name exists; PUT /api/teams/<team>/workers/<name> to redeploy",
         );
       }
-      return c.json({ worker: await svc.deploy(team, input, cr.actor) }, 201);
+      const wname = typeof input.name === "string" ? input.name.trim() : "";
+      return await runDeploy(c, cr, wname, "deploy", 201, async (hooks) => ({
+        worker: await svc.deploy(team, input, cr.actor, { hooks }),
+      }));
     } catch (e) {
       return workerErr(c, e);
     }
@@ -263,12 +374,15 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
       const existed = !!svc.find(cr.team.id, c.req.param("name"));
       const input = await readDeploy(c, c.req.param("name"));
       const note = c.req.header("x-marsa-note");
-      const w = await svc.deploy(
-        cr.team,
-        note && input.note === undefined ? { ...input, note } : input,
-        cr.actor,
+      const finalInput = note && input.note === undefined ? { ...input, note } : input;
+      return await runDeploy(
+        c,
+        cr,
+        c.req.param("name"),
+        existed ? "redeploy" : "deploy",
+        existed ? 200 : 201,
+        async (hooks) => ({ worker: await svc.deploy(cr.team, finalInput, cr.actor, { hooks }) }),
       );
-      return c.json({ worker: w }, existed ? 200 : 201);
     } catch (e) {
       return workerErr(c, e);
     }
@@ -346,17 +460,44 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
         c,
         400,
         "INVALID_REQUEST",
-        'send JSON {"compatibilityDate"?, "compatibilityFlags"?, "bindings"?}',
+        'send JSON {"compatibilityDate"?, "compatibilityFlags"?, "bindings"?, "crons"?, "storage"?}',
       );
     }
     const change: Record<string, unknown> = {};
-    for (const k of ["compatibilityDate", "compatibilityFlags", "bindings"])
+    for (const k of ["compatibilityDate", "compatibilityFlags", "bindings", "crons", "storage"])
       if (k in body) change[k] = body[k];
     try {
-      return c.json({ worker: await svc.editRuntime(r.cr.team, r.rec, change, r.cr.actor) });
+      return await runDeploy(c, r.cr, r.rec.name, "runtime", 200, async (hooks) => ({
+        worker: await svc.editRuntime(r.cr.team, r.rec, change, r.cr.actor, hooks),
+      }));
     } catch (e) {
       return workerErr(c, e);
     }
+  });
+  // 0.17.0: read the runtime settings of one Worker (the counterpart of the POST above).
+  app.get("/api/teams/:team/workers/:name/runtime", async (c) => {
+    const r = await recOf(c, "workers:read");
+    if (r instanceof Response) return r;
+    return c.json({
+      runtime: svc.runtimeView(r.rec),
+      allowedCompatibilityFlags: [...ALLOWED_COMPAT_FLAGS],
+    });
+  });
+  // 0.17.0: deploy jobs.
+  app.get("/api/teams/:team/jobs", async (c) => {
+    const cr = await teamOf(c, "workers:read");
+    if (cr instanceof Response) return cr;
+    const ref = c.req.param("team") ?? cr.team.id;
+    const list = await d.jobs.list(cr.team.id, c.req.query("worker") || undefined, 50);
+    return c.json({ jobs: list.map((j) => jobView(j, d.config.publicUrl, ref)) });
+  });
+  app.get("/api/teams/:team/jobs/:id", async (c) => {
+    const cr = await teamOf(c, "workers:read");
+    if (cr instanceof Response) return cr;
+    const j = await d.jobs.get(cr.team.id, c.req.param("id") ?? "");
+    if (!j) return err(c, 404, "NOT_FOUND", "no such job for this team");
+    if (!j.status.match(/succeeded|failed|interrupted/)) c.header("Retry-After", "5");
+    return c.json({ job: jobView(j, d.config.publicUrl, c.req.param("team") ?? cr.team.id) });
   });
   // 0.15.1: metadata only (no redeploy): declared meta, repo link, linked space.
   app.post("/api/teams/:team/workers/:name/links", async (c) => {
@@ -399,7 +540,9 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
     if (limited) return limited;
     const body = ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
     try {
-      return c.json({ worker: await svc.redeploy(r.cr.team, r.rec, r.cr.actor, body.note) });
+      return await runDeploy(c, r.cr, r.rec.name, "redeploy", 200, async (hooks) => ({
+        worker: await svc.redeploy(r.cr.team, r.rec, r.cr.actor, body.note, hooks),
+      }));
     } catch (e) {
       return workerErr(c, e);
     }
@@ -414,14 +557,17 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
       return err(c, 400, "INVALID_REQUEST", 'send JSON {"version": <n>, "note"?: "…"}');
     }
     try {
-      const out = await svc.rollback(
-        r.cr.team,
-        r.rec,
-        body.version as number,
-        r.cr.actor,
-        body.note,
-      );
-      return c.json(out);
+      return await runDeploy(c, r.cr, r.rec.name, "rollback", 200, async (hooks) => {
+        const out = await svc.rollback(
+          r.cr.team,
+          r.rec,
+          body.version as number,
+          r.cr.actor,
+          body.note,
+          hooks,
+        );
+        return { worker: out.worker, extra: { missingSecrets: out.missingSecrets } };
+      });
     } catch (e) {
       return workerErr(c, e);
     }
@@ -452,6 +598,18 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
     try {
       await svc.clearSettings(ADMIN_ACTOR);
       return c.body(null, 204);
+    } catch (e) {
+      return workerErr(c, e);
+    }
+  });
+  // 0.17.0: the Browser Integrity Check exception for team Worker hosts (one config rule).
+  app.get("/api/admin/workers/bic", (c) => c.json({ bic: svc.bicView() }));
+  app.put("/api/admin/workers/bic", async (c) => {
+    const body = await readBody(c);
+    if (typeof body.enabled !== "boolean")
+      return err(c, 400, "INVALID_REQUEST", 'send JSON {"enabled": true|false}');
+    try {
+      return c.json({ bic: await svc.setBic(body.enabled, ADMIN_ACTOR) });
     } catch (e) {
       return workerErr(c, e);
     }

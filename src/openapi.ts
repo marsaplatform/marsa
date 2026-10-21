@@ -273,13 +273,36 @@ export function openapi(config: Config) {
           summary: "Create or redeploy a Worker",
           operationId: "putWorker",
           description:
-            'JSON {"code","vars"?,"secrets"?,"compatibilityDate"?,"compatibilityFlags"?,"bindings"?} or the raw script as application/javascript. Omitted vars and runtime settings are kept; secrets are write-only (null removes one). compatibilityFlags is allowlisted (global_fetch_strictly_public, nodejs_compat, nodejs_als). bindings are service bindings to Workers of the same team only: [{"name":"NEWS","worker":"news"}]; 409 WORKER_BOUND when deleting a Worker another one binds to.',
+            'JSON {"code","vars"?,"secrets"?,"compatibilityDate"?,"compatibilityFlags"?,"bindings"?,"crons"?,"storage"?} or the raw script as application/javascript. Omitted vars and runtime settings are kept; secrets are write-only (null removes one). compatibilityFlags is allowlisted (global_fetch_strictly_public, nodejs_compat, nodejs_als). bindings are service bindings to Workers of the same team only: [{"name":"NEWS","worker":"news"}]; 409 WORKER_BOUND when deleting a Worker another one binds to. 0.17.0: the code is checked before upload (400 SYNTAX_ERROR / MISSING_MODULE / NOT_A_MODULE; Cloudflare script errors are 400 VALIDATION_FAILED). crons: up to 3 five-field UTC cron expressions, at least 10 minutes apart (409 CRON_QUOTA / CRON_ACCOUNT_LIMIT). storage: "kv" adds a private KV namespace as env.STORE (null deletes it and its data). The answer waits up to 60 s (?wait=0-90); after that, or with ?async=1 or Prefer: respond-async, it is 202 with a job to poll at GET /api/teams/{team}/jobs/{id}. Successful answers include health {path, status, ms, ok} (?health=0 skips the probe).',
           security: [{ teamKey: [] }],
           parameters: [
             { name: "team", in: "path", required: true, schema: { type: "string" } },
             { name: "name", in: "path", required: true, schema: { type: "string" } },
+            {
+              name: "wait",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 0, maximum: 90 },
+            },
+            {
+              name: "async",
+              in: "query",
+              required: false,
+              schema: { type: "string", enum: ["1"] },
+            },
+            {
+              name: "health",
+              in: "query",
+              required: false,
+              schema: { type: "string", enum: ["0"] },
+            },
           ],
-          responses: { "200": { description: "Redeployed" }, "201": { description: "Created" } },
+          responses: {
+            "200": { description: "Redeployed" },
+            "201": { description: "Created" },
+            "202": { description: "Accepted: still deploying; poll the job" },
+            "400": { description: "The code, crons or storage were refused" },
+          },
         },
         get: {
           summary: "One Worker, with a live check",
@@ -333,7 +356,7 @@ export function openapi(config: Config) {
           summary: "Set compatibility date/flags and same-team service bindings",
           operationId: "setWorkerRuntime",
           description:
-            'JSON {"compatibilityDate"?: "YYYY-MM-DD"|null, "compatibilityFlags"?: [..], "bindings"?: [{"name","worker"}]}. Redeploys the newest stored code with them (a new version); the bound Workers are not changed. 409 NO_STORED_VERSION when nothing is stored yet.',
+            'JSON {"compatibilityDate"?: "YYYY-MM-DD"|null, "compatibilityFlags"?: [..], "bindings"?: [{"name","worker"}], "crons"?: [..]|null, "storage"?: "kv"|null}. Read the current values with GET on the same path. Same ?wait / ?async / 202 job behaviour as PUT …/workers/{name}. Redeploys the newest stored code with them (a new version); the bound Workers are not changed. 409 NO_STORED_VERSION when nothing is stored yet.',
           security: [{ teamKey: [] }],
           parameters: [
             { name: "team", in: "path", required: true, schema: { type: "string" } },

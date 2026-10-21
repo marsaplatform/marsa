@@ -141,6 +141,11 @@ export class JobStore {
       .slice(0, limit);
   }
 
+  /** A request that never got past validation leaves no job behind. */
+  async drop(id: string) {
+    if (this.jobs.delete(id)) await this.save();
+  }
+
   started(id: string) {
     return this.update(id, { status: "running", startedAt: this.iso() });
   }
@@ -148,7 +153,11 @@ export class JobStore {
     return this.update(id, { status: "succeeded", finishedAt: this.iso(), ...out });
   }
   failed(id: string, error: WorkerJob["error"]) {
-    return this.update(id, { status: "failed", finishedAt: this.iso(), ...(error ? { error } : {}) });
+    return this.update(id, {
+      status: "failed",
+      finishedAt: this.iso(),
+      ...(error ? { error } : {}),
+    });
   }
 }
 

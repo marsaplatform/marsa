@@ -45,6 +45,11 @@ export interface WorkersPermInput {
  * "Account · Workers Observability: Edit (API: Write)"; "Read" alone answers 403.
  */
 export const OBS_PERMISSION = "Account · Workers Observability: Edit (API: Write)";
+/**
+ * 0.17.0: the Browser Integrity Check exception for team Worker hosts is one Configuration Rule;
+ * managing it needs "Zone · Config Rules: Edit". The light reads the rules entrypoint only.
+ */
+export const CONFIG_RULES_PERMISSION = "Zone · Config Rules: Edit";
 export const OBS_DENIED_HINT =
   'Cloudflare\'s logs query needs "Account · Workers Observability: Edit (API: Write)"; "Read" alone is refused with 403. Edit the same token (check its last 4 characters) and press Verify.';
 
@@ -85,7 +90,7 @@ export async function checkWorkersToken(i: WorkersPermInput): Promise<PermReport
   const A = `/accounts/${acc}`;
   const s = i.sampleScript;
   const hasZone = !!i.zoneId;
-  const [verify, scripts, sub, settings, secrets, tails, zone, routes, dns, kv, r2] =
+  const [verify, scripts, sub, settings, secrets, tails, zone, routes, dns, kv, r2, cfgRules] =
     await Promise.all([
       verifyToken(api, token, acc),
       api.readProbe(token, `${A}/workers/scripts`),
@@ -98,7 +103,15 @@ export async function checkWorkersToken(i: WorkersPermInput): Promise<PermReport
       hasZone ? api.readProbe(token, `/zones/${i.zoneId}/dns_records?per_page=1`) : null,
       api.readProbe(token, `${A}/storage/kv/namespaces?per_page=1`),
       api.readProbe(token, `${A}/r2/buckets?per_page=1`),
+      hasZone
+        ? api.readProbe(token, `/zones/${i.zoneId}/rulesets/phases/http_config_settings/entrypoint`)
+        : null,
     ]);
+  // No config rules yet answers 404 after auth succeeded: that is a successful read.
+  const cfgR =
+    cfgRules && !cfgRules.ok && cfgRules.status === 404
+      ? { ok: true, status: 404, message: null }
+      : cfgRules;
   // Account Analytics: one tiny GraphQL read.
   const g = await api.graphql<unknown>(
     token,
@@ -188,6 +201,16 @@ export async function checkWorkersToken(i: WorkersPermInput): Promise<PermReport
         ),
     mk("kv", "Account · Workers KV Storage: Edit", "kvbind", false, kv),
     mk("r2", "Account · Workers R2 Storage: Edit", "r2bind", false, r2),
+    hasZone
+      ? mk(
+          "config-rules",
+          CONFIG_RULES_PERMISSION,
+          "bic",
+          false,
+          cfgR,
+          "read OK; edit is not probed (nothing is changed). The BIC exception stays off until the admin turns it on.",
+        )
+      : mk("config-rules", CONFIG_RULES_PERMISSION, "bic", false, null, "no zone configured"),
   ];
   return summary("workers", checks, i.now);
 }

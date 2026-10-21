@@ -106,6 +106,43 @@ const ROWS: Row[] = [
     'Reply to or change a note: {"status"?, "reply"?} (admin)',
     "admin",
   ],
+  [
+    "post",
+    "/api/admin/teams/{id}/notes",
+    'Post a note to a team as the platform admin: {"severity","message","stage"?,"category"?,"target"?} (no notification, no webhook) (admin)',
+    "admin",
+  ],
+  // 0.17.0: deploy jobs, runtime read, BIC exception
+  [
+    "get",
+    "/api/teams/{team}/jobs",
+    "Recent deploy jobs of the team (?worker=name): status queued|running|succeeded|failed|interrupted (workers:read)",
+    "team",
+  ],
+  [
+    "get",
+    "/api/teams/{team}/jobs/{id}",
+    "One deploy job: status, version, health probe, error {status, code, message} (workers:read)",
+    "team",
+  ],
+  [
+    "get",
+    "/api/teams/{team}/workers/{name}/runtime",
+    "A Worker's runtime settings: compatibility date/flags, bindings, crons, storage, logs, var and secret names (workers:read)",
+    "team",
+  ],
+  [
+    "get",
+    "/api/admin/workers/bic",
+    "The Browser Integrity Check exception for team Worker hosts: enabled, hosts, last error (admin)",
+    "admin",
+  ],
+  [
+    "put",
+    "/api/admin/workers/bic",
+    '{"enabled": bool}: manage one Configuration Rule (bic off) for team Worker hosts; needs Zone · Config Rules: Edit, else 403 BIC_NOT_PERMITTED and nothing changes (admin)',
+    "admin",
+  ],
   ["put", "/api/admin/recipes/{slug}", "Create or update a platform recipe (admin)", "admin"],
   ["delete", "/api/admin/recipes/{slug}", "Delete a platform recipe (admin)", "admin"],
   // Backend checks (admin)

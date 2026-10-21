@@ -38,7 +38,8 @@ function expand(raw: string, i: number): Set<number> {
       a = word(x as string);
       b = y === undefined ? (m[2] ? hi : a) : word(y);
     }
-    if (a < lo || b > hi || a > b) throw new CronError(`${name}: ${part} is out of range ${lo}-${hi}`);
+    if (a < lo || b > hi || a > b)
+      throw new CronError(`${name}: ${part} is out of range ${lo}-${hi}`);
     for (let v = a; v <= b; v += step) out.add(v);
   }
   return out;
@@ -51,9 +52,11 @@ function expand(raw: string, i: number): Set<number> {
 export function parseCron(expr: unknown): { cron: string; minGapMin: number } {
   if (typeof expr !== "string") throw new CronError("a cron expression is a string");
   const cron = expr.trim().replace(/\s+/g, " ");
-  if (cron.startsWith("@")) throw new CronError(`"${cron}": use the 5-field form (e.g. "*/15 * * * *")`);
+  if (cron.startsWith("@"))
+    throw new CronError(`"${cron}": use the 5-field form (e.g. "*/15 * * * *")`);
   const parts = cron.split(" ");
-  if (parts.length !== 5) throw new CronError(`"${cron}": 5 fields (minute hour day month weekday)`);
+  if (parts.length !== 5)
+    throw new CronError(`"${cron}": 5 fields (minute hour day month weekday)`);
   const sets = parts.map((p, i) => expand(p, i));
   const minutes = [...(sets[0] as Set<number>)].sort((x, y) => x - y);
   const hours = sets[1] as Set<number>;
@@ -62,7 +65,8 @@ export function parseCron(expr: unknown): { cron: string; minGapMin: number } {
     gap = Math.min(gap, (minutes[k] as number) - (minutes[k - 1] as number));
   // Consecutive hours: the wrap from the last minute of one hour to the first of the next.
   const hs = [...hours].sort((x, y) => x - y);
-  const consecutive = hs.length === 24 || hs.some((h, k) => k > 0 && h - (hs[k - 1] as number) === 1);
+  const consecutive =
+    hs.length === 24 || hs.some((h, k) => k > 0 && h - (hs[k - 1] as number) === 1);
   if (consecutive) gap = Math.min(gap, 60 - (minutes.at(-1) as number) + (minutes[0] as number));
   return { cron, minGapMin: gap };
 }
@@ -71,7 +75,8 @@ export function parseCron(expr: unknown): { cron: string; minGapMin: number } {
 export function readCrons(raw: unknown, minIntervalMin: number): string[] | undefined {
   if (raw === undefined) return undefined;
   if (raw === null) return [];
-  if (!Array.isArray(raw)) throw new CronError('crons: a list such as ["*/15 * * * *"] (or [] to remove)');
+  if (!Array.isArray(raw))
+    throw new CronError('crons: a list such as ["*/15 * * * *"] (or [] to remove)');
   if (raw.length > MAX_CRONS_PER_WORKER)
     throw new CronError(`crons: at most ${MAX_CRONS_PER_WORKER} per Worker`);
   const out: string[] = [];
