@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Context, Hono, MiddlewareHandler } from "hono";
+import { probeBackend } from "./backend/health.js";
 import type { SiteBackend } from "./backend/types.js";
 import { APP_VERSION } from "./brand.js";
 import { clientIp } from "./client-ip.js";
@@ -1523,6 +1524,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             teamMb: Math.round(config.teamMaxBytes / 1024 / 1024),
             workersMax: config.workers.defaultMax,
             workerKb: config.workers.defaultMaxKb,
+            health: backend ? await probeBackend(backend) : null,
           },
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),

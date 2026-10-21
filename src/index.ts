@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { CloudflareBackend } from "./backend/cloudflare.js";
+import { probeBackend } from "./backend/health.js";
 import { APP_NAME } from "./brand.js";
 import { loadConfig } from "./config.js";
 import { SiteStore } from "./store.js";
@@ -49,6 +50,17 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
   console.log(
     `data/files backend: ${config.cloudflare ? `cloudflare (KV namespace ${config.cloudflare.kvNamespaceId}, R2 bucket ${config.cloudflare.r2Bucket})` : "off (static publishing only)"}`,
   );
+  // Fail loudly at start if the store rejects us (e.g. a token that lost a permission).
+  if (backend) {
+    probeBackend(backend)
+      .then((h) => {
+        for (const k of ["kv", "files"] as const) {
+          if (!h[k].ok) console.error(`[backend] ${k} check FAILED at start: ${h[k].error}`);
+        }
+        if (h.kv.ok && h.files.ok) console.log("data/files backend: start check ok (KV + files)");
+      })
+      .catch(() => {});
+  }
 });
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {

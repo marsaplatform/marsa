@@ -4,6 +4,8 @@ import { open, readFile } from "node:fs/promises";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { APP_CSS, APP_JS, fontAsset } from "./assets.js";
+import { CloudflareError } from "./backend/cloudflare.js";
+import { probeBackend } from "./backend/health.js";
 import { mountBackendRoutes } from "./backend/routes.js";
 import type { SiteBackend } from "./backend/types.js";
 import { APP_NAME } from "./brand.js";
@@ -181,6 +183,18 @@ export function createApp({
       );
     }
     console.error(err);
+    if (err instanceof CloudflareError) {
+      // The data/files store failed (e.g. Cloudflare rejected the server's
+      // credentials). Say so instead of a generic 500, so agents can tell an
+      // outage of the store from a bug in their request.
+      c.header("Retry-After", "60");
+      return apiError(
+        c,
+        503,
+        "BACKEND_UNAVAILABLE",
+        `the data/files store is unavailable (${err.service.toUpperCase()} ${err.status}); try again later or tell the admin`,
+      );
+    }
     return apiError(c, 500, "INTERNAL", "unexpected server error");
   });
 
@@ -665,6 +679,10 @@ export function createApp({
     await next();
   });
   mountWorkerRoutes(app, { config, teams, members, workers: workerSvc, limiter, now });
+  app.get("/api/admin/backend/check", async (c) =>
+    c.json(backend ? { enabled: true, ...(await probeBackend(backend)) } : { enabled: false }),
+  );
+
   app.get("/api/admin/sites", async (c) => {
     const sites = (await store.list()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return c.json({
