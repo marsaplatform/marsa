@@ -786,30 +786,32 @@ export interface TeamPageOpts {
 
 function teamHead(
   lang: Lang,
-  o: { team: TeamPageOpts["team"]; csrf: string; me?: MeView },
+  _o: { team: TeamPageOpts["team"]; csrf: string; me?: MeView },
   sub = "",
-  active: "sites" | "members" | "workers" = "sites",
+  active = "overview",
+  actions = "",
 ): string {
   const t = STRINGS[lang];
-  const out = postForm(
-    localePath(lang, "/logout"),
-    o.csrf,
-    `<button class="button small ghost" type="submit">${esc(t.common.signOut)}</button>`,
-  );
-  const cur = (k: string) => (k === active ? ' aria-current="page"' : "");
-  const nav = `<nav class="segmented" aria-label="${esc(t.team.eyebrow)}"><a class="button small ghost" href="${localePath(lang, "/team")}"${cur("sites")}>${esc(t.team.sites)}</a><a class="button small ghost" href="${localePath(lang, "/team/workers")}"${cur("workers")}>${esc(WS[lang].nav)}</a><a class="button small ghost" href="${localePath(lang, "/team/members")}"${cur("members")}>${esc(t.members.nav)}</a></nav>`;
-  const who = o.me
-    ? t.members.signedInAs(
-        o.me.viaKey ? t.members.viaKey : o.me.name,
-        o.me.viaKey ? t.members.roles.owner : t.members.roles[o.me.role],
-      )
-    : "";
   return pageHead(
     t.team.eyebrow,
-    `<bdi>${esc(o.team.name)}</bdi>`,
-    sub || who,
-    `<div class="head-tools">${nav}${out}</div>`,
+    esc(DS[lang].nav[active] ?? active),
+    sub,
+    `<div class="head-tools">${actions}</div>`,
   );
+}
+
+/** Sidebar context for a team page: the team name and who is signed in. */
+function teamCtx(lang: Lang, o: { team: { name: string }; me?: MeView }): DashCtx {
+  const t = STRINGS[lang];
+  return {
+    name: o.team.name,
+    sub: o.me
+      ? t.members.signedInAs(
+          o.me.viaKey ? t.members.viaKey : o.me.name,
+          o.me.viaKey ? t.members.roles.owner : t.members.roles[o.me.role],
+        )
+      : "",
+  };
 }
 
 const quotaState = (o: TeamPageOpts) =>
@@ -867,21 +869,23 @@ function teamUploader(
   </form>`;
 }
 
-export function teamHtml(lang: Lang, c: Config, o: TeamPageOpts): string {
+/** Rows of the team's spaces table. */
+function siteRows(lang: Lang, o: TeamPageOpts, sites: TeamSiteRow[]): string {
   const t = STRINGS[lang];
   const href = (p: string) => localePath(lang, p);
-  const rows = o.sites
+  return sites
     .map((s) => {
       const listing = !o.team.directory
         ? `<span class="badge muted">${esc(t.team.hidden)}</span>`
         : `<span class="badge ${s.listed ? "on" : "muted"}">${esc(s.listed ? t.team.listed : t.team.hidden)}</span>`;
+      const exp = isPermanentIso(s.expiresAt) ? "9999" : s.expiresAt;
       return `<tr>
-        <th scope="row"><a href="${href(`/team/sites/${s.id}`)}"><bdi>${esc(s.title)}</bdi></a></th>
-        ${td(t.common.link, `<a href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a>`)}
-        ${td(t.common.expires, timeTag(lang, s.expiresAt))}
-        ${td(t.common.size, esc(bytesLabel(lang, s.totalBytes)))}
+        <th scope="row" data-v="${esc(s.title.toLowerCase())}"><a href="${href(`/team/sites/${s.id}`)}"><bdi>${esc(s.title)}</bdi></a></th>
+        ${td(t.common.link, `<span class="copy-cell"><a id="u-${esc(s.id)}" href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a><button type="button" class="icon-btn js-only" data-copy="#u-${esc(s.id)}" data-copied="${esc(t.common.copied)}" aria-label="${esc(`${t.common.copy}: ${s.title}`)}">${icon("copy")}</button></span>`)}
+        <td data-label="${esc(t.common.expires)}" data-v="${esc(exp)}">${timeTag(lang, s.expiresAt)}</td>
+        <td data-label="${esc(t.common.size)}" data-v="${s.totalBytes}">${esc(bytesLabel(lang, s.totalBytes))}</td>
         ${td(t.admin.directory, listing)}
-        ${td(t.visits.column, visitsCell(lang, s.visits))}
+        <td data-label="${esc(t.visits.column)}" data-v="${s.visits?.views30 ?? 0}">${visitsCell(lang, s.visits)}</td>
         <td class="cell-actions"><div class="acts"><a class="button small ghost" href="${href(`/team/sites/${s.id}`)}">${esc(t.team.manage)}</a>${
           canEdit(o.me)
             ? postForm(
@@ -895,23 +899,157 @@ export function teamHtml(lang: Lang, c: Config, o: TeamPageOpts): string {
       </tr>`;
     })
     .join("");
-  const table = o.sites.length
-    ? `<div class="table-wrap"><table class="data stack">
+}
+
+function sitesTable(lang: Lang, o: TeamPageOpts, sites: TeamSiteRow[], id: string, tools: boolean) {
+  const t = STRINGS[lang];
+  return `${tools && sites.length > 3 ? tableTools(lang, id) : ""}<div class="table-wrap"><table class="data stack" id="${id}">
       <caption class="sr-only">${esc(t.team.sites)}</caption>
-      <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.link)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(t.admin.directory)}</th><th scope="col">${esc(t.visits.column)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`
-    : emptyState(t.team.empty, t.team.emptySub);
-  const body = `<div class="wrap page-wide">
-  ${teamHead(lang, o)}
+      <thead><tr>${sortTh(t.common.title)}<th scope="col">${esc(t.common.link)}</th>${sortTh(t.common.expires, "date")}${sortTh(t.common.size, "num")}<th scope="col">${esc(t.admin.directory)}</th>${sortTh(t.visits.column, "num")}<th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
+      <tbody>${siteRows(lang, o, sites)}</tbody></table></div>`;
+}
+
+/** Compact list of the newest spaces for the overview (title + address, expiry, visits). */
+function recentTable(lang: Lang, sites: TeamSiteRow[]): string {
+  const t = STRINGS[lang];
+  const href = (p: string) => localePath(lang, p);
+  const rows = sites
+    .map(
+      (s) => `<tr>
+        <th scope="row"><a href="${href(`/team/sites/${s.id}`)}"><bdi>${esc(s.title)}</bdi></a><div class="meta">${ltr(hostless(s.url))}</div></th>
+        ${td(t.common.expires, timeTag(lang, s.expiresAt))}
+        ${td(t.visits.column, visitsCell(lang, s.visits))}
+        <td class="cell-actions"><a class="button small ghost" href="${href(`/team/sites/${s.id}`)}">${esc(t.team.manage)}</a></td>
+      </tr>`,
+    )
+    .join("");
+  return `<div class="table-wrap"><table class="data stack recent-table">
+      <caption class="sr-only">${esc(t.team.sites)}</caption>
+      <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.visits.column)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+}
+
+const agentPublishSnippet = (
+  c: Config,
+) => `<pre class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
+(cd out &amp;&amp; zip -qr ../site.zip .)
+curl -s -X POST "${esc(c.publicUrl)}/api/sites?ttlHours=72" \\
+  -H "X-Team-Key: $MARSA_TEAM_KEY" \\
+  -H "Content-Type: application/zip" --data-binary @site.zip
+
+# Agent prompt:
+# Read ${esc(c.publicUrl)}/llms.txt, publish ./out with the
+# X-Team-Key header from $MARSA_TEAM_KEY, and reply with the URL.</code></pre>`;
+
+export interface TeamOverview {
+  audit: AuditView[];
+  members: number;
+  invites: number;
+  workers: { enabled: boolean; count: number; max: number };
+}
+
+/** Team overview: stat cards, recent spaces, quick publish and recent activity. */
+export function teamHtml(
+  lang: Lang,
+  c: Config,
+  o: TeamPageOpts & { overview?: TeamOverview },
+): string {
+  const t = STRINGS[lang];
+  const d = DS[lang];
+  const href = (p: string) => localePath(lang, p);
+  const ov = o.overview ?? {
+    audit: [],
+    members: 0,
+    invites: 0,
+    workers: { enabled: false, count: 0, max: 0 },
+  };
+  const v30 = o.sites.reduce((n, s) => n + (s.visits?.views30 ?? 0), 0);
+  const v7 = o.sites.reduce((n, s) => n + (s.visits?.views7 ?? 0), 0);
+  const counting = o.sites.some((s) => s.visits);
+  const cards = `<div class="stat-grid">
+    ${statCard("sites", d.stats.spaces, esc(fmt(lang, o.usage.sites)), esc(d.stats.of(fmt(lang, o.usage.sites), fmt(lang, o.quota.sites))), { value: o.usage.sites, max: o.quota.sites }, href("/team/sites"))}
+    ${statCard("storage", d.stats.storage, esc(bytesLabel(lang, o.usage.bytes)), esc(d.stats.of(bytesLabel(lang, o.usage.bytes), bytesLabel(lang, o.quota.bytes))), { value: o.usage.bytes, max: o.quota.bytes })}
+    ${counting ? statCard("views", d.stats.views, esc(fmt(lang, v30)), esc(d.stats.views7(fmt(lang, v7))), undefined, href("/team/sites")) : ""}
+    ${statCard("members", d.stats.members, esc(fmt(lang, ov.members)), ov.invites ? esc(d.stats.invites(ov.invites)) : "", undefined, href("/team/members"))}
+    ${
+      ov.workers.enabled
+        ? statCard(
+            "workers",
+            d.stats.workers,
+            esc(fmt(lang, ov.workers.count)),
+            esc(d.stats.of(fmt(lang, ov.workers.count), fmt(lang, ov.workers.max))),
+            { value: ov.workers.count, max: ov.workers.max },
+            href("/team/workers"),
+          )
+        : statCard(
+            "workers",
+            d.stats.workers,
+            "—",
+            esc(d.stats.workersOff),
+            undefined,
+            href("/team/workers"),
+          )
+    }
+  </div>`;
+  const edit = canEdit(o.me);
+  const actions = edit
+    ? `<a class="button small" href="#publish">${icon("plus")}${esc(d.publish)}</a>${ov.workers.enabled ? `<a class="button small ghost" href="${href("/team/workers#deploy")}">${esc(d.deploy)}</a>` : ""}${(o.me?.role ?? "owner") === "owner" ? `<a class="button small ghost" href="${href("/team/members#invite")}">${esc(d.invite)}</a>` : ""}`
+    : "";
+  const recent = [...o.sites].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 6);
+  const body = `<div class="page-wide">
+  ${teamHead(lang, o, d.overviewSub, "overview", actions)}
+  ${flashBox(lang, o.flash)}
+  ${cards}
+  ${statusList(lang, o)}
+  <div class="dash-cols">
+    <section aria-labelledby="sites-title" class="card-block">
+      <div class="block-head"><h2 id="sites-title">${esc(d.recentSpaces)}</h2>${o.sites.length > recent.length ? `<a class="text-link" href="${href("/team/sites")}">${esc(d.viewAll)} (${fmt(lang, o.sites.length)})</a>` : ""}</div>
+      ${recent.length ? recentTable(lang, recent) : emptyState(t.team.empty, t.team.emptySub, edit ? `<a class="button" href="#publish">${esc(d.publish)}</a>` : "")}
+    </section>
+    <section aria-labelledby="act-title" class="card-block">
+      <div class="block-head"><h2 id="act-title">${esc(d.recentActivity)}</h2><a class="text-link" href="${href("/team/activity")}">${esc(d.viewAll)}</a></div>
+      ${activityFeed(lang, ov.audit)}
+    </section>
+  </div>
+  ${
+    edit
+      ? `<section id="publish" aria-label="${esc(t.team.publishTitle)}" class="block">
+    ${teamUploader(lang, c, o.csrf, href("/team/sites"), t.team.publishTitle, t.team.publishSub, t.team.publish, true, false, o.team.permanent)}
+  </section>`
+      : ""
+  }
+</div>`;
+  return dashLayout({
+    lang,
+    config: c,
+    kind: "team",
+    active: "overview",
+    title: `${d.overview} · ${o.team.name} · ${t.product}`,
+    description: t.team.eyebrow,
+    path: "/team",
+    body,
+    csrf: o.csrf,
+    ctx: teamCtx(lang, o),
+  });
+}
+
+/** All of the team's spaces, with search and sort, the uploader and the agent snippet. */
+export function teamSitesHtml(lang: Lang, c: Config, o: TeamPageOpts): string {
+  const t = STRINGS[lang];
+  const d = DS[lang];
+  const href = (p: string) => localePath(lang, p);
+  const edit = canEdit(o.me);
+  const body = `<div class="page-wide">
+  ${teamHead(lang, o, t.team.sitesCount(o.sites.length), "sites", edit ? `<a class="button small" href="#publish">${icon("plus")}${esc(d.publish)}</a>` : "")}
   ${flashBox(lang, o.flash)}
   ${statusList(lang, o)}
   <section aria-labelledby="sites-title" class="block">
-    <h2 id="sites-title">${esc(t.team.sites)}</h2>
-    ${table}
+    <h2 id="sites-title" class="sr-only">${esc(t.team.sites)}</h2>
+    ${o.sites.length ? sitesTable(lang, o, o.sites, "sites-table", true) : emptyState(t.team.empty, t.team.emptySub, edit ? `<a class="button" href="#publish">${esc(d.publish)}</a>` : "")}
   </section>
   ${
-    canEdit(o.me)
-      ? `<section aria-label="${esc(t.team.publishTitle)}" class="block">
+    edit
+      ? `<section id="publish" aria-label="${esc(t.team.publishTitle)}" class="block">
     ${teamUploader(lang, c, o.csrf, href("/team/sites"), t.team.publishTitle, t.team.publishSub, t.team.publish, true, false, o.team.permanent)}
   </section>`
       : ""
@@ -922,26 +1060,150 @@ export function teamHtml(lang: Lang, c: Config, o: TeamPageOpts): string {
       <p>${esc(t.team.agentsSub)}</p>
       <div class="actions"><a class="button small ghost" href="/llms.txt">llms.txt</a><a class="text-link" href="/docs/teams">${esc(t.teamsBand.docs)}</a></div>
     </div>
-    <pre class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
-(cd out &amp;&amp; zip -qr ../site.zip .)
-curl -s -X POST "${esc(c.publicUrl)}/api/sites?ttlHours=72" \\
-  -H "X-Team-Key: $MARSA_TEAM_KEY" \\
-  -H "Content-Type: application/zip" --data-binary @site.zip
-
-# Agent prompt:
-# Read ${esc(c.publicUrl)}/llms.txt, publish ./out with the
-# X-Team-Key header from $MARSA_TEAM_KEY, and reply with the URL.</code></pre>
+    ${agentPublishSnippet(c)}
   </section>
 </div>`;
-  return layout({
+  return dashLayout({
     lang,
-    title: `${t.team.eyebrow} · ${o.team.name} · ${t.product}`,
-    description: t.team.eyebrow,
-    path: "/team",
-    body,
     config: c,
-    active: "team",
-    noindex: true,
+    kind: "team",
+    active: "sites",
+    title: `${d.nav.sites} · ${o.team.name} · ${t.product}`,
+    description: t.team.eyebrow,
+    path: "/team/sites",
+    body,
+    csrf: o.csrf,
+    ctx: teamCtx(lang, o),
+  });
+}
+
+/** The team's full activity log, with filters. */
+export function teamActivityHtml(
+  lang: Lang,
+  c: Config,
+  o: TeamPageOpts & { audit: AuditView[]; kind: string; q: string },
+): string {
+  const t = STRINGS[lang];
+  const d = DS[lang];
+  const href = (p: string) => localePath(lang, p);
+  const kinds = ["member", "key", "api", "mcp", "admin"] as const;
+  const filter = `<form method="get" action="${href("/team/activity")}" class="filters" role="search">
+    <label><span>${esc(d.search)}</span><input type="search" name="q" value="${esc(o.q)}" placeholder="${esc(d.searchPh)}"></label>
+    <label><span>${esc(d.who)}</span><select name="kind"><option value="">${esc(d.everyone)}</option>${kinds.map((k) => `<option value="${k}"${o.kind === k ? " selected" : ""}>${esc(t.members.actorKinds[k])}</option>`).join("")}</select></label>
+    <button class="button small" type="submit">${esc(d.filter)}</button>${o.q || o.kind ? `<a class="text-link" href="${href("/team/activity")}">${esc(d.reset)}</a>` : ""}
+  </form>`;
+  const body = `<div class="page-wide">
+  ${teamHead(lang, o, d.activitySub, "activity")}
+  ${flashBox(lang, o.flash)}
+  <section class="block" aria-labelledby="audit-title">
+    <h2 id="audit-title" class="sr-only">${esc(d.activity)}</h2>
+    ${filter}
+    <p class="meta">${esc(d.shown(o.audit.length))}</p>
+    ${auditTable(lang, o.audit, true, "audit-title")}
+  </section>
+</div>`;
+  return dashLayout({
+    lang,
+    config: c,
+    kind: "team",
+    active: "activity",
+    title: `${d.activity} · ${o.team.name} · ${t.product}`,
+    description: d.activitySub,
+    path: "/team/activity",
+    body,
+    csrf: o.csrf,
+    ctx: teamCtx(lang, o),
+  });
+}
+
+/** Team settings: details, features, quotas, API access and the signed-in member's account. */
+export function teamSettingsHtml(
+  lang: Lang,
+  c: Config,
+  o: TeamPageOpts & {
+    meId: string | null;
+    keyPrefix: string;
+    slug: string | null;
+    workers: { enabled: boolean; count: number; max: number; kb: number };
+  },
+): string {
+  const t = STRINGS[lang];
+  const d = DS[lang];
+  const tm = t.members;
+  const href = (p: string) => localePath(lang, p);
+  const onOff = (on: boolean, label: string) =>
+    `<li><span class="badge ${on ? "on" : "muted"}">${esc(on ? d.on : d.off)}</span> ${esc(label)}</li>`;
+  const bar = (label: string, used: number, max: number, text: string) => {
+    const pct = max ? Math.min(100, Math.round((used / max) * 100)) : 0;
+    return `<div class="quota-row"><div class="quota-label"><span>${esc(label)}</span><span class="meta">${esc(text)}</span></div><progress class="quota${pct >= 90 ? " full" : pct >= 70 ? " high" : ""}" max="100" value="${pct}" aria-label="${esc(`${label}: ${pct}%`)}">${pct}%</progress></div>`;
+  };
+  const account = o.meId
+    ? `<section class="block two-col account-block" aria-labelledby="account-title">
+    <form method="post" action="${href("/team/account/password")}" class="panel">
+      ${csrfField(o.csrf)}
+      <h2 class="h3" id="account-title">${esc(tm.accountTitle)}: ${esc(tm.changePassword)}</h2>
+      <label for="cur-pw">${esc(tm.current)}</label>
+      <input id="cur-pw" name="current" type="password" dir="ltr" required autocomplete="current-password" maxlength="200">
+      <label for="new-pw">${esc(tm.newPassword)}</label>
+      <input id="new-pw" name="password" type="password" dir="ltr" required autocomplete="new-password" minlength="10" maxlength="200" aria-describedby="new-pw-help">
+      <p class="form-help" id="new-pw-help">${esc(tm.passwordHelp)}</p>
+      <label for="new-pw2">${esc(tm.confirm)}</label>
+      <input id="new-pw2" name="confirm" type="password" dir="ltr" required autocomplete="new-password" minlength="10" maxlength="200">
+      <button class="button" type="submit">${esc(tm.changePassword)}</button>
+    </form>
+    <div class="panel">
+      <h2 class="h3">${esc(tm.signOutAll)}</h2>
+      <p>${esc(tm.signOutAllHelp)}</p>
+      ${postForm(href("/team/account/signout-all"), o.csrf, `<button class="button ghost" type="submit">${esc(tm.signOutAll)}</button>`)}
+    </div>
+  </section>`
+    : `<p class="notice">${esc(tm.keyAccount)}</p>`;
+  const body = `<div class="page-wide">
+  ${teamHead(lang, o, d.settingsSub, "settings")}
+  ${flashBox(lang, o.flash)}
+  <div class="card-grid">
+    <section class="card-block" aria-labelledby="ti-title">
+      <h2 id="ti-title" class="h3">${esc(d.teamInfo)}</h2>
+      <dl class="facts">
+        <div><dt>${esc(d.name)}</dt><dd><bdi>${esc(o.team.name)}</bdi></dd></div>
+        <div><dt>${esc(d.id)}</dt><dd><code class="ltr">${esc(o.team.id)}</code></dd></div>
+        <div><dt>${esc(d.slug)}</dt><dd>${o.slug ? `<code class="ltr">${esc(o.slug)}</code>` : "—"}</dd></div>
+      </dl>
+    </section>
+    <section class="card-block" aria-labelledby="tf-title">
+      <h2 id="tf-title" class="h3">${esc(d.features)}</h2>
+      <ul class="feature-list">
+        ${onOff(o.team.backend, t.team.backend)}
+        ${onOff(o.team.directory, t.admin.directory)}
+        ${onOff(o.team.permanent, t.admin.permanent)}
+        ${onOff(o.workers.enabled, d.nav.workers ?? "Workers")}
+      </ul>
+    </section>
+    <section class="card-block" aria-labelledby="tq-title">
+      <h2 id="tq-title" class="h3">${esc(d.quotas)}</h2>
+      ${bar(d.stats.spaces, o.usage.sites, o.quota.sites, d.stats.of(fmt(lang, o.usage.sites), fmt(lang, o.quota.sites)))}
+      ${bar(d.stats.storage, o.usage.bytes, o.quota.bytes, d.stats.of(bytesLabel(lang, o.usage.bytes), bytesLabel(lang, o.quota.bytes)))}
+      ${o.workers.enabled ? bar(d.stats.workers, o.workers.count, o.workers.max, d.stats.of(fmt(lang, o.workers.count), fmt(lang, o.workers.max))) : ""}
+    </section>
+    <section class="card-block" aria-labelledby="tk-title">
+      <h2 id="tk-title" class="h3">${esc(d.api)}</h2>
+      <p>${esc(d.apiNote(o.keyPrefix))}</p>
+      <div class="actions"><a class="text-link" href="/docs/api">API</a><a class="text-link" href="${href("/team/workers")}">${esc(d.nav.workers ?? "")}</a></div>
+    </section>
+  </div>
+  ${account}
+</div>`;
+  return dashLayout({
+    lang,
+    config: c,
+    kind: "team",
+    active: "settings",
+    title: `${d.settings} · ${o.team.name} · ${t.product}`,
+    description: d.settingsSub,
+    path: "/team/settings",
+    body,
+    csrf: o.csrf,
+    ctx: teamCtx(lang, o),
   });
 }
 
@@ -1059,9 +1321,8 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
     }`;
   }
   const tools = `<div class="head-tools"><a class="button small" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(t.team.openSite)} <span class="arrow" aria-hidden="true"></span></a><button type="button" class="button small ghost" data-copy="#siteUrl" data-copied="${esc(t.common.copied)}">${esc(t.common.copy)}</button></div>`;
-  const body = `<div class="wrap page-wide">
-  <p><a class="breadcrumb" href="${href("/team")}"><span class="arrow back" aria-hidden="true"></span> ${esc(t.team.back)}</a></p>
-  ${pageHead(o.team.name, `<bdi>${esc(s.title)}</bdi>`, "", tools)}
+  const body = `<div class="page-wide">
+  ${pageHead(DS[lang].nav.sites ?? "", `<bdi>${esc(s.title)}</bdi>`, "", tools)}
   ${flashBox(lang, o.flash)}
   <section aria-labelledby="settings-title">
     <div class="site-summary panel">
@@ -1131,15 +1392,18 @@ export function teamSiteHtml(lang: Lang, c: Config, o: TeamSitePageOpts): string
       : ""
   }
 </div>`;
-  return layout({
+  return dashLayout({
     lang,
+    config: c,
+    kind: "team",
+    active: "sites",
     title: `${s.title} · ${o.team.name} · ${t.product}`,
     description: t.team.eyebrow,
     path: base,
     body,
-    config: c,
-    active: "team",
-    noindex: true,
+    csrf: o.csrf,
+    ctx: teamCtx(lang, o),
+    crumbs: [{ label: s.title }],
   });
 }
 
@@ -1290,7 +1554,7 @@ export function membersHtml(lang: Lang, c: Config, o: MembersPageOpts): string {
     )
     .join("");
   const invites = owner
-    ? `<section class="block" aria-labelledby="invites-title">
+    ? `<section class="block" id="invite" aria-labelledby="invites-title">
     <h2 id="invites-title">${esc(tm.invitesTitle)}</h2>
     ${o.invites.length ? `<div class="table-wrap"><table class="data stack" aria-labelledby="invites-title"><thead><tr><th scope="col">${esc(tm.role)}</th><th scope="col">${esc(tm.expires)}</th><th scope="col">${esc(tm.by)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${inviteRows}</tbody></table></div>` : `<p class="meta">${esc(tm.invitesNone)}</p>`}
     <form method="post" action="${href("/team/members/invite")}" class="panel invite-panel">
@@ -1305,29 +1569,12 @@ export function membersHtml(lang: Lang, c: Config, o: MembersPageOpts): string {
     </form>
   </section>`
     : "";
+  const d = DS[lang];
   const account = o.meId
-    ? `<section class="block two-col account-block" aria-labelledby="account-title">
-    <form method="post" action="${href("/team/account/password")}" class="panel">
-      ${csrfField(o.csrf)}
-      <h2 class="h3" id="account-title">${esc(tm.accountTitle)}: ${esc(tm.changePassword)}</h2>
-      <label for="cur-pw">${esc(tm.current)}</label>
-      <input id="cur-pw" name="current" type="password" dir="ltr" required autocomplete="current-password" maxlength="200">
-      <label for="new-pw">${esc(tm.newPassword)}</label>
-      <input id="new-pw" name="password" type="password" dir="ltr" required autocomplete="new-password" minlength="10" maxlength="200" aria-describedby="new-pw-help">
-      <p class="form-help" id="new-pw-help">${esc(tm.passwordHelp)}</p>
-      <label for="new-pw2">${esc(tm.confirm)}</label>
-      <input id="new-pw2" name="confirm" type="password" dir="ltr" required autocomplete="new-password" minlength="10" maxlength="200">
-      <button class="button" type="submit">${esc(tm.changePassword)}</button>
-    </form>
-    <div class="panel">
-      <h2 class="h3">${esc(tm.signOutAll)}</h2>
-      <p>${esc(tm.signOutAllHelp)}</p>
-      ${postForm(href("/team/account/signout-all"), o.csrf, `<button class="button ghost" type="submit">${esc(tm.signOutAll)}</button>`)}
-    </div>
-  </section>`
+    ? `<p class="notice">${esc(tm.accountTitle)}: <a class="text-link" href="${href("/team/settings")}">${esc(d.settings)}</a></p>`
     : `<p class="notice">${esc(tm.keyAccount)}</p>`;
-  const body = `<div class="wrap page-wide">
-  ${teamHead(lang, o, "", "members")}
+  const body = `<div class="page-wide">
+  ${teamHead(lang, o, tm.count(o.members.length), "members", owner ? `<a class="button small" href="#invite">${icon("plus")}${esc(d.invite)}</a>` : "")}
   ${flashBox(lang, o.flash)}
   <section class="block" aria-labelledby="people-title">
     <h2 id="people-title">${esc(tm.listTitle)} <span class="count">${esc(tm.count(o.members.length))}</span></h2>
@@ -1336,19 +1583,21 @@ export function membersHtml(lang: Lang, c: Config, o: MembersPageOpts): string {
   ${invites}
   ${account}
   <section class="block audit-block" aria-labelledby="audit-title">
-    <h2 id="audit-title">${esc(tm.auditTitle)}</h2>
-    ${auditTable(lang, o.audit, true, "audit-title")}
+    <div class="block-head"><h2 id="audit-title">${esc(tm.auditTitle)}</h2><a class="text-link" href="${href("/team/activity")}">${esc(d.viewAll)}</a></div>
+    ${auditTable(lang, o.audit.slice(0, 20), true, "audit-title")}
   </section>
 </div>`;
-  return layout({
+  return dashLayout({
     lang,
+    config: c,
+    kind: "team",
+    active: "members",
     title: `${tm.title} · ${o.team.name} · ${t.product}`,
     description: tm.sub,
     path: "/team/members",
     body,
-    config: c,
-    active: "team",
-    noindex: true,
+    csrf: o.csrf,
+    ctx: teamCtx(lang, o),
   });
 }
 
@@ -1416,42 +1665,77 @@ export interface AdminTeamRow {
   createdAt: string;
 }
 
-/** Section switch + sign-out, shown in the page heading like the team dashboard's tools. */
-function adminTools(lang: Lang, active: "teams" | "sites" | "workers", csrf: string): string {
-  const t = STRINGS[lang];
-  const href = (p: string) => localePath(lang, p);
-  const cur = (k: string) => (k === active ? ' aria-current="page"' : "");
-  return `<div class="head-tools"><nav class="segmented" aria-label="${esc(t.admin.tabsLabel)}"><a class="button small ghost" href="${href("/admin")}"${cur("teams")}>${esc(t.admin.teamsTab)}</a><a class="button small ghost" href="${href("/admin/sites")}"${cur("sites")}>${esc(t.admin.sitesTab)}</a><a class="button small ghost" href="${href("/admin/workers")}"${cur("workers")}>${esc(WS[lang].nav)}</a></nav>${postForm(
-    href("/logout"),
-    csrf,
-    `<button class="button small ghost" type="submit">${esc(t.common.signOut)}</button>`,
-  )}</div>`;
+/** Page-level actions in the heading (navigation and sign-out live in the sidebar). */
+function adminTools(
+  _lang: Lang,
+  _active: "teams" | "sites" | "workers" | "activity" | "settings",
+  _csrf: string,
+  actions = "",
+): string {
+  return `<div class="head-tools">${actions}</div>`;
+}
+
+const ADMIN_CTX = (_lang: Lang): DashCtx => ({ name: null, sub: "" });
+
+export interface AdminStats {
+  sites: number;
+  bytes: number;
+  guests: number;
+  permanent: number;
+  views30: number | null;
+  views7: number | null;
+  workers: number;
+  workersTeams: number;
+  members: number;
 }
 
 export function adminTeamsHtml(
   lang: Lang,
   c: Config,
-  o: { teams: AdminTeamRow[]; csrf: string; flash?: Flash | null; backendConfigured: boolean },
+  o: {
+    teams: (AdminTeamRow & { workers?: boolean; slug?: string | null; workerCount?: number })[];
+    csrf: string;
+    flash?: Flash | null;
+    backendConfigured: boolean;
+    stats?: AdminStats;
+    cfConfigured?: boolean;
+  },
 ): string {
   const t = STRINGS[lang];
+  const d = DS[lang];
   const href = (p: string) => localePath(lang, p);
   const live = o.teams.reduce((n, x) => n + x.liveSites, 0);
+  const st = o.stats;
   const rows = o.teams
     .map((tm) => {
       const base = `/admin/teams/${tm.id}`;
-      // Same pattern as a site's "Listed / Hidden" on the team pages: a badge with
-      // the state and one button that flips it.
+      // A badge with the state and one button that flips it.
       const toggle = (field: "backend" | "directory" | "permanent", label: string) =>
-        `<div class="acts"><span class="badge ${tm[field] ? "on" : "muted"}">${esc(tm[field] ? t.common.on : t.common.off)}</span>${postForm(
+        `<div class="acts">${postForm(
           href(`${base}/update`),
           o.csrf,
-          `<input type="hidden" name="${field}" value="${tm[field] ? "0" : "1"}"><button type="submit" class="button small ghost" aria-label="${esc(`${tm[field] ? t.admin.turnOff : t.admin.turnOn}: ${label} · ${tm.name}`)}">${esc(tm[field] ? t.admin.turnOff : t.admin.turnOn)}</button>`,
+          `<input type="hidden" name="${field}" value="${tm[field] ? "0" : "1"}"><button type="submit" class="pill-toggle${tm[field] ? " on" : ""}" aria-pressed="${tm[field] ? "true" : "false"}" aria-label="${esc(`${label} · ${tm.name}: ${tm[field] ? t.admin.turnOff : t.admin.turnOn}`)}"><span class="knob" aria-hidden="true"></span>${esc(tm[field] ? t.common.on : t.common.off)}</button>`,
         )}</div>`;
+      const wk =
+        tm.workers === undefined
+          ? ""
+          : td(
+              d.workersCol,
+              tm.slug && o.cfConfigured
+                ? `<div class="acts">${postForm(
+                    href(`/admin/workers/teams/${tm.id}`),
+                    o.csrf,
+                    `<input type="hidden" name="back" value="admin">${tm.workers ? "" : `<input type="hidden" name="enabled" value="1">`}<button type="submit" class="pill-toggle${tm.workers ? " on" : ""}" aria-pressed="${tm.workers ? "true" : "false"}" aria-label="${esc(`${d.workersCol} · ${tm.name}: ${tm.workers ? t.admin.turnOff : t.admin.turnOn}`)}"><span class="knob" aria-hidden="true"></span>${esc(tm.workers ? t.common.on : t.common.off)}</button>`,
+                    tm.workers && tm.workerCount ? { confirm: WS[lang].turnOffConfirm } : {},
+                  )}${tm.workers ? `<span class="meta">${esc(String(tm.workerCount ?? 0))}</span>` : ""}</div>`
+                : `<a class="text-link" href="${href("/admin/workers")}">${esc(tm.workers ? t.common.on : d.manage)}</a>`,
+            );
       return `<tr>
-        <th scope="row"><bdi>${esc(tm.name)}</bdi><div class="meta ltr">${esc(tm.id)}</div></th>
+        <th scope="row" data-v="${esc(tm.name.toLowerCase())}"><bdi>${esc(tm.name)}</bdi><div class="meta ltr">${esc(tm.id)}</div></th>
         ${td(t.admin.backend, toggle("backend", t.admin.backend))}
         ${td(t.admin.directory, toggle("directory", t.admin.directory))}
         ${td(t.admin.permanent, toggle("permanent", t.admin.permanent))}
+        ${wk}
         ${td(
           t.admin.quota,
           postForm(
@@ -1461,41 +1745,56 @@ export function adminTeamsHtml(
             { cls: "inline-form quota-form" },
           ),
         )}
-        ${td(t.admin.liveSites, `<a class="text-link" href="${href(`/admin/sites?owner=${tm.id}`)}">${esc(String(tm.liveSites))}</a>`)}
+        <td data-label="${esc(t.admin.liveSites)}" data-v="${tm.liveSites}"><a class="text-link" href="${href(`/admin/sites?owner=${tm.id}`)}">${esc(String(tm.liveSites))}</a></td>
+        <td data-label="${esc(t.members.title)}" data-v="${tm.members}">${esc(t.members.count(tm.members))}</td>
         ${td(
-          t.members.title,
-          `<div class="meta">${esc(t.members.count(tm.members))}</div>${postForm(
+          t.common.actions,
+          `<details class="row-more"><summary class="button small ghost">${esc(d.more)}</summary><div class="more-panel">
+          <p class="meta">${esc(t.admin.key)}: <code class="ltr">${esc(tm.keyPrefix)}…</code></p>
+          ${postForm(
             href(`${base}/invite`),
             o.csrf,
             `<label class="sr-only" for="inv-${esc(tm.id)}">${esc(`${t.members.role} · ${tm.name}`)}</label><select id="inv-${esc(tm.id)}" name="role">${(["owner", "editor", "viewer"] as const).map((r) => `<option value="${r}">${esc(t.members.roles[r])}</option>`).join("")}</select><button type="submit" class="button small ghost">${esc(t.members.invite)}</button>`,
             { cls: "inline-form invite-form" },
-          )}`,
-        )}
-        ${td(t.admin.key, `<code class="ltr">${esc(tm.keyPrefix)}…</code>`)}
-        ${td(
-          t.common.actions,
-          `<div class="acts">${postForm(href(`${base}/rotate`), o.csrf, `<button class="button small ghost" type="submit">${esc(t.admin.rotate)}</button>`, { confirm: t.admin.confirmRotate })}${postForm(
+          )}
+          <div class="danger-box"><p class="h4">${esc(d.dangerZone)}</p>
+          <p class="meta">${esc(d.rotateWarn)}</p>
+          ${postForm(href(`${base}/rotate`), o.csrf, `<button class="button small ghost warn" type="submit">${esc(t.admin.rotate)}</button>`, { confirm: d.rotateConfirm })}
+          ${postForm(
             href(`${base}/delete`),
             o.csrf,
             `<label class="check small"><input type="checkbox" name="sites" value="delete"> ${esc(t.admin.alsoDeleteSites)}</label><button class="button small danger" type="submit">${esc(t.common.del)}</button>`,
-            { confirm: t.admin.confirmDelete },
-          )}</div>`,
+            { confirm: t.admin.confirmDelete, cls: "inline-form" },
+          )}</div></div></details>`,
           "cell-actions",
         )}
       </tr>`;
     })
     .join("");
   const table = o.teams.length
-    ? `<div class="table-wrap"><table class="data stack">
+    ? `${o.teams.length > 3 ? tableTools(lang, "teams-table") : ""}<div class="table-wrap"><table class="data stack" id="teams-table">
       <caption class="sr-only">${esc(t.admin.teams)}</caption>
-      <thead><tr><th scope="col">${esc(t.admin.name)}</th><th scope="col">${esc(t.admin.backend)}</th><th scope="col">${esc(t.admin.directory)}</th><th scope="col">${esc(t.admin.permanent)}</th><th scope="col">${esc(t.admin.quota)}</th><th scope="col">${esc(t.admin.liveSites)}</th><th scope="col">${esc(t.members.title)}</th><th scope="col">${esc(t.admin.key)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
+      <thead><tr>${sortTh(t.admin.name)}<th scope="col">${esc(t.admin.backend)}</th><th scope="col">${esc(t.admin.directory)}</th><th scope="col">${esc(t.admin.permanent)}</th>${o.teams.some((x) => x.workers !== undefined) ? `<th scope="col">${esc(d.workersCol)}</th>` : ""}<th scope="col">${esc(t.admin.quota)}</th>${sortTh(t.admin.liveSites, "num")}${sortTh(t.members.title, "num")}<th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
       <tbody>${rows}</tbody></table></div>
       <p class="meta table-note">${esc(t.admin.keyHelp)}</p>
       <p class="meta table-note" id="quota-help">${esc(`${t.admin.quotaSites} / ${t.admin.quotaMb}: ${t.admin.quotaHelp}`)}</p>`
-    : emptyState(t.admin.none, t.admin.createSub);
-  const body = `<div class="wrap page-wide">
-  ${pageHead(t.admin.eyebrow, esc(t.admin.title), t.admin.sub, adminTools(lang, "teams", o.csrf))}
+    : emptyState(
+        t.admin.none,
+        t.admin.createSub,
+        `<a class="button" href="#create">${icon("plus")}${esc(d.newTeam)}</a>`,
+      );
+  const cards = st
+    ? `<div class="stat-grid">
+    ${statCard("teams", d.stats.teams, esc(fmt(lang, o.teams.length)), esc(d.stats.teamsSub(st.members)))}
+    ${statCard("sites", d.stats.spaces, esc(fmt(lang, st.sites)), esc(`${bytesLabel(lang, st.bytes)} · ${d.stats.guests(st.guests)} · ${d.stats.perm(st.permanent)}`), undefined, href("/admin/sites"))}
+    ${statCard("workers", d.stats.workers, esc(fmt(lang, st.workers)), esc(d.stats.workersSub(st.workersTeams)), undefined, href("/admin/workers"))}
+    ${st.views30 !== null ? statCard("views", d.stats.views30, esc(fmt(lang, st.views30)), esc(d.stats.views7(fmt(lang, st.views7 ?? 0)))) : ""}
+  </div>`
+    : "";
+  const body = `<div class="page-wide">
+  ${pageHead(t.admin.eyebrow, esc(d.overview), d.adminOverviewSub, adminTools(lang, "teams", o.csrf, `<a class="button small" href="#create">${icon("plus")}${esc(d.newTeam)}</a>`))}
   ${flashBox(lang, o.flash)}
+  ${cards}
   <ul class="status-list">
     <li><span class="dot-status on" aria-hidden="true"></span><strong>${esc(t.admin.teams)}:</strong> ${esc(t.admin.teamsCount(o.teams.length))}</li>
     <li><span class="dot-status ${live ? "on" : "off"}" aria-hidden="true"></span>${esc(t.admin.liveTotal(live))}</li>
@@ -1505,7 +1804,7 @@ export function adminTeamsHtml(
     <h2 id="teams-title">${esc(t.admin.teams)}</h2>
     ${table}
   </section>
-  <section class="block" aria-labelledby="create-title">
+  <section class="block" id="create" aria-labelledby="create-title">
     <form method="post" action="${href("/admin/teams")}" class="panel">
       ${csrfField(o.csrf)}
       <h2 class="h3" id="create-title">${esc(t.admin.create)}</h2>
@@ -1517,7 +1816,7 @@ export function adminTeamsHtml(
         <label class="check"><input name="directory" type="checkbox" value="1" checked> ${esc(t.admin.directory)}</label>
         <label class="check"><input name="permanent" type="checkbox" value="1"> ${esc(t.admin.permanent)}</label>
       </div>
-      <button class="button" type="submit">${esc(t.admin.create)}</button>
+      <button class="button" type="submit" data-busy>${esc(t.admin.create)}</button>
     </form>
   </section>
   <section class="block two-col" aria-labelledby="how-title">
@@ -1535,14 +1834,17 @@ curl -s -X POST "${esc(c.publicUrl)}/api/sites" \\
 # ${esc(c.publicUrl)}${esc(localePath(lang, "/login"))}</code></pre>
   </section>
 </div>`;
-  return layout({
+  return dashLayout({
     lang,
+    config: c,
+    kind: "admin",
+    active: "overview",
     title: `${t.admin.title} · ${t.admin.eyebrow} · ${t.product}`,
     description: t.admin.sub,
     path: "/admin",
     body,
-    config: c,
-    noindex: true,
+    csrf: o.csrf,
+    ctx: ADMIN_CTX(lang),
   });
 }
 
@@ -1582,12 +1884,12 @@ export function adminSitesHtml(
   const rows = o.sites
     .map(
       (s) => `<tr>
-      <th scope="row"><bdi>${esc(s.title)}</bdi></th>
-      ${td(t.admin.owner, s.owner ? `<a class="text-link" href="${href(`/admin/sites?owner=${s.ownerId}`)}"><bdi>${esc(s.owner)}</bdi></a>` : `<span class="badge muted">${esc(t.common.guest)}</span>`)}
-      ${td(t.common.link, `<a href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a>`)}
-      ${td(t.common.expires, timeTag(lang, s.expiresAt))}
-      ${td(t.common.size, esc(bytesLabel(lang, s.totalBytes)))}
-      ${td(t.visits.column, visitsCell(lang, s.visits))}
+      <th scope="row" data-v="${esc(s.title.toLowerCase())}"><bdi>${esc(s.title)}</bdi></th>
+      <td data-label="${esc(t.admin.owner)}" data-v="${esc((s.owner ?? "").toLowerCase())}">${s.owner ? `<a class="text-link" href="${href(`/admin/sites?owner=${s.ownerId}`)}"><bdi>${esc(s.owner)}</bdi></a>` : `<span class="badge muted">${esc(t.common.guest)}</span>`}</td>
+      ${td(t.common.link, `<span class="copy-cell"><a id="au-${esc(s.id)}" href="${esc(s.url)}" target="_blank" rel="noopener" class="url">${ltr(hostless(s.url))}</a><button type="button" class="icon-btn js-only" data-copy="#au-${esc(s.id)}" data-copied="${esc(t.common.copied)}" aria-label="${esc(`${t.common.copy}: ${s.title}`)}">${icon("copy")}</button></span>`)}
+      <td data-label="${esc(t.common.expires)}" data-v="${esc(isPermanentIso(s.expiresAt) ? "9999" : s.expiresAt)}">${timeTag(lang, s.expiresAt)}</td>
+      <td data-label="${esc(t.common.size)}" data-v="${s.totalBytes}">${esc(bytesLabel(lang, s.totalBytes))}</td>
+      <td data-label="${esc(t.visits.column)}" data-v="${s.visits?.views30 ?? 0}">${visitsCell(lang, s.visits)}</td>
       ${td(
         t.common.actions,
         `<div class="acts">${postForm(
@@ -1609,7 +1911,7 @@ export function adminSitesHtml(
       )}</tr>`,
     )
     .join("");
-  const body = `<div class="wrap page-wide">
+  const body = `<div class="page-wide">
   ${pageHead(t.admin.eyebrow, esc(t.admin.sitesTitle), t.admin.sitesSub, adminTools(lang, "sites", o.csrf))}
   ${flashBox(lang, o.flash)}
   <ul class="status-list">
@@ -1630,22 +1932,25 @@ export function adminSitesHtml(
     </form>
     ${
       o.sites.length
-        ? `<div class="table-wrap"><table class="data stack">
+        ? `${o.sites.length > 3 ? tableTools(lang, "admin-sites") : ""}<div class="table-wrap"><table class="data stack" id="admin-sites">
       <caption class="sr-only">${esc(t.admin.sitesTitle)}</caption>
-      <thead><tr><th scope="col">${esc(t.common.title)}</th><th scope="col">${esc(t.admin.owner)}</th><th scope="col">${esc(t.common.link)}</th><th scope="col">${esc(t.common.expires)}</th><th scope="col">${esc(t.common.size)}</th><th scope="col">${esc(t.visits.column)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
+      <thead><tr>${sortTh(t.common.title)}${sortTh(t.admin.owner)}<th scope="col">${esc(t.common.link)}</th>${sortTh(t.common.expires, "date")}${sortTh(t.common.size, "num")}${sortTh(t.visits.column, "num")}<th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`
         : emptyState(t.admin.noSites, t.admin.sitesSub)
     }
   </section>
 </div>`;
-  return layout({
+  return dashLayout({
     lang,
+    config: c,
+    kind: "admin",
+    active: "sites",
     title: `${t.admin.sitesTitle} · ${t.admin.eyebrow} · ${t.product}`,
     description: t.admin.sitesSub,
     path: "/admin/sites",
     body,
-    config: c,
-    noindex: true,
+    csrf: o.csrf,
+    ctx: ADMIN_CTX(lang),
   });
 }
 
@@ -1952,63 +2257,94 @@ export interface TeamWorkersOpts extends TeamPageOpts {
   zone: string | null;
 }
 
-export function teamWorkersHtml(lang: Lang, c: Config, o: TeamWorkersOpts): string {
+export function teamWorkersHtml(
+  lang: Lang,
+  c: Config,
+  o: TeamWorkersOpts & { redeploy?: string },
+): string {
   const t = STRINGS[lang];
   const w = WS[lang];
+  const d = DS[lang];
   const href = (p: string) => localePath(lang, p);
   const edit = canEdit(o.me);
   const i = o.info;
-  const rows = i.workers
-    .map(
-      (x) =>
-        `<tr><th scope="row"><code class="ltr">${esc(x.name)}</code></th>${td(w.url, x.url ? `<a class="text-link" href="${esc(x.url)}" target="_blank" rel="noopener" dir="ltr">${esc(hostless(x.url))}</a>` : "—")}${td(w.status, `${workerStatus(lang, x.status)}${x.lastError ? `<div class="meta">${esc(x.lastError)}</div>` : ""}`)}${td(w.size, esc(bytesLabel(lang, x.bytes)))}${td(w.env, workerEnvCell(x))}${td(w.deployed, x.deployedAt ? `${timeTag(lang, x.deployedAt)} <span class="meta"><bdi>${esc(t.members.actorLabels[x.deployedBy] ?? x.deployedBy)}</bdi></span>` : "—")}<td class="cell-actions">${
-          edit
-            ? postForm(
-                href(`/team/workers/${x.name}/delete`),
-                o.csrf,
-                `<button class="button small danger" type="submit" aria-label="${esc(`${w.del}: ${x.name}`)}">${esc(w.del)}</button>`,
-                { confirm: w.confirmDelete },
-              )
-            : ""
-        }</td></tr>`,
-    )
+  const canDeploy = i.enabled && i.configured && edit;
+  const redeploy = o.redeploy && i.workers.some((x) => x.name === o.redeploy) ? o.redeploy : "";
+  const cards = i.workers
+    .map((x) => {
+      const by = t.members.actorLabels[x.deployedBy] ?? x.deployedBy;
+      return `<article class="worker-card" aria-labelledby="wk-${esc(x.id)}">
+      <div class="worker-head"><h3 id="wk-${esc(x.id)}"><code class="ltr">${esc(x.name)}</code></h3>${workerStatus(lang, x.status)}</div>
+      ${
+        x.url
+          ? `<div class="copy-row"><a id="wu-${esc(x.id)}" class="strong-link" href="${esc(x.url)}" target="_blank" rel="noopener" dir="ltr">${esc(hostless(x.url))}</a><button type="button" class="icon-btn js-only" data-copy="#wu-${esc(x.id)}" data-copied="${esc(t.common.copied)}" aria-label="${esc(`${t.common.copy}: ${x.name}`)}">${icon("copy")}</button></div>`
+          : ""
+      }
+      ${x.lastError ? `<p class="flash err">${esc(x.lastError)}</p>` : ""}
+      <dl class="facts compact">
+        <div><dt>${esc(d.lastDeploy)}</dt><dd>${x.deployedAt ? `${timeTag(lang, x.deployedAt)} <span class="meta">${esc(d.by)} <bdi>${esc(by)}</bdi></span>` : "—"}</dd></div>
+        <div><dt>${esc(w.size)}</dt><dd>${esc(bytesLabel(lang, x.bytes))}</dd></div>
+        <div class="fact-wide"><dt>${esc(w.env)}</dt><dd>${workerEnvCell(x)}</dd></div>
+      </dl>
+      ${
+        edit
+          ? `<div class="acts">${canDeploy ? `<a class="button small ghost" href="${href(`/team/workers?redeploy=${encodeURIComponent(x.name)}#deploy`)}">${esc(d.redeploy)}</a>` : ""}${postForm(
+              href(`/team/workers/${x.name}/delete`),
+              o.csrf,
+              `<button class="button small danger" type="submit" aria-label="${esc(`${w.del}: ${x.name}`)}">${esc(w.del)}</button>`,
+              { confirm: w.confirmDelete },
+            )}</div>`
+          : ""
+      }
+    </article>`;
+    })
     .join("");
-  const table = i.workers.length
-    ? `<div class="table-wrap"><table class="data stack" aria-labelledby="workers-title"><thead><tr><th scope="col">${esc(w.name)}</th><th scope="col">${esc(w.url)}</th><th scope="col">${esc(w.status)}</th><th scope="col">${esc(w.size)}</th><th scope="col">${esc(w.env)}</th><th scope="col">${esc(w.deployed)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
-    : emptyState(w.none, w.noneSub);
+  const list = i.workers.length
+    ? `<div class="worker-grid">${cards}</div>`
+    : emptyState(
+        w.none,
+        w.noneSub,
+        canDeploy ? `<a class="button" href="#deploy">${icon("plus")}${esc(d.newWorker)}</a>` : "",
+      );
   const zone = o.zone ?? "workers.dev";
-  const form =
-    i.enabled && i.configured && edit
-      ? `<section class="block" aria-labelledby="deploy-title">
-    <form method="post" action="${href("/team/workers/deploy")}" enctype="multipart/form-data" class="panel">
+  const form = canDeploy
+    ? `<section class="block" id="deploy" aria-labelledby="deploy-title">
+    <details class="panel deploy-panel"${redeploy || !i.workers.length ? " open" : ""}>
+      <summary><h2 class="h3" id="deploy-title">${esc(redeploy ? `${d.redeploy}: ${redeploy}` : w.deployTitle)}</h2></summary>
+    <form method="post" action="${href("/team/workers/deploy")}" enctype="multipart/form-data">
       ${csrfField(o.csrf)}
-      <h2 class="h3" id="deploy-title">${esc(w.deployTitle)}</h2>
       <p>${esc(w.deploySub)}</p>
       <label for="wname">${esc(w.name)}</label>
-      <input id="wname" name="name" type="text" dir="ltr" required maxlength="30" pattern="[a-z0-9](?:[a-z0-9\\-]{0,28}[a-z0-9])?" aria-describedby="wname-help" autocomplete="off">
+      <input id="wname" name="name" type="text" dir="ltr" required maxlength="30" pattern="[a-z0-9](?:[a-z0-9\\-]{0,28}[a-z0-9])?" aria-describedby="wname-help" autocomplete="off" value="${esc(redeploy)}">
       <p class="form-help" id="wname-help">${esc(w.nameHelp(i.slug ?? "team", zone))}</p>
-      <label for="wfile">${esc(w.file)}</label>
-      <input id="wfile" name="file" type="file" accept=".js,.mjs,text/javascript,application/javascript">
+      <div class="two-col tight">
+        <div><label for="wfile">${esc(w.file)}</label>
+        <input id="wfile" name="file" type="file" accept=".js,.mjs,text/javascript,application/javascript"></div>
+      </div>
       <label for="wcode">${esc(w.code)}</label>
-      <textarea id="wcode" name="code" rows="8" dir="ltr" spellcheck="false" class="code-input" placeholder="export default { async fetch(request, env) { return new Response('hello'); } };"></textarea>
-      <label for="wvars">${esc(w.vars)}</label>
-      <textarea id="wvars" name="vars" rows="3" dir="ltr" spellcheck="false" aria-describedby="wvars-help"></textarea>
-      <p class="form-help" id="wvars-help">${esc(w.varsHelp)}</p>
-      <label for="wsecrets">${esc(w.secrets)}</label>
-      <textarea id="wsecrets" name="secrets" rows="2" dir="ltr" spellcheck="false" autocomplete="off" aria-describedby="wsecrets-help"></textarea>
-      <p class="form-help" id="wsecrets-help">${esc(w.secretsHelp)}</p>
-      <button class="button" type="submit">${esc(w.deploy)}</button>
+      <textarea id="wcode" name="code" rows="10" dir="ltr" spellcheck="false" class="code-input" placeholder="export default { async fetch(request, env) { return new Response('hello'); } };"></textarea>
+      <div class="two-col tight">
+        <div><label for="wvars">${esc(w.vars)}</label>
+        <textarea id="wvars" name="vars" rows="3" dir="ltr" spellcheck="false" aria-describedby="wvars-help" placeholder="GREETING=hello"></textarea>
+        <p class="form-help" id="wvars-help">${esc(w.varsHelp)}</p></div>
+        <div><label for="wsecrets">${esc(w.secrets)}</label>
+        <textarea id="wsecrets" name="secrets" rows="3" dir="ltr" spellcheck="false" autocomplete="off" aria-describedby="wsecrets-help" placeholder="API_KEY=…"></textarea>
+        <p class="form-help" id="wsecrets-help">${esc(w.secretsHelp)}</p></div>
+      </div>
+      <button class="button" type="submit" data-busy>${esc(w.deploy)}</button>
     </form>
+    </details>
   </section>`
-      : "";
+    : "";
   const teamRef = i.slug ?? o.team.id;
   const agents = `<section class="block two-col" aria-labelledby="agents-title">
     <div>
-      <h2 id="agents-title">${esc(w.agentsTitle)}</h2>
-      <p>${esc(w.agentsSub)}</p>
-      <div class="actions"><a class="text-link" href="${href("/docs/workers")}">${esc(t.admin.docsLink)}</a></div>
+      <h2 id="agents-title">${esc(d.agentSnippet)}</h2>
+      <p>${esc(d.agentSnippetSub(teamRef))}</p>
+      <p class="meta">${esc(d.mcpTip)}</p>
+      <div class="actions"><button type="button" class="button small ghost js-only" data-copy="#agent-snippet" data-copied="${esc(t.common.copied)}">${icon("copy")}${esc(d.copy)}</button><a class="text-link" href="${href("/docs/workers")}">${esc(t.admin.docsLink)}</a></div>
     </div>
-    <pre class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
+    <pre class="code" dir="ltr"><code id="agent-snippet"># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
 curl -s -X PUT "${esc(c.publicUrl)}/api/teams/${esc(teamRef)}/workers/hello" \\
   -H "X-Team-Key: $MARSA_TEAM_KEY" \\
   -H "Content-Type: application/javascript" --data-binary @worker.js
@@ -2019,27 +2355,29 @@ curl -s "${esc(c.publicUrl)}/api/teams/${esc(teamRef)}/workers" -H "X-Team-Key: 
     ? `<p class="notice">${esc(w.notConfigured)}</p>`
     : !i.enabled
       ? `<p class="notice">${esc(w.off)}</p>`
-      : `<ul class="status-list"><li><span class="dot-status ${i.workers.length >= i.quota.workers ? "warn" : "on"}" aria-hidden="true"></span>${esc(w.quota(i.workers.length, i.quota.workers, i.quota.kb))}</li></ul>${edit ? "" : `<p class="meta">${esc(w.viewOnly)}</p>`}`;
-  const body = `<div class="wrap page-wide">
-  ${teamHead(lang, o, w.sub, "workers")}
+      : `<div class="stat-grid narrow">${statCard("workers", d.stats.workers, esc(fmt(lang, i.workers.length)), esc(w.quota(i.workers.length, i.quota.workers, i.quota.kb)), { value: i.workers.length, max: i.quota.workers })}</div>${edit ? "" : `<p class="meta">${esc(w.viewOnly)}</p>`}`;
+  const body = `<div class="page-wide">
+  ${teamHead(lang, o, w.sub, "workers", canDeploy ? `<a class="button small" href="#deploy">${icon("plus")}${esc(d.newWorker)}</a>` : "")}
   ${flashBox(lang, o.flash)}
   ${state}
   <section class="block" aria-labelledby="workers-title">
     <h2 id="workers-title">${esc(w.title)} <span class="count">${esc(String(i.workers.length))}</span></h2>
-    ${table}
+    ${list}
   </section>
   ${form}
   ${i.enabled ? agents : ""}
 </div>`;
-  return layout({
+  return dashLayout({
     lang,
+    config: c,
+    kind: "team",
+    active: "workers",
     title: `${w.title} · ${o.team.name} · ${t.product}`,
     description: w.sub,
     path: "/team/workers",
     body,
-    config: c,
-    active: "team",
-    noindex: true,
+    csrf: o.csrf,
+    ctx: teamCtx(lang, o),
   });
 }
 
@@ -2074,31 +2412,12 @@ export function adminWorkersHtml(lang: Lang, c: Config, o: AdminWorkersOpts): st
   const w = WS[lang];
   const href = (p: string) => localePath(lang, p);
   const st = o.settings;
-  const settings = `<section class="block two-col" aria-labelledby="cf-title">
-    <div>
-      <h2 id="cf-title">${esc(w.settings)}</h2>
-      ${st.encryption ? "" : `<p class="notice">${esc(w.noKey)}</p>`}
-      <ul class="status-list">
-        <li><span class="dot-status ${st.configured ? "on" : "warn"}" aria-hidden="true"></span>${esc(st.last4 ? w.tokenSet(st.last4) : w.tokenUnset)}</li>
-        ${st.accountId ? `<li><strong>${esc(w.account)}:</strong> <code class="ltr">${esc(st.accountId)}</code></li>` : ""}
-        ${st.configured ? `<li><strong>${esc(w.zone)}:</strong> <code class="ltr">${esc(st.zoneName ?? "workers.dev")}</code></li>` : ""}
-        ${st.verifiedAt ? `<li><strong>${esc(w.verified)}:</strong> ${timeTag(lang, st.verifiedAt)} · <span dir="ltr">${esc(st.status ?? "")}</span></li>` : ""}
-      </ul>
-      ${st.configured ? `<div class="acts">${postForm(href("/admin/workers/settings/verify"), o.csrf, `<button class="button small ghost" type="submit">${esc(w.verify)}</button>`)}${postForm(href("/admin/workers/settings/clear"), o.csrf, `<button class="button small danger" type="submit">${esc(w.clear)}</button>`, { confirm: w.confirmClear })}</div>` : ""}
-    </div>
-    <form method="post" action="${href("/admin/workers/settings")}" class="panel" autocomplete="off">
-      ${csrfField(o.csrf)}
-      <label for="cftoken">${esc(w.token)}</label>
-      <input id="cftoken" name="token" type="password" dir="ltr" autocomplete="off" maxlength="200" ${st.configured ? `placeholder="…${esc(st.last4 ?? "")}"` : "required"} aria-describedby="cftoken-help">
-      <p class="form-help" id="cftoken-help">${esc(w.tokenHelp)}</p>
-      <label for="cfacct">${esc(w.account)}</label>
-      <input id="cfacct" name="accountId" type="text" dir="ltr" maxlength="32" value="${esc(st.accountId ?? "")}" aria-describedby="cfacct-help">
-      <p class="form-help" id="cfacct-help">${esc(w.accountHelp)}</p>
-      <label for="cfzone">${esc(w.zone)}</label>
-      <input id="cfzone" name="zone" type="text" dir="ltr" maxlength="253" value="${esc(st.zoneName ?? (st.configured ? "" : "marsaplatform.com"))}" aria-describedby="cfzone-help">
-      <p class="form-help" id="cfzone-help">${esc(w.zoneHelp)}</p>
-      <button class="button" type="submit"${st.encryption ? "" : " disabled"}>${esc(w.save)}</button>
-    </form>
+  const settingsLine = `<section class="block" aria-labelledby="cf-title">
+    <h2 id="cf-title" class="sr-only">${esc(w.settings)}</h2>
+    <ul class="status-list">
+      <li><span class="dot-status ${st.configured ? "on" : "warn"}" aria-hidden="true"></span><strong>${esc(w.settings)}:</strong> ${esc(st.last4 ? w.tokenSet(st.last4) : w.tokenUnset)}${st.configured ? ` · <code class="ltr">${esc(st.zoneName ?? "workers.dev")}</code>` : ""}</li>
+    </ul>
+    <p class="meta">${esc(DS[lang].cfOnSettings)} <a class="text-link" href="${href("/admin/settings")}">${esc(DS[lang].openSettings)}</a></p>
   </section>`;
   const teamRows = o.teams
     .map(
@@ -2146,24 +2465,613 @@ export function adminWorkersHtml(lang: Lang, c: Config, o: AdminWorkersOpts): st
     <h2 id="wall-title">${esc(w.allTitle)} <span class="count">${esc(String(o.workers.length))}</span></h2>
     ${o.workers.length ? `<div class="table-wrap"><table class="data stack" aria-labelledby="wall-title"><thead><tr><th scope="col">${esc(w.name)}</th><th scope="col">${esc(w.team)}</th><th scope="col">${esc(w.url)}</th><th scope="col">${esc(w.status)}</th><th scope="col">${esc(w.size)}</th><th scope="col">${esc(w.deployed)}</th><th scope="col"><span class="sr-only">${esc(t.common.actions)}</span></th></tr></thead><tbody>${wRows}</tbody></table></div>` : `<p class="meta">${esc(w.none)}</p>`}
   </section>`;
-  const body = `<div class="wrap page-wide">
+  const body = `<div class="page-wide">
   ${pageHead(t.admin.eyebrow, esc(w.adminTitle), w.adminSub, adminTools(lang, "workers", o.csrf))}
   ${flashBox(lang, o.flash)}
-  ${settings}
+  ${settingsLine}
   ${teams}
   ${all}
   <section class="block audit-block" aria-labelledby="plog-title">
-    <h2 id="plog-title">${esc(w.platformLog)}</h2>
-    ${auditTable(lang, o.audit, false, "plog-title")}
+    <div class="block-head"><h2 id="plog-title">${esc(w.platformLog)}</h2><a class="text-link" href="${href("/admin/activity?team=platform")}">${esc(DS[lang].viewAll)}</a></div>
+    ${auditTable(lang, o.audit.slice(0, 10), false, "plog-title")}
   </section>
 </div>`;
-  return layout({
+  return dashLayout({
     lang,
+    config: c,
+    kind: "admin",
+    active: "workers",
     title: `${w.adminTitle} · ${t.admin.eyebrow} · ${t.product}`,
     description: w.adminSub,
     path: "/admin/workers",
     body,
-    config: c,
-    noindex: true,
+    csrf: o.csrf,
+    ctx: ADMIN_CTX(lang),
   });
+}
+
+/** Cloudflare connection card (token is write-only: only the last 4 characters are ever shown). */
+function cfCard(lang: Lang, st: AdminWorkersOpts["settings"], csrf: string): string {
+  const w = WS[lang];
+  const href = (p: string) => localePath(lang, p);
+  return `<section class="card-block two-col cf-card" aria-labelledby="cf-title">
+    <div>
+      <h2 id="cf-title">${esc(w.settings)}</h2>
+      ${st.encryption ? "" : `<p class="notice">${esc(w.noKey)}</p>`}
+      <ul class="status-list">
+        <li><span class="dot-status ${st.configured ? "on" : "warn"}" aria-hidden="true"></span>${esc(st.last4 ? w.tokenSet(st.last4) : w.tokenUnset)}</li>
+        ${st.accountId ? `<li><strong>${esc(w.account)}:</strong> <code class="ltr">${esc(st.accountId)}</code></li>` : ""}
+        ${st.configured ? `<li><strong>${esc(w.zone)}:</strong> <code class="ltr">${esc(st.zoneName ?? "workers.dev")}</code></li>` : ""}
+        ${st.verifiedAt ? `<li><strong>${esc(w.verified)}:</strong> ${timeTag(lang, st.verifiedAt)} · <span dir="ltr">${esc(st.status ?? "")}</span></li>` : ""}
+      </ul>
+      ${st.configured ? `<div class="acts">${postForm(href("/admin/workers/settings/verify"), csrf, `<button class="button small ghost" type="submit">${esc(w.verify)}</button>`)}${postForm(href("/admin/workers/settings/clear"), csrf, `<button class="button small danger" type="submit">${esc(w.clear)}</button>`, { confirm: w.confirmClear })}</div>` : ""}
+    </div>
+    <form method="post" action="${href("/admin/workers/settings")}" class="panel" autocomplete="off">
+      ${csrfField(csrf)}
+      <label for="cftoken">${esc(w.token)}</label>
+      <input id="cftoken" name="token" type="password" dir="ltr" autocomplete="off" maxlength="200" ${st.configured ? `placeholder="…${esc(st.last4 ?? "")}"` : "required"} aria-describedby="cftoken-help">
+      <p class="form-help" id="cftoken-help">${esc(w.tokenHelp)}</p>
+      <label for="cfacct">${esc(w.account)}</label>
+      <input id="cfacct" name="accountId" type="text" dir="ltr" maxlength="32" value="${esc(st.accountId ?? "")}" aria-describedby="cfacct-help">
+      <p class="form-help" id="cfacct-help">${esc(w.accountHelp)}</p>
+      <label for="cfzone">${esc(w.zone)}</label>
+      <input id="cfzone" name="zone" type="text" dir="ltr" maxlength="253" value="${esc(st.zoneName ?? (st.configured ? "" : "marsaplatform.com"))}" aria-describedby="cfzone-help">
+      <p class="form-help" id="cfzone-help">${esc(w.zoneHelp)}</p>
+      <button class="button" type="submit"${st.encryption ? "" : " disabled"}>${esc(w.save)}</button>
+    </form>
+  </section>`;
+}
+
+export interface AdminSettingsOpts {
+  settings: AdminWorkersOpts["settings"];
+  server: {
+    version: string;
+    publicUrl: string;
+    backend: boolean;
+    secretsKey: boolean;
+    sessionKey: boolean;
+    maxUploadMb: number;
+    teamSites: number;
+    teamMb: number;
+    workersMax: number;
+    workerKb: number;
+  };
+  csrf: string;
+  flash?: Flash | null;
+}
+
+export function adminSettingsHtml(lang: Lang, c: Config, o: AdminSettingsOpts): string {
+  const t = STRINGS[lang];
+  const d = DS[lang];
+  const sv = o.server;
+  const yes = (on: boolean, a: string = d.present, b: string = d.missing) =>
+    `<span class="badge ${on ? "on" : "warn"}">${esc(on ? a : b)}</span>`;
+  const body = `<div class="page-wide">
+  ${pageHead(t.admin.eyebrow, esc(d.settings), d.adminSettingsSub, adminTools(lang, "settings", o.csrf))}
+  ${flashBox(lang, o.flash)}
+  ${cfCard(lang, o.settings, o.csrf)}
+  <section class="card-block" aria-labelledby="srv-title">
+    <h2 id="srv-title" class="h3">${esc(d.server)}</h2>
+    <dl class="facts">
+      <div><dt>${esc(d.version)}</dt><dd><code class="ltr">${esc(sv.version)}</code></dd></div>
+      <div class="fact-wide"><dt>${esc(d.publicUrl)}</dt><dd><a class="text-link" href="${esc(sv.publicUrl)}" dir="ltr">${esc(hostless(sv.publicUrl))}</a></dd></div>
+      <div><dt>${esc(d.backendSrv)}</dt><dd>${yes(sv.backend, d.on, d.off)}</dd></div>
+      <div><dt>${esc(d.secretsKey)}</dt><dd>${yes(sv.secretsKey)}</dd></div>
+      <div class="fact-wide"><dt>${esc(d.sessions)}</dt><dd>${esc(sv.sessionKey ? d.sessionsPersistent : d.sessionsEphemeral)}</dd></div>
+      <div><dt>${esc(d.limits)}</dt><dd>${esc(`${fmt(lang, sv.maxUploadMb)} MB`)}</dd></div>
+      <div><dt>${esc(d.defaults)}</dt><dd>${esc(`${fmt(lang, sv.teamSites)} · ${fmt(lang, sv.teamMb)} MB · ${fmt(lang, sv.workersMax)} × ${fmt(lang, sv.workerKb)} KB`)}</dd></div>
+    </dl>
+  </section>
+</div>`;
+  return dashLayout({
+    lang,
+    config: c,
+    kind: "admin",
+    active: "settings",
+    title: `${d.settings} · ${t.admin.eyebrow} · ${t.product}`,
+    description: d.adminSettingsSub,
+    path: "/admin/settings",
+    body,
+    csrf: o.csrf,
+    ctx: ADMIN_CTX(lang),
+  });
+}
+
+export function adminActivityHtml(
+  lang: Lang,
+  c: Config,
+  o: {
+    audit: (AuditView & { team?: { id: string; name: string } | null })[];
+    teams: { id: string; name: string }[];
+    team: string;
+    kind: string;
+    q: string;
+    csrf: string;
+    flash?: Flash | null;
+  },
+): string {
+  const t = STRINGS[lang];
+  const d = DS[lang];
+  const href = (p: string) => localePath(lang, p);
+  const kinds = ["member", "key", "api", "mcp", "admin"] as const;
+  const opt = (v: string, label: string, sel: string) =>
+    `<option value="${esc(v)}"${sel === v ? " selected" : ""}>${esc(label)}</option>`;
+  const filter = `<form method="get" action="${href("/admin/activity")}" class="filters" role="search">
+    <label><span>${esc(d.search)}</span><input type="search" name="q" value="${esc(o.q)}" placeholder="${esc(d.searchPh)}"></label>
+    <label><span>${esc(d.pickTeam)}</span><select name="team">${opt("", d.allTeams, o.team)}${opt("platform", d.platform, o.team)}${o.teams.map((x) => opt(x.id, x.name, o.team)).join("")}</select></label>
+    <label><span>${esc(d.who)}</span><select name="kind">${opt("", d.everyone, o.kind)}${kinds.map((k) => opt(k, t.members.actorKinds[k], o.kind)).join("")}</select></label>
+    <button class="button small" type="submit">${esc(d.filter)}</button>${o.q || o.kind || o.team ? `<a class="text-link" href="${href("/admin/activity")}">${esc(d.reset)}</a>` : ""}
+  </form>`;
+  const rows = o.audit
+    .map((e) => {
+      const what =
+        t.members.actions[e.action] ??
+        (e.action.startsWith("mcp:") ? `MCP · ${e.action.slice(4)}` : e.action);
+      const who = e.kind === "member" ? e.who : (t.members.actorLabels[e.who] ?? e.who);
+      return `<tr><td data-label="${esc(t.members.when)}">${timeTag(lang, e.at)}</td>${td(d.pickTeam, e.team ? `<a class="text-link" href="${href(`/admin/activity?team=${encodeURIComponent(e.team.id)}`)}"><bdi>${esc(e.team.name)}</bdi></a>` : `<span class="badge muted">${esc(d.platform)}</span>`)}${td(d.who, `<span class="badge k-${esc(e.kind)}">${esc(t.members.actorKinds[e.kind as (typeof kinds)[number]] ?? e.kind)}</span> <bdi>${esc(who)}</bdi>`)}${td(t.members.what, `${esc(what)}${e.detail ? ` <span class="meta"><bdi>${esc(e.detail)}</bdi></span>` : ""}${e.site ? ` · <bdi>${esc(e.site.title)}</bdi>` : ""}`)}</tr>`;
+    })
+    .join("");
+  const body = `<div class="page-wide">
+  ${pageHead(t.admin.eyebrow, esc(d.activity), d.adminActivitySub, adminTools(lang, "activity", o.csrf))}
+  ${flashBox(lang, o.flash)}
+  <section class="block" aria-labelledby="pa-title">
+    <h2 id="pa-title" class="sr-only">${esc(d.activity)}</h2>
+    ${filter}
+    <p class="meta">${esc(d.shown(o.audit.length))}</p>
+    ${
+      o.audit.length
+        ? `<div class="table-wrap"><table class="data stack audit-table" aria-labelledby="pa-title"><thead><tr><th scope="col">${esc(t.members.when)}</th><th scope="col">${esc(d.pickTeam)}</th><th scope="col">${esc(d.who)}</th><th scope="col">${esc(t.members.what)}</th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : `<p class="meta">${esc(d.noActivity)}</p>`
+    }
+  </section>
+</div>`;
+  return dashLayout({
+    lang,
+    config: c,
+    kind: "admin",
+    active: "activity",
+    title: `${d.activity} · ${t.admin.eyebrow} · ${t.product}`,
+    description: d.adminActivitySub,
+    path: "/admin/activity",
+    body,
+    csrf: o.csrf,
+    ctx: ADMIN_CTX(lang),
+  });
+}
+
+// ---- dashboard shell (0.13.0) ----------------------------------------------------------------
+
+/** Dashboard strings (team dashboard + admin console). */
+export const DS = {
+  en: {
+    menu: "Menu",
+    close: "Close menu",
+    publicSite: "Public site",
+    guide: "Guide",
+    crumbs: "Breadcrumb",
+    teamArea: "Team dashboard",
+    adminArea: "Admin console",
+    nav: {
+      overview: "Overview",
+      sites: "Spaces",
+      workers: "Workers",
+      members: "Members",
+      activity: "Activity",
+      settings: "Settings",
+    } as Record<string, string>,
+    overview: "Overview",
+    overviewSub: "Your team at a glance: spaces, visits, people and Workers.",
+    stats: {
+      spaces: "Live spaces",
+      storage: "Storage",
+      views: "Views, last 30 days",
+      views7: (n: string) => `${n} in the last 7 days`,
+      members: "Members",
+      invites: (n: number) => (n === 1 ? "1 pending invite" : `${n} pending invites`),
+      workers: "Workers",
+      workersOff: "Off for this team",
+      of: (a: string, b: string) => `${a} of ${b}`,
+      teams: "Teams",
+      teamsSub: (m: number) => (m === 1 ? "1 member in total" : `${m} members in total`),
+      guests: (n: number) => `${n} guest`,
+      perm: (n: number) => `${n} permanent`,
+      workersSub: (n: number) => (n === 1 ? "1 team can deploy" : `${n} teams can deploy`),
+      views30: "Views, last 30 days",
+    },
+    quick: "Quick actions",
+    publish: "Publish a space",
+    deploy: "Deploy a Worker",
+    invite: "Invite a member",
+    recentActivity: "Recent activity",
+    recentSpaces: "Recent spaces",
+    viewAll: "View all",
+    noActivity: "Nothing has happened yet.",
+    activity: "Activity",
+    activitySub: "Every change by members, the team key, edit tokens, MCP tokens and the admin.",
+    adminActivitySub: "Changes across all teams, and platform settings.",
+    search: "Search",
+    searchPh: "Type to filter…",
+    who: "Actor",
+    everyone: "Everyone",
+    allTeams: "All teams",
+    platform: "Platform",
+    filter: "Filter",
+    reset: "Reset",
+    shown: (n: number) => (n === 1 ? "1 entry" : `${n} entries`),
+    noMatch: "No rows match.",
+    sortBy: (c: string) => `Sort by ${c}`,
+    settings: "Settings",
+    settingsSub: "Team details, features, quotas and your account.",
+    teamInfo: "Team",
+    name: "Name",
+    id: "Team id",
+    slug: "Workers slug",
+    features: "Features",
+    quotas: "Quotas and usage",
+    api: "API access",
+    apiNote: (p: string) =>
+      `Agents use the team key (it starts with ${p}…). It was shown once when it was issued; only the admin can issue a new one, and the old one stops working at once.`,
+    on: "On",
+    off: "Off",
+    adminOverviewSub: "The whole platform: teams, spaces, Workers and visits. Manage teams below.",
+    newTeam: "New team",
+    more: "More",
+    dangerZone: "Danger zone",
+    rotateWarn:
+      "Issue a new key: it is shown once. The old key stops working immediately, so agents and scripts using it fail until they get the new one.",
+    rotateConfirm:
+      "Issue a new team key? The current key stops working right now. Agents and scripts that use it will fail until you give them the new key.",
+    workersCol: "Workers",
+    manage: "Manage",
+    adminSettingsSub: "Cloudflare connection for team Workers, and how this server is configured.",
+    server: "Server",
+    version: "Version",
+    publicUrl: "Public URL",
+    backendSrv: "Data/files backend",
+    secretsKey: "Secrets key (MARSA_SECRETS_KEY)",
+    sessions: "Session key",
+    sessionsPersistent: "Set (sessions survive restarts)",
+    sessionsEphemeral: "Random per start (everyone is signed out on restart)",
+    limits: "Upload limits",
+    defaults: "Default team quotas",
+    present: "Set",
+    missing: "Not set",
+    cfOnSettings: "The Cloudflare token is managed in Settings.",
+    openSettings: "Open settings",
+    confirm: "Confirm",
+    cancel: "Cancel",
+    dismiss: "Dismiss",
+    redeploy: "Redeploy",
+    copy: "Copy",
+    copied: "Copied",
+    newWorker: "New Worker",
+    lastDeploy: "Last deploy",
+    by: "by",
+    agentSnippet: "How agents use this",
+    agentSnippetSub: (slug: string) =>
+      `Ready to paste: the team slug (${slug}) is filled in. Put the team key in MARSA_TEAM_KEY; it never goes in a page or a repository.`,
+    mcpTip:
+      "Or connect a space's MCP with a read-write token: the tools list_workers, deploy_worker and delete_worker appear automatically.",
+    pickTeam: "Team",
+  },
+  ar: {
+    menu: "القائمة",
+    close: "أغلق القائمة",
+    publicSite: "الموقع العام",
+    guide: "الدليل",
+    crumbs: "مسار التنقل",
+    teamArea: "لوحة الفريق",
+    adminArea: "لوحة المسؤول",
+    nav: {
+      overview: "نظرة عامة",
+      sites: "المساحات",
+      workers: "الوركرز",
+      members: "الأعضاء",
+      activity: "سجل النشاط",
+      settings: "الإعدادات",
+    } as Record<string, string>,
+    overview: "نظرة عامة",
+    overviewSub: "فريقك في لمحة: المساحات والزيارات والأعضاء والوركرز.",
+    stats: {
+      spaces: "المساحات الحية",
+      storage: "التخزين",
+      views: "المشاهدات في آخر 30 يومًا",
+      views7: (n: string) => `${n} في آخر 7 أيام`,
+      members: "الأعضاء",
+      invites: (n: number) => (n === 1 ? "دعوة واحدة معلّقة" : `${n} دعوات معلّقة`),
+      workers: "الوركرز",
+      workersOff: "غير مفعّلة لهذا الفريق",
+      of: (a: string, b: string) => `${a} من ${b}`,
+      teams: "الفرق",
+      teamsSub: (m: number) => (m === 1 ? "عضو واحد إجمالًا" : `${m} أعضاء إجمالًا`),
+      guests: (n: number) => `${n} زائر`,
+      perm: (n: number) => `${n} دائم`,
+      workersSub: (n: number) => (n === 1 ? "فريق واحد يستطيع النشر" : `${n} فرق تستطيع النشر`),
+      views30: "المشاهدات في آخر 30 يومًا",
+    },
+    quick: "إجراءات سريعة",
+    publish: "انشر مساحة",
+    deploy: "انشر وركر",
+    invite: "ادعُ عضوًا",
+    recentActivity: "آخر النشاط",
+    recentSpaces: "أحدث المساحات",
+    viewAll: "عرض الكل",
+    noActivity: "لا يوجد نشاط بعد.",
+    activity: "سجل النشاط",
+    activitySub:
+      "كل تغيير قام به الأعضاء أو مفتاح الفريق أو مفاتيح التعديل أو رموز MCP أو المسؤول.",
+    adminActivitySub: "التغييرات في كل الفرق، وإعدادات المنصة.",
+    search: "بحث",
+    searchPh: "اكتب للتصفية…",
+    who: "المنفّذ",
+    everyone: "الكل",
+    allTeams: "كل الفرق",
+    platform: "المنصة",
+    filter: "تصفية",
+    reset: "إعادة ضبط",
+    shown: (n: number) => (n === 1 ? "سجل واحد" : `${n} سجلات`),
+    noMatch: "لا توجد نتائج مطابقة.",
+    sortBy: (c: string) => `رتّب حسب ${c}`,
+    settings: "الإعدادات",
+    settingsSub: "بيانات الفريق والمزايا والحصص وحسابك.",
+    teamInfo: "الفريق",
+    name: "الاسم",
+    id: "معرّف الفريق",
+    slug: "الاسم المختصر للوركرز",
+    features: "المزايا",
+    quotas: "الحصص والاستخدام",
+    api: "الوصول عبر الـ API",
+    apiNote: (p: string) =>
+      `الإيجنتس تستخدم مفتاح الفريق (يبدأ بـ ${p}…). ظهر المفتاح مرة واحدة عند إصداره، والمسؤول وحده يستطيع إصدار مفتاح جديد، وعندها يتوقف القديم فورًا.`,
+    on: "مفعّل",
+    off: "متوقف",
+    adminOverviewSub:
+      "المنصة كلها: الفرق والمساحات والوركرز والزيارات. أدِر الفرق من الجدول بالأسفل.",
+    newTeam: "فريق جديد",
+    more: "المزيد",
+    dangerZone: "منطقة الخطر",
+    rotateWarn:
+      "إصدار مفتاح جديد: يظهر مرة واحدة فقط، ويتوقف المفتاح القديم فورًا، فتفشل الإيجنتس والسكربتات التي تستخدمه حتى تحصل على الجديد.",
+    rotateConfirm:
+      "تصدر مفتاحًا جديدًا للفريق؟ سيتوقف المفتاح الحالي الآن، وستفشل الإيجنتس والسكربتات التي تستخدمه حتى تعطيها المفتاح الجديد.",
+    workersCol: "الوركرز",
+    manage: "إدارة",
+    adminSettingsSub: "ربط كلاودفلير لوركرز الفرق، وإعدادات هذا الخادم.",
+    server: "الخادم",
+    version: "الإصدار",
+    publicUrl: "العنوان العام",
+    backendSrv: "خدمة البيانات والملفات",
+    secretsKey: "مفتاح التشفير (MARSA_SECRETS_KEY)",
+    sessions: "مفتاح الجلسات",
+    sessionsPersistent: "مضبوط (الجلسات تبقى بعد إعادة التشغيل)",
+    sessionsEphemeral: "عشوائي مع كل تشغيل (يخرج الجميع عند إعادة التشغيل)",
+    limits: "حدود الرفع",
+    defaults: "الحصص الافتراضية للفرق",
+    present: "مضبوط",
+    missing: "غير مضبوط",
+    cfOnSettings: "مفتاح كلاودفلير يُدار من صفحة الإعدادات.",
+    openSettings: "افتح الإعدادات",
+    confirm: "تأكيد",
+    cancel: "إلغاء",
+    dismiss: "إغلاق",
+    redeploy: "أعد النشر",
+    copy: "انسخ",
+    copied: "تم النسخ",
+    newWorker: "وركر جديد",
+    lastDeploy: "آخر نشر",
+    by: "بواسطة",
+    agentSnippet: "كيف تستخدمه الإيجنتس",
+    agentSnippetSub: (slug: string) =>
+      `جاهز للنسخ: الاسم المختصر للفريق (${slug}) مكتوب بالفعل. ضع مفتاح الفريق في MARSA_TEAM_KEY، ولا تضعه أبدًا في صفحة أو مستودع.`,
+    mcpTip:
+      "أو اربط MCP إحدى المساحات برمز قراءة وكتابة، فتظهر الأدوات list_workers وdeploy_worker وdelete_worker تلقائيًا.",
+    pickTeam: "الفريق",
+  },
+} as const;
+
+const ICONS: Record<string, string> = {
+  overview: '<path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-3H4zM14 7h6V4h-6z"/>',
+  sites:
+    '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 9h16M8 6.5h.01"/>',
+  workers: '<path d="M8 9l-3 3 3 3M16 9l3 3-3 3M13.5 6l-3 12"/>',
+  members:
+    '<path d="M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 10.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6M21 19v-1a4 4 0 0 0-3-3.9M15.5 4.6a3 3 0 0 1 0 5.8"/>',
+  activity: '<path d="M3 12h4l3 7 4-14 3 7h4"/>',
+  settings:
+    '<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1"/>',
+  teams: '<path d="M3 21V8l9-5 9 5v13M9 21v-6h6v6"/>',
+  storage:
+    '<path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+  views:
+    '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  out: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/>',
+  ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/>',
+  book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 5v16M19 19v2H6"/>',
+  copy: '<path d="M9 9h10v10H9zM5 15V5h10"/>',
+};
+export const icon = (name: string, cls = "icon") =>
+  `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name] ?? ""}</svg>`;
+
+export interface DashCtx {
+  /** Team name (team area) or null (admin). */
+  name: string | null;
+  /** Small line under it: "Signed in as … · Owner". */
+  sub: string;
+}
+
+interface DashOpts {
+  lang: Lang;
+  config: Config;
+  kind: "team" | "admin";
+  active: string;
+  title: string;
+  description: string;
+  path: string;
+  body: string;
+  csrf: string;
+  ctx: DashCtx;
+  /** Extra crumbs after the section (e.g. a site title). */
+  crumbs?: { label: string; href?: string }[];
+}
+
+const TEAM_NAV = [
+  ["overview", "/team"],
+  ["sites", "/team/sites"],
+  ["workers", "/team/workers"],
+  ["members", "/team/members"],
+  ["activity", "/team/activity"],
+  ["settings", "/team/settings"],
+] as const;
+const ADMIN_NAV = [
+  ["overview", "/admin"],
+  ["sites", "/admin/sites"],
+  ["workers", "/admin/workers"],
+  ["activity", "/admin/activity"],
+  ["settings", "/admin/settings"],
+] as const;
+
+/** The signed-in app shell: top bar, sidebar navigation (a drawer on phones), breadcrumbs. */
+function dashLayout(o: DashOpts): string {
+  const t = STRINGS[o.lang];
+  const d = DS[o.lang];
+  const other: Lang = o.lang === "en" ? "ar" : "en";
+  const href = (p: string) => localePath(o.lang, p);
+  const nav = (o.kind === "team" ? TEAM_NAV : ADMIN_NAV)
+    .map(
+      ([k, p]) =>
+        `<li><a href="${href(p)}"${k === o.active ? ' aria-current="page"' : ""}>${icon(k === "overview" && o.kind === "admin" ? "teams" : k)}<span>${esc(d.nav[k] ?? k)}</span></a></li>`,
+    )
+    .join("");
+  const area = o.kind === "team" ? d.teamArea : d.adminArea;
+  const home = href(o.kind === "team" ? "/team" : "/admin");
+  const crumbs = [
+    { label: area, href: home },
+    ...(o.active === "overview" && !o.crumbs?.length
+      ? []
+      : [
+          {
+            label: d.nav[o.active] ?? o.title,
+            ...(o.crumbs?.length
+              ? {
+                  href: href(
+                    (
+                      (o.kind === "team" ? TEAM_NAV : ADMIN_NAV) as readonly (readonly [
+                        string,
+                        string,
+                      ])[]
+                    ).find(([k]) => k === o.active)?.[1] ?? "/",
+                  ),
+                }
+              : {}),
+          },
+        ]),
+    ...(o.crumbs ?? []),
+  ];
+  const crumbHtml = `<nav class="crumbs" aria-label="${esc(d.crumbs)}"><ol>${crumbs
+    .map((c, i) =>
+      i === crumbs.length - 1
+        ? `<li><span aria-current="location"><bdi>${esc(c.label)}</bdi></span></li>`
+        : `<li><a href="${esc(c.href ?? "#")}"><bdi>${esc(c.label)}</bdi></a></li>`,
+    )
+    .join("")}</ol></nav>`;
+  const ctx = `<div class="side-ctx"><span class="side-avatar" aria-hidden="true">${esc(initialOf(o.ctx.name ?? "M"))}</span><div><strong>${o.ctx.name ? `<bdi>${esc(o.ctx.name)}</bdi>` : esc(area)}</strong>${o.ctx.sub ? `<span class="meta">${esc(o.ctx.sub)}</span>` : ""}</div></div>`;
+  return `<!doctype html>
+<html lang="${o.lang}" dir="${t.dir}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(o.title)}</title>
+<meta name="description" content="${esc(o.description)}">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#145a49">
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/assets/fonts/zad/Zad-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/app.css?v=${ASSET_VERSION}">
+</head>
+<body class="dash-body">
+<a class="skip" href="#main">${esc(t.skip)}</a>
+<header class="dash-top">
+  <button type="button" class="nav-toggle js-only" data-nav-toggle aria-controls="dash-nav" aria-expanded="false"><span aria-hidden="true" class="burger"></span><span class="sr-only">${esc(d.menu)}</span></button>
+  <a class="wordmark" href="${href("/")}" aria-label="${esc(`${t.product}: ${t.nav.home}`)}">${brandMark(o.lang)}</a>
+  <span class="dash-area">${esc(area)}</span>
+  <div class="dash-top-tools">
+    <a class="locale-link" href="${localePath(other, o.path)}" hreflang="${other}" lang="${other}">${esc(t.switchLabel)}</a>
+  </div>
+</header>
+<div class="dash">
+  <aside class="dash-side" id="dash-nav" aria-label="${esc(area)}">
+    ${ctx}
+    <nav class="side-nav" aria-label="${esc(area)}"><ul>${nav}</ul></nav>
+    <div class="side-foot">
+      <a href="${href("/")}">${icon("ext")}<span>${esc(d.publicSite)}</span></a>
+      <a href="${href(o.lang === "ar" ? "/docs/guide" : "/docs/teams")}">${icon("book")}<span>${esc(d.guide)}</span></a>
+      ${postForm(href("/logout"), o.csrf, `<button class="side-out" type="submit">${icon("out")}<span>${esc(t.common.signOut)}</span></button>`, { cls: "side-out-form" })}
+    </div>
+  </aside>
+  <div class="dash-scrim" data-nav-close hidden></div>
+  <main id="main" class="dash-main" tabindex="-1">
+    ${crumbHtml}
+    ${o.body}
+  </main>
+</div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+<dialog class="confirm-dialog" id="confirm-dialog" aria-labelledby="confirm-text">
+  <form method="dialog">
+    <p id="confirm-text"></p>
+    <div class="actions"><button class="button ghost" value="cancel" type="submit">${esc(d.cancel)}</button><button class="button danger" value="ok" type="submit" data-ok>${esc(d.confirm)}</button></div>
+  </form>
+</dialog>
+<script src="/assets/app.js?v=${ASSET_VERSION}" type="module"></script>
+</body>
+</html>`;
+}
+
+/** A stat card: label, big value, optional sub line and progress bar. */
+function statCard(
+  ic: string,
+  label: string,
+  value: string,
+  sub = "",
+  bar?: { value: number; max: number },
+  link?: string,
+): string {
+  const pct = bar && bar.max > 0 ? Math.min(100, Math.round((bar.value / bar.max) * 100)) : 0;
+  const meter = bar
+    ? `<progress class="quota${pct >= 90 ? " full" : pct >= 70 ? " high" : ""}" max="100" value="${pct}" aria-label="${esc(`${label}: ${pct}%`)}">${pct}%</progress>`
+    : "";
+  const inner = `<div class="stat-head">${icon(ic)}<span>${esc(label)}</span></div><div class="stat-value">${value}</div>${meter}${sub ? `<div class="stat-sub">${sub}</div>` : ""}`;
+  return link
+    ? `<a class="stat-card" href="${esc(link)}">${inner}</a>`
+    : `<div class="stat-card">${inner}</div>`;
+}
+
+/** A search box (and optional select) that filters the rows of a table client-side. */
+function tableTools(lang: Lang, tableId: string, extra = ""): string {
+  const d = DS[lang];
+  return `<div class="table-tools js-only-block" data-table-tools="${esc(tableId)}"><label class="search-field"><span class="sr-only">${esc(d.search)}</span><input type="search" data-filter placeholder="${esc(d.searchPh)}" autocomplete="off"></label>${extra}<span class="meta" data-count aria-live="polite"></span></div><p class="meta no-match" data-no-match hidden>${esc(d.noMatch)}</p>`;
+}
+
+/** Sortable header cell (the script adds the button behaviour). */
+const sortTh = (label: string, kind: "text" | "num" | "date" = "text") =>
+  `<th scope="col" data-sort="${kind}">${esc(label)}</th>`;
+
+/** A compact activity feed (newest first). */
+function activityFeed(lang: Lang, rows: AuditView[], withSite = true): string {
+  const t = STRINGS[lang];
+  if (!rows.length) return `<p class="meta">${esc(DS[lang].noActivity)}</p>`;
+  return `<ol class="feed">${rows
+    .map((e) => {
+      const what =
+        t.members.actions[e.action] ??
+        (e.action.startsWith("mcp:") ? `MCP · ${e.action.slice(4)}` : e.action);
+      const who = e.kind === "member" ? e.who : (t.members.actorLabels[e.who] ?? e.who);
+      const site =
+        withSite && e.site
+          ? ` · <a class="text-link" href="${localePath(lang, `/team/sites/${e.site.id}`)}"><bdi>${esc(e.site.title)}</bdi></a>`
+          : "";
+      return `<li><span class="feed-dot k-${esc(e.kind)}" aria-hidden="true"></span><div><p><strong><bdi>${esc(who)}</bdi></strong> ${esc(what)}${e.detail && !/^\d{4}-\d\d-\d\dT/.test(e.detail) ? ` <span class="meta"><bdi>${esc(e.detail)}</bdi></span>` : ""}${site}</p>${timeTag(lang, e.at)}</div></li>`;
+    })
+    .join("")}</ol>`;
 }

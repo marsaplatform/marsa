@@ -119,15 +119,24 @@ Every site still has one (only its hash is stored), so scripts keep using `PUT/P
 
 ## The admin console
 
-Sign in at `/admin/login` with `ADMIN_TOKEN`. The console has two tabs:
+Sign in at `/admin/login` with `ADMIN_TOKEN`. The sidebar has five pages:
 
-1. **Teams** (`/admin`): create a team (name, *Data and files*, *On home page*). The **team key is
-   shown once** after creating or rotating; Marsa stores only its SHA-256. Each row has switches for
-   *Data and files* and *On home page* (they apply to the next request), **New key** (the old key and
-   its sessions stop at once) and **Delete** (optionally with its sites; otherwise they stay up as
-   ordinary links until they expire).
-2. **All sites** (`/admin/sites`): every live site with its owner (a team or *Guest*), link, expiry and
-   size. Filter by team or guests only, and delete any site.
+1. **Overview** (`/admin`): platform totals (teams, spaces, Workers, views) and the teams table.
+   Create a team (name, *Data and files*, *On home page*, *Permanent*). The **team key is shown
+   once** after creating or rotating; Marsa stores only its SHA-256. Each row has switches for
+   *Data and files*, *On home page*, *Permanent* and *Workers*, the quotas, and a **More** menu with
+   **Invite**, **New key** (the old key and its sessions stop at once) and **Delete** (optionally
+   with its sites; otherwise they stay up as ordinary links until they expire).
+2. **Spaces** (`/admin/sites`): every live site with its owner (a team or *Guest*), link, expiry and
+   size. Filter by team, guests or permanent, search, sort, and delete any site.
+3. **Workers** (`/admin/workers`): per-team Workers settings and every team Worker.
+4. **Activity** (`/admin/activity`): every team's activity log plus the platform log, filtered by
+   team, actor kind and text.
+5. **Settings** (`/admin/settings`): the Cloudflare connection for team Workers (write-only token,
+   last 4 characters shown) and the server configuration.
+
+The team dashboard has the same layout: **Overview**, **Spaces**, **Workers**, **Members**,
+**Activity** and **Settings** (your password and sign-out-everywhere).
 
 ## Uploading as a team
 

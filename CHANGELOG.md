@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] - 2026-10-21
+
+### Changed
+- **Redesigned admin console and team dashboard** (same identity: Zad / IBM Plex Sans Arabic,
+  Marsa green, light and dark):
+  - One app shell for both: a sidebar (an off-canvas drawer on phones, RTL-correct, Esc/scrim to
+    close), breadcrumbs, page titles with the page's main actions, and sign-out in the sidebar.
+  - Team **Overview** (`/team`): stat cards for spaces and storage (with quota bars), views,
+    members (+ pending invites) and Workers (with a quota bar); recent spaces; recent activity;
+    quick publish.
+  - New team pages: **Spaces** (`/team/sites`, full list with search and sortable columns),
+    **Activity** (`/team/activity`, filter by actor kind and text) and **Settings**
+    (`/team/settings`: team details, features, quotas and usage, API-key note, your password and
+    sign-out-everywhere).
+  - **Workers**: one card per Worker with status, live URL (copy), last deploy and who did it;
+    quick **Redeploy** (pre-fills the deploy form) and delete; a collapsible deploy form (paste or
+    upload `.js`, vars, write-only secrets); a copy-ready agent snippet with the team slug.
+  - Admin **Overview** (`/admin`): platform stats (teams, spaces, Workers, views), a compact teams
+    table with on/off switches (data backend, directory, permanent, Workers) and quotas inline;
+    invite, key rotation (with a clear warning) and delete moved into a per-team "More" menu.
+  - New admin pages: **Activity** (`/admin/activity`: every team's log plus the platform log,
+    filters for team, actor kind and text) and **Settings** (`/admin/settings`: the Cloudflare
+    card, still showing only the token's last 4 characters, and server configuration).
+  - Feedback: confirmation dialogs for destructive actions, toasts for successes, busy states on
+    submit, copy buttons for URLs, relative times ("3 hours ago" / "منذ ٣ ساعات") with the full
+    date on hover. Everything still works without JavaScript.
+- The overview's Workers switch changes only on/off; it never resets a team's Worker quotas.
+- CSP allows the Cloudflare Web Analytics beacon (`static.cloudflareinsights.com`), which the edge
+  injects and which was being blocked (a console error on every page).
+
 ## [0.12.0] - 2026-10-21
 
 ### Added
