@@ -28,6 +28,14 @@ import {
 } from "./members.js";
 import { type NotificationCenter, PLATFORM, WebhookError } from "./notify.js";
 import type { RateLimiter } from "./rate-limit.js";
+import {
+  RecipeError,
+  type RecipeStore,
+  recipeHtml,
+  recipeSkeleton,
+  servedLang,
+  summaryOf,
+} from "./recipes.js";
 import { fingerprint, type Session, type Sessions, sameOrigin } from "./session.js";
 import type { SiteMeta, SiteStore } from "./store.js";
 import { cleanTeamName, type Team, type TeamPatch, type TeamStore } from "./teams.js";
@@ -43,12 +51,16 @@ import {
   adminTeamsHtml,
   adminWorkersHtml,
   bellHtml,
+  dashRecipeHtml,
+  dashRecipesHtml,
   type Flash,
   joinHtml,
+  K14,
   localePath,
   loginHtml,
   membersHtml,
   messageHtml,
+  R14,
   type TeamSiteRow,
   teamActivityHtml,
   teamAgentsHtml,
@@ -60,8 +72,11 @@ import {
   teamWorkersHtml,
   V14,
   WS,
+  workerKeysHtml,
   workerVersionsHtml,
 } from "./ui.js";
+import type { UserKeyOps } from "./user-key-routes.js";
+import { UserKeyError, type UserKeyStore } from "./user-keys.js";
 import type { VisitCounter, VisitSummary } from "./visits.js";
 import { versionMeta } from "./worker-versions.js";
 import { PLATFORM_AUDIT, WorkerError, type WorkerService, workerView } from "./workers.js";
@@ -125,6 +140,9 @@ export interface WebDeps {
   workers: WorkerService;
   agentKeys: AgentKeyStore;
   notify: NotificationCenter;
+  recipes: RecipeStore;
+  userKeys: UserKeyStore;
+  userKeyOps: UserKeyOps;
 }
 
 /** "NAME=value" lines into an object (blank lines and # comments skipped). */
@@ -1250,6 +1268,204 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       return done(c, s, agentsBack, ok ? undefined : { kind: "err", text: t.notFound });
     });
 
+    // ---- Worker API keys for end users (0.14.0) ---------------------------------------
+    const k14 = K14[lang];
+    app.get(`${prefix}/team/workers/:name/keys`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const rec = d.workers.find(team.id, c.req.param("name") ?? "");
+      if (!rec) return done(c, s, workersBack, { kind: "err", text: t.notFound });
+      const v = await d.userKeyOps.view(rec);
+      return page(
+        c,
+        workerKeysHtml(lang, config, {
+          ...(await teamInfo(team)),
+          backendConfigured: !!backend,
+          sites: [],
+          me: meOf(ts),
+          worker: workerView(rec),
+          settings: v.settings,
+          keys: v.keys,
+          verifyUrl: v.verifyUrl,
+          helperUrl: v.helperUrl,
+          canManage: roleRank[ts.role] >= roleRank.editor,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+    const ukPost = (
+      path: string,
+      fn: (
+        c: Context,
+        ctx: TeamCtx & {
+          form: FormData;
+          rec: NonNullable<ReturnType<typeof d.workers.find>>;
+          back: string;
+        },
+      ) => Promise<Response>,
+    ) => {
+      app.post(`${prefix}${path}`, async (c) => {
+        const ts = needTeam(c, "editor");
+        if (ts instanceof Response) return ts;
+        const rec = d.workers.find(ts.team.id, c.req.param("name") ?? "");
+        const back = rec ? href(`/team/workers/${rec.name}/keys`) : workersBack;
+        const form = await guardPost(c, ts.s, lang, back);
+        if (form instanceof Response) return form;
+        if (!rec) return done(c, ts.s, workersBack, { kind: "err", text: t.notFound });
+        try {
+          return await fn(c, { ...ts, form, rec, back });
+        } catch (e) {
+          if (e instanceof UserKeyError || e instanceof WorkerError)
+            return done(c, ts.s, back, { kind: "err", text: e.message });
+          throw e;
+        }
+      });
+    };
+    ukPost("/team/workers/:name/keys", async (c, { s, team, form, actor, rec, back }) => {
+      const r = await d.userKeyOps.create(
+        team,
+        rec,
+        {
+          label: field(form, "label"),
+          email: field(form, "email"),
+          expiresInDays: field(form, "expiresInDays") || "never",
+          perMinute: field(form, "perMinute"),
+          perDay: field(form, "perDay"),
+          tools: field(form, "tools"),
+        },
+        actor,
+      );
+      return done(c, s, back, {
+        kind: "ok",
+        text: k14.created,
+        secret: { label: k14.secretLabel, note: k14.secretNote, value: r.secret },
+      });
+    });
+    ukPost("/team/workers/:name/keys/settings", async (c, { s, team, form, actor, rec, back }) => {
+      await d.userKeyOps.configure(
+        team,
+        rec,
+        {
+          required: field(form, "required") === "on",
+          perMinute: field(form, "perMinute"),
+          perDay: field(form, "perDay"),
+        },
+        actor,
+      );
+      return done(c, s, back, { kind: "ok", text: k14.settingsSaved });
+    });
+    ukPost("/team/workers/:name/keys/:id/revoke", async (c, { s, team, actor, rec, back }) => {
+      const k = await d.userKeyOps.revoke(team, rec, c.req.param("id") ?? "", actor);
+      return done(
+        c,
+        s,
+        back,
+        k ? { kind: "ok", text: k14.revoked } : { kind: "err", text: t.notFound },
+      );
+    });
+
+    // ---- recipes (0.14.0) --------------------------------------------------------------
+    const r14 = R14[lang];
+    const skeleton = { en: recipeSkeleton("en"), ar: recipeSkeleton("ar") };
+    const recipeInput = (form: FormData) => ({
+      title_en: field(form, "title_en"),
+      title_ar: field(form, "title_ar"),
+      summary_en: field(form, "summary_en"),
+      summary_ar: field(form, "summary_ar"),
+      body_en: field(form, "body_en"),
+      body_ar: field(form, "body_ar"),
+      tags: field(form, "tags"),
+    });
+    const tRecipes = href("/team/recipes");
+    app.get(`${prefix}/team/recipes`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      await d.recipes.ready();
+      return page(
+        c,
+        dashRecipesHtml(lang, config, {
+          ...(await teamInfo(ts.team)),
+          me: meOf(ts),
+          kind: "team",
+          list: d.recipes.visible(ts.team.id).map((r) => summaryOf(r, lang)),
+          canWrite: roleRank[ts.role] >= roleRank.editor,
+          csrf: sessions.csrfFor(ts.s),
+          flash: takeFlash(c, ts.s),
+          skeleton,
+        }),
+      );
+    });
+    app.get(`${prefix}/team/recipes/:slug`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      await d.recipes.ready();
+      const r = d.recipes.get(c.req.param("slug") ?? "", ts.team.id);
+      if (!r) return done(c, ts.s, tRecipes, { kind: "err", text: t.notFound });
+      const served = servedLang(r, lang);
+      return page(
+        c,
+        dashRecipeHtml(lang, config, {
+          ...(await teamInfo(ts.team)),
+          me: meOf(ts),
+          kind: "team",
+          list: [],
+          recipe: r,
+          html: recipeHtml(r, served),
+          served,
+          canWrite: r.scope === "team" && roleRank[ts.role] >= roleRank.editor,
+          csrf: sessions.csrfFor(ts.s),
+          flash: takeFlash(c, ts.s),
+          skeleton,
+        }),
+      );
+    });
+    const recipePost = (
+      path: string,
+      fn: (c: Context, ctx: TeamCtx & { form: FormData }) => Promise<Response>,
+    ) => {
+      app.post(`${prefix}${path}`, async (c) => {
+        const ts = needTeam(c, "editor");
+        if (ts instanceof Response) return ts;
+        const form = await guardPost(c, ts.s, lang, tRecipes);
+        if (form instanceof Response) return form;
+        try {
+          return await fn(c, { ...ts, form });
+        } catch (e) {
+          if (e instanceof RecipeError)
+            return done(c, ts.s, tRecipes, { kind: "err", text: e.message });
+          throw e;
+        }
+      });
+    };
+    recipePost("/team/recipes", async (c, { s, team, form, actor }) => {
+      await d.recipes.ready();
+      const r = await d.recipes.save1(team.id, field(form, "slug"), recipeInput(form), actor.label);
+      await d.audit({
+        teamId: team.id,
+        actor,
+        action: "recipe-save",
+        detail: `${r.slug} v${r.version}`,
+      });
+      return done(c, s, href(`/team/recipes/${r.slug}`), {
+        kind: "ok",
+        text: r14.saved(r.version),
+      });
+    });
+    recipePost("/team/recipes/:slug/delete", async (c, { s, team, actor }) => {
+      await d.recipes.ready();
+      const slug = c.req.param("slug") ?? "";
+      const ok = await d.recipes.remove(team.id, slug);
+      if (ok) await d.audit({ teamId: team.id, actor, action: "recipe-delete", detail: slug });
+      return done(
+        c,
+        s,
+        tRecipes,
+        ok ? { kind: "ok", text: r14.deleted } : { kind: "err", text: t.notFound },
+      );
+    });
+
     // ---- notification center + team webhook (0.14.0) ---------------------------------
     const alertsBack = href("/team/notifications");
     const rowsFor = (teamId: string | null, who: string | null) =>
@@ -1622,6 +1838,8 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       await members.purgeTeam(id);
       await d.agentKeys.purgeTeam(id);
       await d.notify.purgeTeam(id);
+      await d.userKeys.purgeTeam(id);
+      await d.recipes.purgeTeam(id);
       d.invalidateDirectory();
       return done(c, s, href("/admin"), { kind: "ok", text: t.admin.deleted });
     });
@@ -1668,6 +1886,84 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     adminPost("/admin/notifications/webhook/delete", async (c, { s }) => {
       await d.notify.clearHook(PLATFORM);
       return done(c, s, aAlerts, { kind: "ok", text: v14.hookRemoved });
+    });
+
+    // ---- admin: platform recipes (0.14.0) ------------------------------------------------
+    const aRecipes = href("/admin/recipes");
+    const aSkeleton = { en: recipeSkeleton("en"), ar: recipeSkeleton("ar") };
+    app.get(`${prefix}/admin/recipes`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      await d.recipes.ready();
+      return page(
+        c,
+        dashRecipesHtml(lang, config, {
+          kind: "admin",
+          list: d.recipes.visible(null).map((r) => summaryOf(r, lang)),
+          canWrite: true,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+          skeleton: aSkeleton,
+        }),
+      );
+    });
+    app.get(`${prefix}/admin/recipes/:slug`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      await d.recipes.ready();
+      const r = d.recipes.get(c.req.param("slug") ?? "", null);
+      if (!r) return done(c, s, aRecipes, { kind: "err", text: t.notFound });
+      const served = servedLang(r, lang);
+      return page(
+        c,
+        dashRecipeHtml(lang, config, {
+          kind: "admin",
+          list: [],
+          recipe: r,
+          html: recipeHtml(r, served),
+          served,
+          canWrite: r.scope === "platform",
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+          skeleton: aSkeleton,
+        }),
+      );
+    });
+    adminPost("/admin/recipes", async (c, { s, form }) => {
+      await d.recipes.ready();
+      try {
+        const r = await d.recipes.save1(
+          null,
+          field(form, "slug"),
+          {
+            title_en: field(form, "title_en"),
+            title_ar: field(form, "title_ar"),
+            summary_en: field(form, "summary_en"),
+            summary_ar: field(form, "summary_ar"),
+            body_en: field(form, "body_en"),
+            body_ar: field(form, "body_ar"),
+            tags: field(form, "tags"),
+          },
+          "admin",
+        );
+        return done(c, s, href(`/admin/recipes/${r.slug}`), {
+          kind: "ok",
+          text: R14[lang].saved(r.version),
+        });
+      } catch (e) {
+        if (e instanceof RecipeError) return done(c, s, aRecipes, { kind: "err", text: e.message });
+        throw e;
+      }
+    });
+    adminPost("/admin/recipes/:slug/delete", async (c, { s }) => {
+      await d.recipes.ready();
+      const ok = await d.recipes.remove(null, c.req.param("slug") ?? "");
+      return done(
+        c,
+        s,
+        aRecipes,
+        ok ? { kind: "ok", text: R14[lang].deleted } : { kind: "err", text: t.notFound },
+      );
     });
 
     // ---- admin: Workers (0.12.0) ------------------------------------------------------

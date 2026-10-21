@@ -10,6 +10,7 @@ import type { NotificationCenter } from "./notify.js";
 import { SiteStore } from "./store.js";
 import { sweepExpired } from "./sweep.js";
 import { TeamStore } from "./teams.js";
+import type { UserKeyStore } from "./user-keys.js";
 import { VisitCounter } from "./visits.js";
 
 let config: ReturnType<typeof loadConfig>;
@@ -27,7 +28,8 @@ await teams.init();
 
 const backend = config.cloudflare ? new CloudflareBackend(config.cloudflare) : null;
 const visits = new VisitCounter(config.dataDir, config.visits);
-let svc: { agentKeys: AgentKeyStore; notify: NotificationCenter } | null = null;
+let svc: { agentKeys: AgentKeyStore; notify: NotificationCenter; userKeys?: UserKeyStore } | null =
+  null;
 const app = createApp({
   config,
   store,
@@ -92,6 +94,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     server.close();
     const bye = setTimeout(() => process.exit(0), 3000);
     bye.unref();
-    visits.flush().finally(() => process.exit(0));
+    const uk = (svc as { userKeys?: UserKeyStore } | null)?.userKeys;
+    Promise.allSettled([visits.flush(), uk?.flush()]).finally(() => process.exit(0));
   });
 }

@@ -501,6 +501,9 @@ export class WorkerService {
       throw new WorkerError(400, "INVALID_REQUEST", `${what}: at most ${MAX_VARS} entries`);
     }
     for (const [k, v] of entries) {
+      if (k.startsWith("MARSA_KEYS_")) {
+        throw new WorkerError(400, "INVALID_REQUEST", `${what}: ${k} is reserved for Spaces`);
+      }
       if (!VAR_NAME_RE.test(k)) {
         throw new WorkerError(
           400,
@@ -688,7 +691,7 @@ export class WorkerService {
         deployedBy: actor.label,
       };
       delete done.lastError;
-      const action: VersionAction = opts.action ?? (existing ? "redeploy" : "deploy");
+      const action: VersionAction = opts.action ?? "deploy";
       try {
         const v = await this.versions.add(done.id, {
           at: done.deployedAt as string,
@@ -737,6 +740,21 @@ export class WorkerService {
     return this.versions.get(rec.id, n);
   }
 
+  /**
+   * Push Spaces-managed secrets (API keys: MARSA_KEYS_URL + MARSA_KEYS_SECRET) to a Worker.
+   * They are not listed among the team's own secrets and survive redeploys (keep_bindings).
+   */
+  async putSystemSecrets(rec: WorkerRec, values: Record<string, string>): Promise<void> {
+    this.token();
+    const a = this.access();
+    try {
+      for (const [k, v] of Object.entries(values))
+        await this.deps.api.putSecret(a, rec.script, k, v);
+    } catch (err) {
+      throw this.cfFail(err, "could not set the key secrets on the Worker");
+    }
+  }
+
   /** One-click redeploy: deploy the newest stored version again (secrets are kept). */
   async redeploy(team: Team, rec: WorkerRec, actor: Actor, note?: unknown): Promise<WorkerView> {
     const v = await this.versions.latest(rec.id);
@@ -776,6 +794,9 @@ export class WorkerService {
     return { worker, missingSecrets: v.secretNames.filter((k) => !have.has(k)) };
   }
 
+  /** Called after a Worker is deleted (API keys are dropped with it). */
+  onRemove: ((rec: WorkerRec) => Promise<void>) | null = null;
+
   /** Delete a tracked Worker: its route, its DNS record, then the script. */
   remove(rec: WorkerRec, actor: Actor): Promise<void> {
     return this.serial(async () => {
@@ -795,6 +816,7 @@ export class WorkerService {
       this.recs.delete(cur.id);
       await this.saveRecs();
       await this.versions.remove(cur.id).catch(() => {});
+      await this.onRemove?.(cur).catch(() => {});
       await this.deps.audit({
         teamId: cur.teamId,
         actor,

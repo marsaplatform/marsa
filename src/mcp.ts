@@ -11,10 +11,13 @@ import { type FileInput, fromFilesArray, type UploadEntry } from "./ingest.js";
 import type { AuditEntry } from "./members.js";
 import { isBlocked, mimeFor } from "./mime.js";
 import type { RateLimiter } from "./rate-limit.js";
+import { type RecipeStore, recipeMarkdown, servedLang, summaryOf } from "./recipes.js";
 import type { SiteMeta, SiteStore } from "./store.js";
 import { isAgentKey, type TeamAuth } from "./team-auth.js";
 import type { TeamStore } from "./teams.js";
 import { bearer, hashToken, safeEqual } from "./tokens.js";
+import type { UserKeyOps } from "./user-key-routes.js";
+import { UserKeyError } from "./user-keys.js";
 import { versionMeta } from "./worker-versions.js";
 import { WorkerError, type WorkerService, workerView } from "./workers.js";
 
@@ -89,6 +92,10 @@ export interface McpDeps {
   workers?: WorkerService;
   /** Team/agent key resolver (0.14.0): an agent key with the mcp scope works as the token. */
   teamAuth?: TeamAuth;
+  /** Agent recipes (0.14.0): list_recipes / get_recipe for every token. */
+  recipes?: RecipeStore;
+  /** Worker API keys for end users (0.14.0). */
+  userKeyOps?: UserKeyOps;
 }
 
 /** The agent-key scope a tool needs. */
@@ -97,8 +104,8 @@ function toolScope(t: { write?: boolean; needsBackend?: boolean; needsWorkers?: 
   if (t.needsBackend) return t.write ? "kv:write" : "kv:read";
   return t.write ? "spaces:write" : "spaces:read";
 }
-const allowedFor = (token: McpToken, t: Parameters<typeof toolScope>[0]) =>
-  !token.agentScopes || token.agentScopes.includes(toolScope(t));
+const allowedFor = (token: McpToken, t: Parameters<typeof toolScope>[0] & { noScope?: boolean }) =>
+  !!t.noScope || !token.agentScopes || token.agentScopes.includes(toolScope(t));
 
 type Json = Record<string, unknown>;
 interface Tool {
@@ -110,6 +117,10 @@ interface Tool {
   write?: boolean;
   needsBackend?: boolean;
   needsWorkers?: boolean;
+  /** Needs no agent-key scope (recipes). */
+  noScope?: boolean;
+  /** Only listed when this returns true. */
+  when?: () => boolean;
   run: (args: Json, ctx: CallCtx) => Promise<ToolResult>;
 }
 interface CallCtx {
@@ -568,6 +579,136 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
         }
       },
     },
+    {
+      name: "list_recipes",
+      title: "List agent recipes",
+      description:
+        "Step-by-step playbooks (built-in, platform and this team's own): slug, title, summary, version, tags, languages. Read one with get_recipe. Start with mcp-server-on-worker, agent-security-rules, site-kv-and-files, bilingual-project-page, protect-mcp-with-keys.",
+      inputSchema: obj({ lang: { type: "string", enum: ["en", "ar"], description: "Default en" } }),
+      annotations: { readOnlyHint: true },
+      noScope: true,
+      when: () => !!d.recipes,
+      run: async (a, { meta }) => {
+        const rs = d.recipes as RecipeStore;
+        await rs.ready();
+        const lang = a.lang === "ar" ? "ar" : "en";
+        return ok({
+          recipes: rs
+            .visible(meta.teamId && teams.get(meta.teamId) ? meta.teamId : null)
+            .map((r) => summaryOf(r, lang)),
+        });
+      },
+    },
+    {
+      name: "get_recipe",
+      title: "Read an agent recipe",
+      description:
+        "One recipe as markdown: goal, when to use, steps, starter template, checklist before deploy, common pitfalls.",
+      inputSchema: obj(
+        {
+          slug: { type: "string" },
+          lang: {
+            type: "string",
+            enum: ["en", "ar"],
+            description: "Default en (falls back to the other language)",
+          },
+        },
+        ["slug"],
+      ),
+      annotations: { readOnlyHint: true },
+      noScope: true,
+      when: () => !!d.recipes,
+      run: async (a, { meta }) => {
+        const rs = d.recipes as RecipeStore;
+        await rs.ready();
+        const r = rs.get(
+          str(a, "slug"),
+          meta.teamId && teams.get(meta.teamId) ? meta.teamId : null,
+        );
+        if (!r) return fail("no such recipe; call list_recipes");
+        const lang = a.lang === "ar" ? "ar" : "en";
+        const markdown = recipeMarkdown(r, lang);
+        return {
+          content: [{ type: "text", text: markdown }],
+          structuredContent: { ...summaryOf(r, lang), lang: servedLang(r, lang), markdown },
+        };
+      },
+    },
+    {
+      name: "list_user_keys",
+      title: "List a Worker's API keys",
+      description:
+        "End-user API keys of one of the team's Workers: settings (required on/off, default per-minute/per-day limits) and each key's label, prefix, state, limits, allowed tools, usage (today, 7 days, 429s) and last use. Secrets are never returned.",
+      inputSchema: obj({ worker: { type: "string", description: "Worker name" } }, ["worker"]),
+      annotations: { readOnlyHint: true },
+      needsWorkers: true,
+      when: () => !!d.userKeyOps,
+      run: async (a, { meta }) => {
+        const team = teams.get(meta.teamId);
+        const rec = team ? (d.workers as WorkerService).find(team.id, str(a, "worker")) : null;
+        if (!rec) return fail("no such Worker");
+        const v = await (d.userKeyOps as UserKeyOps).view(rec);
+        return ok(v);
+      },
+    },
+    {
+      name: "create_user_key",
+      title: "Create a Worker API key",
+      description:
+        "Create an end-user API key for one of the team's Workers. Returns the key ONCE (msk_…): hand it to the user privately, never print it in logs. Optional: email, expiresInDays (omit = never), perMinute/perDay (omit = Worker default), tools (allowed tool names). Turn enforcement on with required:true on the Worker (dashboard or API).",
+      inputSchema: obj(
+        {
+          worker: { type: "string" },
+          label: { type: "string" },
+          email: { type: "string" },
+          expiresInDays: { type: "integer" },
+          perMinute: { type: "integer" },
+          perDay: { type: "integer" },
+          tools: { type: "array", items: { type: "string" } },
+        },
+        ["worker", "label"],
+      ),
+      write: true,
+      needsWorkers: true,
+      when: () => !!d.userKeyOps,
+      run: async (a, { meta, token }) => {
+        const team = teams.get(meta.teamId);
+        const rec = team ? (d.workers as WorkerService).find(team.id, str(a, "worker")) : null;
+        if (!team || !rec) return fail("no such Worker");
+        try {
+          const { worker: _w, ...input } = a;
+          const r = await (d.userKeyOps as UserKeyOps).create(team, rec, input, {
+            kind: "mcp",
+            label: token.name,
+          });
+          return ok({ ...r, note: "Shown once. Send it as Authorization: Bearer <key>." });
+        } catch (err) {
+          if (err instanceof UserKeyError) return fail(`${err.code}: ${err.message}`);
+          throw err;
+        }
+      },
+    },
+    {
+      name: "revoke_user_key",
+      title: "Revoke a Worker API key",
+      description:
+        "Revoke an end-user API key by its id (uk_…). Calls with it stop at the Worker's next check.",
+      inputSchema: obj({ worker: { type: "string" }, id: { type: "string" } }, ["worker", "id"]),
+      annotations: { destructiveHint: true },
+      write: true,
+      needsWorkers: true,
+      when: () => !!d.userKeyOps,
+      run: async (a, { meta, token }) => {
+        const team = teams.get(meta.teamId);
+        const rec = team ? (d.workers as WorkerService).find(team.id, str(a, "worker")) : null;
+        if (!team || !rec) return fail("no such Worker");
+        const k = await (d.userKeyOps as UserKeyOps).revoke(team, rec, str(a, "id"), {
+          kind: "mcp",
+          label: token.name,
+        });
+        return k ? ok({ key: k }) : fail("no such key");
+      },
+    },
   ];
 
   function workersOn(meta: SiteMeta) {
@@ -590,6 +731,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
       (t) =>
         (!t.write || token.scope === "rw") &&
         allowedFor(token, t) &&
+        (!t.when || t.when()) &&
         (!t.needsBackend || backendOn(meta)) &&
         (!t.needsWorkers || workersOn(meta)),
     );
@@ -727,7 +869,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
           );
         case "tools/call": {
           const name = String(params.name ?? "");
-          const tool = tools.find((t) => t.name === name);
+          const tool = tools.find((t) => t.name === name && (!t.when || t.when()));
           if (!tool) return c.json(rpcErr(id, -32602, `unknown tool: ${name}`));
           if (tool.write && token.scope !== "rw") {
             return c.json(rpc(id, fail("this token is read-only")));

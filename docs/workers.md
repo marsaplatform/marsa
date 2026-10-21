@@ -81,6 +81,17 @@ Every successful deploy is stored as a version on the Spaces server: the code, t
 
 When Workers are on for the team, a space's MCP server (see [MCP per space](mcp.md)) also offers `list_workers`, `list_worker_versions` and `get_worker_version` (read-only tokens) and `deploy_worker`, `redeploy_worker`, `rollback_worker` and `delete_worker` (read-write tokens), with the same rules as the API.
 
+## API keys for your Worker's users (0.14.0)
+
+Protect a public MCP server (or any Worker) with per-user keys managed in Spaces. Full walkthrough: the recipe [Protect your MCP with Spaces keys](https://marsa.example.com/docs/recipes/protect-mcp-with-keys).
+
+- Turn on **Require API keys** (Team → Workers → *API keys*, or `PUT /api/teams/<team>/workers/<name>/keys/settings` with `{"required": true, "perMinute": 60, "perDay": 5000}`). Spaces sets two Worker secrets: `MARSA_KEYS_URL` and `MARSA_KEYS_SECRET` (a per-Worker verifier; never shown). They are not listed with your own secrets, and names starting with `MARSA_KEYS_` are reserved.
+- Create keys: `POST …/keys` with `{"label","email"?,"expiresInDays"?,"perMinute"?,"perDay"?,"tools"?}`. The key (`msk_…`) is returned once; Spaces keeps a SHA-256 hash and a prefix. `DELETE …/keys/<id>` revokes. `GET …/keys` lists settings, keys and usage (today, 7 days, 429s, last use).
+- In the Worker, paste the helper from `/api/keys/helper.js` and call `await requireKey(request, env, { tool })` before any work. It reads `Authorization: Bearer <key>` or `X-Api-Key`, calls `POST /api/keys/verify`, and returns `{ ok, response }` (401 missing/invalid/revoked/expired, 403 tool not allowed, 429 over a limit with `Retry-After`).
+- Counting happens in the Spaces server (memory, saved about every 15 s). The helper may cache an allow for up to 30 s (never beyond the remaining minute quota) and reports the cached uses on its next check, so a key can go over its per-minute limit by at most one cache window. If Spaces is unreachable the helper fails closed (503) unless you pass `failOpen: true`.
+- Owners get a notification when a key is created or revoked and when a Worker's 429s pass 10, 100 and 1000 in a day. Deleting the Worker deletes its keys.
+- Scopes: reading needs `workers:read`; settings, create and revoke need `workers:deploy`. MCP tools: `list_user_keys`, `create_user_key`, `revoke_user_key`.
+
 ## Admin API
 
 All with `Authorization: Bearer $ADMIN_TOKEN`:

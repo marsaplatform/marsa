@@ -67,6 +67,24 @@ export function inviteOnboarding(config: Config, team: Team, inv: AgentInvite, t
       api: `${base}/docs/api`,
       mcp: `${base}/docs/mcp`,
       llms: `${base}/llms.txt`,
+      recipes: `${base}/docs/recipes`,
+    },
+    recipes: {
+      note: "Step-by-step playbooks. Read the security rules first. As markdown: GET <api>/recipes/<slug>?format=md (add ?lang=ar for Arabic); your team's own recipes are listed too when you send your key.",
+      list: `${base}/api/recipes`,
+      start: [
+        { slug: "agent-security-rules", url: `${base}/api/recipes/agent-security-rules?format=md` },
+        { slug: "mcp-server-on-worker", url: `${base}/api/recipes/mcp-server-on-worker?format=md` },
+        {
+          slug: "protect-mcp-with-keys",
+          url: `${base}/api/recipes/protect-mcp-with-keys?format=md`,
+        },
+        { slug: "site-kv-and-files", url: `${base}/api/recipes/site-kv-and-files?format=md` },
+        {
+          slug: "bilingual-project-page",
+          url: `${base}/api/recipes/bilingual-project-page?format=md`,
+        },
+      ],
     },
     examples: {
       claim: `curl -s -X POST "${claim}"`,
@@ -129,6 +147,13 @@ ${o.mcp.note}
 \`\`\`json
 ${JSON.stringify(o.mcp.config, null, 2)}
 \`\`\`
+
+## 4. Recipes (read before you build)
+
+${o.recipes.note}
+
+${o.recipes.start.map((r) => `- \`${r.slug}\`: ${r.url}`).join("\n")}
+- All recipes: ${o.recipes.list} · ${o.docs.recipes}
 
 ## Docs
 

@@ -95,7 +95,7 @@ describe("0.14.0 worker versions", () => {
     expect(list.current).toBe(2);
     expect(list.versions.map((v: { n: number }) => v.n)).toEqual([2, 1]);
     expect(list.versions[0]).toMatchObject({
-      action: "redeploy",
+      action: "deploy",
       note: "second",
       varNames: ["WHO"],
       secretNames: ["TOKEN"],

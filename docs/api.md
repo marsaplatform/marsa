@@ -133,3 +133,10 @@ see [Teams](teams.md).
 | `BACKEND_NOT_CONFIGURED` | 503 | Allowed, but the instance has no data/files backend configured |
 | `BACKEND_UNAVAILABLE` | 503 | The data/files store failed (e.g. its credentials were rejected); retry later (`Retry-After`) or tell the admin |
 | `RATE_LIMITED` | 429 | Slow down; see the `Retry-After` header |
+
+## Recipes and Worker API keys (0.14.0)
+
+- `GET /api/recipes?lang=en|ar`: built-in and platform recipes (plus your team's with a team/agent key). `GET /api/recipes/<slug>?lang=ar&format=md`: one recipe as markdown (JSON without `format=md`).
+- `PUT|DELETE /api/teams/<team>/recipes/<slug>`: team recipes (team key, or an agent key with `spaces:write`). Body: `{"title_en","title_ar","summary_en","summary_ar","body_en","body_ar","tags"}`.
+- `GET|POST /api/teams/<team>/workers/<name>/keys`, `PUT …/keys/settings`, `DELETE …/keys/<id>`: end-user API keys for a Worker (see [Workers](workers.md)).
+- `POST /api/keys/verify` (Bearer = the Worker's `MARSA_KEYS_SECRET`) and `GET /api/keys/helper.js`: used by the Worker.

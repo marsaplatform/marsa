@@ -43,6 +43,8 @@ import { type NavAccount, withNavAccount } from "./nav-state.js";
 import { NotificationCenter, type NotifyDeps } from "./notify.js";
 import { openapi } from "./openapi.js";
 import { RateLimiter } from "./rate-limit.js";
+import { mountAdminRecipeRoutes, mountRecipeRoutes } from "./recipe-routes.js";
+import { loadBuiltinRecipes, RecipeStore, recipeHtml, servedLang, summaryOf } from "./recipes.js";
 import { SDK_JS } from "./sdk.js";
 import { SecretBox } from "./secrets.js";
 import { APP_CSP, baseHeaders, SITE_CSP } from "./security.js";
@@ -77,7 +79,11 @@ import {
   notFoundHtml,
   placeholderSvg,
   privacyHtml,
+  recipePageHtml,
+  recipesIndexHtml,
 } from "./ui.js";
+import { mountUserKeyRoutes, userKeyOps } from "./user-key-routes.js";
+import { UserKeyStore } from "./user-keys.js";
 import { VisitCounter } from "./visits.js";
 import { mountWebRoutes } from "./web.js";
 import { PLATFORM_AUDIT, WorkerService } from "./workers.js";
@@ -131,7 +137,16 @@ export interface AppDeps {
   /** Overrides for the webhook sender (tests: fetch, retry delays). */
   notifyOpts?: Partial<NotifyDeps>;
   /** Receives the services the caller may need (index.ts runs the alert ticker). */
-  expose?: (s: { agentKeys: AgentKeyStore; notify: NotificationCenter }) => void;
+  expose?: (s: {
+    agentKeys: AgentKeyStore;
+    notify: NotificationCenter;
+    userKeys: UserKeyStore;
+    recipes: RecipeStore;
+  }) => void;
+  /** Agent recipes (0.14.0). Built from docs/recipes + <dataDir> when omitted. */
+  recipes?: RecipeStore;
+  /** End-user API keys for team Workers (0.14.0). */
+  userKeys?: UserKeyStore;
   now?: () => number;
 }
 
@@ -156,6 +171,8 @@ export function createApp({
   notify,
   notifyOpts = {},
   expose,
+  recipes = new RecipeStore(config.dataDir, loadBuiltinRecipes(config.publicUrl), now),
+  userKeys = new UserKeyStore(config.dataDir, now),
 }: AppDeps) {
   const notices =
     notify ??
@@ -171,7 +188,9 @@ export function createApp({
       ...notifyOpts,
     });
   members.onLog = (e) => notices.fromAudit(e);
-  expose?.({ agentKeys, notify: notices });
+  expose?.({ agentKeys, notify: notices, userKeys, recipes });
+  void userKeys.ready().catch((e) => console.error("[user-keys] load failed", e?.message));
+  void recipes.ready().catch((e) => console.error("[recipes] load failed", e?.message));
   void agentKeys.ready().catch((e) => console.error("[agent-keys] load failed", e?.message));
   void notices.ready().catch((e) => console.error("[notify] load failed", e?.message));
   const teamAuth = makeTeamAuth({
@@ -195,6 +214,15 @@ export function createApp({
         if (e.teamId === PLATFORM_AUDIT || teams.get(e.teamId)) await members.log(e);
       },
     });
+  workerSvc.onRemove = (rec) => userKeys.purgeWorker(rec.id);
+  const ukOps = userKeyOps({
+    config,
+    teams,
+    members,
+    workers: workerSvc,
+    userKeys,
+    notify: notices,
+  });
   /** Record an action on a team's site (or the team) in its audit log. */
   const audit = async (e: Omit<AuditEntry, "at" | "teamId"> & { teamId?: string }) => {
     if (e.teamId && teams.get(e.teamId)) await members.log({ ...e, teamId: e.teamId });
@@ -753,12 +781,21 @@ export function createApp({
     audit,
     workers: workerSvc,
     teamAuth,
+    recipes,
+    userKeyOps: ukOps,
   });
 
   // ---- optional per-site data/files backend --------------------------------
   mountBackendRoutes(app, { config, store, backend, teams, now, uploadRate, teamAuth });
   const agentDeps = { config, teams, members, agentKeys, notify: notices, limiter, teamAuth };
   mountAgentInviteRoutes(app, agentDeps);
+  const recipeDeps = { publicUrl: config.publicUrl, recipes, members, teamAuth };
+  mountRecipeRoutes(app, recipeDeps);
+  mountUserKeyRoutes(
+    app,
+    { config, teams, members, workers: workerSvc, userKeys, notify: notices, limiter, teamAuth },
+    ukOps,
+  );
 
   // ---- optional self-host admin (enabled only when ADMIN_TOKEN is set) -----
   app.use("/api/admin/*", async (c, next) => {
@@ -779,6 +816,7 @@ export function createApp({
     teamAuth,
   });
   mountAgentRoutes(app, agentDeps);
+  mountAdminRecipeRoutes(app, recipeDeps);
   app.get("/api/admin/backend/check", async (c) =>
     c.json(backend ? { enabled: true, ...(await probeBackend(backend)) } : { enabled: false }),
   );
@@ -992,6 +1030,8 @@ export function createApp({
     await members.purgeTeam(id);
     await agentKeys.purgeTeam(id);
     await notices.purgeTeam(id);
+    await userKeys.purgeTeam(id);
+    await recipes.purgeTeam(id);
     invalidateDirectory();
     return c.json({ deleted: id, removedSites, removedWorkers });
   });
@@ -1073,9 +1113,43 @@ export function createApp({
     workers: workerSvc,
     agentKeys,
     notify: notices,
+    recipes,
+    userKeys,
+    userKeyOps: ukOps,
   });
   app.get("/privacy", (c) => appPage(c, privacyHtml("en", config)));
   app.get("/ar/privacy", (c) => appPage(c, privacyHtml("ar", config)));
+  for (const prefix of ["", "/ar"] as const) {
+    const lang: Lang = prefix ? "ar" : "en";
+    app.get(`${prefix}/docs/recipes`, async (c) => {
+      await recipes.ready();
+      return appPage(
+        c,
+        recipesIndexHtml(
+          lang,
+          config,
+          recipes.visible(null).map((r) => summaryOf(r, lang)),
+        ),
+      );
+    });
+    app.get(`${prefix}/docs/recipes/:slug`, async (c) => {
+      await recipes.ready();
+      const r = recipes.get(c.req.param("slug"), null);
+      if (!r) return appPage(c, notFoundHtml(lang, config), 404);
+      const served = servedLang(r, lang);
+      return appPage(
+        c,
+        recipePageHtml(
+          lang,
+          config,
+          r,
+          recipeHtml(r, served),
+          served,
+          recipes.visible(null).map((x) => summaryOf(x, lang)),
+        ),
+      );
+    });
+  }
   app.get("/docs", (c) => appPage(c, docsIndexHtml("en", config, docs)));
   app.get("/ar/docs", (c) => appPage(c, docsIndexHtml("ar", config, docs)));
   for (const prefix of ["", "/ar"] as const) {

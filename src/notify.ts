@@ -35,7 +35,10 @@ export type NoticeKind =
   | "member-remove"
   | "backend-failing"
   | "backend-ok"
-  | "webhook-test";
+  | "webhook-test"
+  | "user-key-create"
+  | "user-key-revoke"
+  | "user-key-spike";
 
 /** Audit actions that also raise a notification. */
 const FROM_AUDIT = new Set<string>([
@@ -51,6 +54,8 @@ const FROM_AUDIT = new Set<string>([
   "cf-token-clear",
   "member-join",
   "member-remove",
+  "user-key-create",
+  "user-key-revoke",
 ]);
 
 export interface Notice {
@@ -95,6 +100,9 @@ const T: Record<Lang, Record<NoticeKind, (n: Notice) => string>> = {
     "backend-failing": (n) => `Storage check failing: ${n.detail}`,
     "backend-ok": () => "Storage check passing again (KV and files)",
     "webhook-test": (n) => `Test notification from ${n.actor}`,
+    "user-key-create": (n) => `${n.actor} created a Worker API key: ${n.detail}`,
+    "user-key-revoke": (n) => `${n.actor} revoked a Worker API key: ${n.detail}`,
+    "user-key-spike": (n) => `Rate-limit spike on a Worker: ${n.detail}`,
   },
   ar: {
     "worker-deploy": (n) => `${n.actor} نشر Worker جديدًا: ${n.detail}`,
@@ -114,6 +122,9 @@ const T: Record<Lang, Record<NoticeKind, (n: Notice) => string>> = {
     "backend-failing": (n) => `فحص التخزين يفشل: ${n.detail}`,
     "backend-ok": () => "فحص التخزين ينجح من جديد (KV والملفات)",
     "webhook-test": (n) => `إشعار تجريبي من ${n.actor}`,
+    "user-key-create": (n) => `${n.actor} أنشأ مفتاح API لوركر: ${n.detail}`,
+    "user-key-revoke": (n) => `${n.actor} ألغى مفتاح API لوركر: ${n.detail}`,
+    "user-key-spike": (n) => `ارتفاع في الطلبات المرفوضة بسبب الحد على وركر: ${n.detail}`,
   },
 };
 
@@ -131,7 +142,9 @@ export const noticeTone = (k: NoticeKind): "warn" | "info" | "ok" =>
   k === "worker-rollback" ||
   k === "cf-token-set" ||
   k === "cf-token-clear" ||
-  k === "team-key-rotate"
+  k === "team-key-rotate" ||
+  k === "user-key-revoke" ||
+  k === "user-key-spike"
     ? "warn"
     : k === "backend-ok"
       ? "ok"

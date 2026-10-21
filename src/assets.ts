@@ -737,6 +737,17 @@ code.scope{font-size:12px;padding:1px 6px;border-radius:6px;background:var(--sur
 .policy .policy-section h2{display:flex;align-items:center;gap:8px;font-size:1.25rem}
 .policy .policy-section ul{padding-inline-start:20px;display:grid;gap:8px}
 mark.placeholder{background:#fff2b8;color:#4a3700;padding:0 4px;border-radius:4px}
+.recipe-card .recipe-meta{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+.recipe-tags{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0 0}
+.recipe-tags code{font-size:.78em}
+.recipe-api{margin-top:16px;overflow-wrap:anywhere}
+.recipe-form .two-col{gap:20px}
+.recipe-form textarea,.code-area{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;line-height:1.55;min-height:220px}
+.prose.recipe .lead{font-size:1.08em;color:var(--muted,inherit)}
+.prose.recipe pre{direction:ltr;text-align:left;overflow-x:auto}
+.uk-usage{white-space:nowrap}
+.inline-field{display:inline-flex;align-items:center;gap:8px;margin-inline-end:16px}
+.uk-settings .check{margin:8px 0}
 `;
 
 export const APP_JS = `
