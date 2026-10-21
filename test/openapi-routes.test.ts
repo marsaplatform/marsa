@@ -9,7 +9,7 @@ afterEach(async () => {
 });
 
 /** Every registered /api route, as "METHOD /path/{param}". */
-export function apiRoutes(app: App["app"]): string[] {
+function apiRoutes(app: App["app"]): string[] {
   const out = new Set<string>();
   for (const r of (app as unknown as { routes: { method: string; path: string }[] }).routes) {
     if (!r.path.startsWith("/api/") || r.method === "ALL" || r.path.includes("*")) continue;

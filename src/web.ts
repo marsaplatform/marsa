@@ -16,6 +16,7 @@ import { APP_VERSION } from "./brand.js";
 import type { PermReport } from "./cf-permissions.js";
 import { clientIp } from "./client-ip.js";
 import type { Config } from "./config.js";
+import { type DocPage, docsFor } from "./docs.js";
 import { UploadError } from "./errors.js";
 import { actorText, type Lang, STRINGS } from "./i18n.js";
 import type { UploadEntry } from "./ingest.js";
@@ -47,6 +48,7 @@ import {
   summaryOf,
 } from "./recipes.js";
 import { type RepoChecker, RepoError, type RepoLink, readRepo } from "./repo-status.js";
+import { SEARCH_MAX_QUERY, type SearchItem, searchItems } from "./search.js";
 import { fingerprint, type Session, type Sessions, sameOrigin } from "./session.js";
 import type { SiteMeta, SiteStore } from "./store.js";
 import { type TeamLifecycle, TeamLifecycleError } from "./team-lifecycle.js";
@@ -54,6 +56,7 @@ import { cleanTeamName, type Team, type TeamPatch, type TeamStore } from "./team
 import { hashToken, newEditToken, safeEqual } from "./tokens.js";
 import {
   ADMIN_CTX,
+  ADMIN_NAV,
   type AdminSiteRow,
   type AdminStats,
   type AuditView,
@@ -64,6 +67,8 @@ import {
   adminTeamsHtml,
   adminWorkersHtml,
   bellHtml,
+  type ChecklistStep,
+  DS,
   dashRecipeHtml,
   dashRecipesHtml,
   type Flash,
@@ -74,6 +79,7 @@ import {
   membersHtml,
   messageHtml,
   R14,
+  TEAM_NAV,
   type TeamSiteRow,
   teamActivityHtml,
   teamAgentsHtml,
@@ -195,6 +201,8 @@ export interface WebDeps {
   ops?: WorkerOps;
   /** 0.16.0: team export, trash and restore. */
   lifecycle?: TeamLifecycle;
+  /** 0.16.0: rendered guide pages, for the dashboard search. */
+  docs?: DocPage[];
   /** 0.16.0: daily encrypted backups. */
   backups?: BackupService | null;
 }
@@ -550,6 +558,59 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     const t = STRINGS[lang];
     const href = (p: string) => localePath(lang, p);
 
+    // ---- 0.16.0 global search helpers ------------------------------------------------
+    const navItems = (kind: "team" | "admin"): SearchItem[] =>
+      (kind === "team" ? TEAM_NAV : ADMIN_NAV).map(([k, p]) => ({
+        kind: "page",
+        title: DS[lang].nav[k] ?? k,
+        url: href(p),
+        text: k,
+      }));
+    const workerItems = async (
+      items: SearchItem[],
+      recs: WorkerRec[],
+      urlOf: (r: WorkerRec) => string,
+      teamName?: (r: WorkerRec) => string,
+    ) => {
+      for (const r of recs) {
+        const ins = await insightRow(r, [], false).catch(() => null);
+        const mcp = ins?.kind === "mcp";
+        items.push({
+          kind: mcp ? "mcp" : "worker",
+          title: r.name,
+          sub: [teamName?.(r), r.host ?? r.url].filter(Boolean).join(" · "),
+          url: urlOf(r),
+          text: `${r.script} ${mcp ? "mcp" : ""}`,
+        });
+      }
+    };
+    const noteItems = (items: SearchItem[], teamId: string | undefined, url: string) => {
+      for (const n of d.notes?.list(teamId ? { teamId } : {}, 300) ?? []) {
+        const title = n.message.length > 80 ? `${n.message.slice(0, 80)}…` : n.message;
+        items.push({
+          kind: "note",
+          title,
+          sub: [n.category, n.agent].filter(Boolean).join(" · "),
+          url: `${url}?q=${encodeURIComponent(n.message.slice(0, 40))}`,
+          text: n.message,
+        });
+      }
+    };
+    const searchJson = (c: Context, items: SearchItem[]) => {
+      const q = (c.req.query("q") ?? "").slice(0, SEARCH_MAX_QUERY);
+      for (const doc of docsFor(lang, d.docs ?? [])) {
+        items.push({
+          kind: "doc",
+          title: doc.title,
+          sub: doc.summary,
+          url: doc.lang === "ar" ? `/ar/docs/${doc.slug}` : `/docs/${doc.slug}`,
+          text: doc.slug,
+        });
+      }
+      c.header("Cache-Control", "no-store");
+      return c.json({ q, results: searchItems(lang, items, q) });
+    };
+
     // ---- team sign-in -------------------------------------------------------------
     app.get(`${prefix}/login`, (c) => {
       if (teamSession(c)) return c.redirect(href("/team"), 303);
@@ -745,6 +806,54 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       };
     };
 
+    /** 0.16.0: the getting-started checklist on the team overview. */
+    const checklistSteps = (team: Team, liveSites: number): ChecklistStep[] => {
+      const keys = d.agentKeys.list(team.id);
+      const steps: ChecklistStep[] = [
+        { key: "space", done: liveSites > 0, href: "/team#publish" },
+        {
+          key: "member",
+          done: members.count(team.id) > 0 || members.listInvites(team.id).length > 0,
+          href: "/team/members#invite",
+        },
+        { key: "agent", done: keys.length > 0, href: "/team/agents" },
+      ];
+      if (d.workers.enabledFor(team))
+        steps.push({
+          key: "worker",
+          done: d.workers.list(team.id).length > 0,
+          href: "/team/workers#deploy",
+        });
+      return steps;
+    };
+    app.post(`${prefix}/team/checklist/hide`, async (c) => {
+      const ts = needTeam(c, "owner");
+      if (ts instanceof Response) return ts;
+      const form = await guardPost(c, ts.s, lang, href("/team"));
+      if (form instanceof Response) return form;
+      await teams.update(ts.team.id, { checklistHidden: true }, d.now());
+      return c.redirect(href("/team"), 303);
+    });
+
+    // 0.16.0: global search (⌘K) over what this team can see.
+    app.get(`${prefix}/team/search`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { team } = ts;
+      const items: SearchItem[] = navItems("team");
+      for (const m of await store.list()) {
+        if (m.teamId !== team.id || !live(m)) continue;
+        items.push({
+          kind: "space",
+          title: m.title || m.id,
+          sub: m.id,
+          url: href(`/team/sites/${m.id}`),
+        });
+      }
+      await workerItems(items, d.workers.list(team.id), (r) => href(`/team/workers/${r.name}`));
+      noteItems(items, team.id, href("/team/notes"));
+      return searchJson(c, items);
+    });
     app.get(`${prefix}/team`, async (c) => {
       const ts = needTeam(c);
       if (ts instanceof Response) return ts;
@@ -765,6 +874,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             members: members.count(team.id),
             invites: members.listInvites(team.id).length,
             workers: workersSummary(team),
+            checklist: team.checklistHidden ? [] : checklistSteps(team, sites.length),
           },
         }),
       );
@@ -2972,6 +3082,37 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         throw e;
       }
       return done(c, s, back, { kind: "ok", text: NX[lang].saved });
+    });
+    app.get(`${prefix}/admin/search`, async (c) => {
+      const s = adminSession(c);
+      if (!s) return c.json({ error: { code: "UNAUTHORIZED", message: t.login.expired } }, 401);
+      const items: SearchItem[] = navItems("admin");
+      const all = teams.list();
+      const names = new Map(all.map((x) => [x.id, x.name]));
+      for (const x of all)
+        items.push({
+          kind: "team",
+          title: x.name,
+          sub: x.slug ? `${x.id} · ${x.slug}` : x.id,
+          url: href(`/admin/teams/${x.id}`),
+        });
+      for (const m of await store.list()) {
+        if (!live(m)) continue;
+        items.push({
+          kind: "space",
+          title: m.title || m.id,
+          sub: [m.teamId ? names.get(m.teamId) : "", m.id].filter(Boolean).join(" · "),
+          url: href(`/admin/sites/${m.id}`),
+        });
+      }
+      await workerItems(
+        items,
+        d.workers.list(),
+        (r) => href(`/admin/teams/${r.teamId}/workers/${r.name}`),
+        (r) => names.get(r.teamId) ?? "",
+      );
+      noteItems(items, undefined, href("/admin/notes"));
+      return searchJson(c, items);
     });
     app.get(`${prefix}/admin/mcp`, async (c) => {
       const s = needAdmin(c);

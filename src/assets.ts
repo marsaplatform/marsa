@@ -739,6 +739,46 @@ pre.tree{max-height:26rem;overflow:auto;font-size:.82rem;line-height:1.5;padding
 .wk-cell{flex-direction:column;align-items:flex-start;flex-wrap:nowrap;gap:6px;white-space:nowrap}
 .wk-count{min-width:28px;text-align:center}
 .badge.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+.search-open{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 10px 0 12px;border:1px solid var(--line);border-radius:999px;background:var(--paper);color:var(--muted);font:inherit;font-size:14px;cursor:pointer}
+.search-open:hover,.search-open:focus-visible{border-color:var(--accent);color:var(--ink)}
+.search-open .icon{width:18px;height:18px}
+.search-open kbd,.search-box kbd{font:12px/1 ui-monospace,monospace;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--muted)}
+@media (max-width:700px){.search-open-text,.search-open kbd{display:none}.search-open{width:38px;padding:0;justify-content:center}}
+.search-dialog{border:1px solid var(--line);border-radius:14px;padding:0;width:min(640px,calc(100vw - 24px));max-height:min(70vh,560px);margin-top:10vh;background:var(--paper);color:var(--ink);box-shadow:0 30px 60px #0003;overflow:hidden}
+.search-dialog[open]{display:flex;flex-direction:column}
+.search-dialog::backdrop{background:#0b1a1566}
+.search-box{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.search-box .icon{width:20px;height:20px;color:var(--muted);flex:none}
+.search-box input{flex:1;border:0;background:transparent;color:var(--ink);font:inherit;font-size:17px;padding:6px 0;min-width:0}
+.search-box input:focus{outline:none}
+.search-box:focus-within{box-shadow:inset 0 -2px 0 var(--accent)}
+.search-results{list-style:none;margin:0;padding:6px;overflow:auto;flex:1}
+.search-results:empty{display:none}
+.search-results li a{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;align-items:center;padding:9px 10px;border-radius:9px;color:var(--ink);text-decoration:none}
+.search-results li[aria-selected=true] a{background:var(--surface);outline:2px solid var(--accent);outline-offset:-2px}
+.search-results li a:not(.has-sub){padding-block:11px}
+.search-results li a:not(.has-sub) .search-kind{margin-top:0;align-self:center}
+.search-results li a.has-sub .search-kind{grid-row:span 2}
+.search-kind{font-size:11px;font-weight:700;padding:3px 7px;border-radius:999px;background:var(--line);color:var(--ink);white-space:nowrap;align-self:start;margin-top:2px}
+.search-kind.k-mcp{background:#356aa8;color:#fff}.search-kind.k-worker{background:#145a49;color:#fff}.search-kind.k-space{background:#7a4e12;color:#fff}.search-kind.k-team{background:#5b3c88;color:#fff}
+.search-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.search-sub{grid-column:2;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.search-status:empty{display:none}
+.search-status,.search-hint{margin:0;padding:10px 16px;font-size:13px}
+.search-hint{border-top:1px solid var(--line)}
+@media (max-width:600px){.search-hint{display:none}.search-dialog{margin-top:12px}}
+.checklist{margin:0 0 20px;padding:20px}
+.checklist-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.checklist-head h2{margin:0}
+.checklist-bar{width:100%;height:8px;margin:12px 0 4px;accent-color:var(--accent)}
+.check-steps{list-style:none;margin:8px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.check-step{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
+.check-step a{font-weight:600}
+.check-step .meta{display:block;font-size:13px;margin-top:2px}
+.check-mark{flex:none;width:22px;height:22px;border-radius:999px;border:2px solid var(--line);display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+.check-step.is-done{opacity:.75}
+.check-step.is-done .check-mark{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.check-step.is-done a{text-decoration:line-through}
 .bell{position:relative;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:999px;color:var(--ink);border:1px solid var(--line);background:var(--paper)}
 .bell:hover{border-color:var(--accent)}
 .bell .icon{width:20px;height:20px}
@@ -1244,6 +1284,7 @@ for (const table of document.querySelectorAll("table[data-dt]")) {
   // 0.16.0: ?health=down (or any filter key) preselects a filter, e.g. from the "Down now" card.
   const qs = new URLSearchParams(location.search);
   for (const s of sels) { const v = qs.get(s.dataset.dtF); if (v && [...s.options].some((o) => o.value === v)) s.value = v; }
+  if (q && qs.get("q")) q.value = qs.get("q").slice(0, 100);
   if (q) q.addEventListener("input", () => { page = 0; apply(); });
   for (const s of sels) s.addEventListener("change", () => { page = 0; apply(); });
   if (pager) {
@@ -1279,6 +1320,88 @@ for (const d of kebabs) {
 }
 document.addEventListener("click", (e) => { for (const d of kebabs) if (d.open && !d.contains(e.target)) d.open = false; });
 addEventListener("scroll", () => { for (const d of kebabs) if (d.open) d.open = false; }, { passive: true });
+// 0.16.0: global search (⌘K / Ctrl+K / "/") in the dashboards.
+const sDlg = $("search-dialog");
+if (sDlg && typeof sDlg.showModal === "function") {
+  const sQ = $("search-q");
+  const sList = $("search-results");
+  const sStatus = sDlg.querySelector(".search-status");
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+  for (const k of document.querySelectorAll("[data-search-kbd]")) k.textContent = mac ? "⌘K" : "Ctrl K";
+  let active = -1, timer = 0, seq = 0, opener = null;
+  const opts = () => [...sList.querySelectorAll("[role=option]")];
+  const setActive = (i) => {
+    const o = opts();
+    if (!o.length) { active = -1; sQ.removeAttribute("aria-activedescendant"); return; }
+    active = (i + o.length) % o.length;
+    o.forEach((el, j) => el.setAttribute("aria-selected", String(j === active)));
+    sQ.setAttribute("aria-activedescendant", o[active].id);
+    o[active].scrollIntoView({ block: "nearest" });
+  };
+  const render = (results) => {
+    sList.textContent = "";
+    results.forEach((r, i) => {
+      const li = document.createElement("li");
+      li.id = "sr-" + i;
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", "false");
+      const a = document.createElement("a");
+      a.href = r.url;
+      a.tabIndex = -1;
+      const tag = document.createElement("span");
+      tag.className = "search-kind k-" + r.kind;
+      tag.textContent = r.label;
+      const title = document.createElement("span");
+      title.className = "search-title";
+      const bdi = document.createElement("bdi");
+      bdi.textContent = r.title;
+      title.append(bdi);
+      a.append(tag, title);
+      if (r.sub) { a.classList.add("has-sub"); const sub = document.createElement("span"); sub.className = "search-sub meta"; const sb = document.createElement("bdi"); sb.textContent = r.sub; sub.append(sb); a.append(sub); }
+      li.append(a);
+      li.addEventListener("mousemove", () => { if (active !== i) setActive(i); });
+      sList.append(li);
+    });
+    sQ.setAttribute("aria-expanded", String(results.length > 0));
+    sStatus.textContent = sQ.value.trim() && !results.length ? sDlg.dataset.none : "";
+    active = -1;
+    if (results.length) setActive(0);
+  };
+  const run = () => {
+    const q = sQ.value.trim();
+    const my = ++seq;
+    if (!q) { render([]); return; }
+    fetch(sDlg.dataset.url + "?q=" + encodeURIComponent(q), { headers: { Accept: "application/json" }, credentials: "same-origin" })
+      .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+      .then((j) => { if (my === seq) render(j.results || []); })
+      .catch(() => { if (my === seq) { render([]); sStatus.textContent = sDlg.dataset.fail; } });
+  };
+  const open = () => {
+    if (sDlg.open) return;
+    opener = document.activeElement;
+    sDlg.showModal();
+    sQ.select();
+    if (sQ.value.trim()) run();
+  };
+  sQ.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 120); });
+  sQ.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive(active + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive(active - 1); }
+    else if (e.key === "Enter") {
+      const o = opts()[active];
+      if (o) { e.preventDefault(); location.href = o.querySelector("a").href; }
+    }
+  });
+  sDlg.addEventListener("click", (e) => { if (e.target === sDlg) sDlg.close(); });
+  sDlg.addEventListener("close", () => { if (opener && opener.focus) opener.focus(); });
+  for (const b of document.querySelectorAll("[data-search-open]")) b.addEventListener("click", open);
+  document.addEventListener("keydown", (e) => {
+    const t = e.target;
+    const typing = t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+    if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey) && !e.altKey) { e.preventDefault(); open(); }
+    else if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); open(); }
+  });
+}
 document.documentElement.classList.add("js");
 const flash = document.getElementById("flash");
 // In the dashboards a plain success message becomes a toast; errors, links and

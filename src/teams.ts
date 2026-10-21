@@ -28,6 +28,8 @@ export interface Team {
   maxWorkers?: number;
   /** Quota: largest script, in KB. Unset = WORKER_MAX_KB. */
   maxWorkerKb?: number;
+  /** 0.16.0: an owner hid the getting-started checklist. */
+  checklistHidden?: boolean;
   createdAt: string;
   updatedAt: string;
   /** SHA-256 of the team key. The key itself is shown once and never stored. */
@@ -48,6 +50,7 @@ export interface TeamPatch {
   slug?: string | null;
   maxWorkers?: number | null;
   maxWorkerKb?: number | null;
+  checklistHidden?: boolean;
 }
 
 /** What the admin API returns (never the key hash). */

@@ -208,7 +208,8 @@ const SECURITY: Record<Auth, object[] | undefined> = {
 /** Merge the table into an OpenAPI paths object (existing operations win). */
 export function addMorePaths(paths: Record<string, Record<string, unknown>>): void {
   for (const [method, path, summary, auth] of ROWS) {
-    const item = (paths[path] ??= {});
+    if (!paths[path]) paths[path] = {};
+    const item = paths[path];
     if (item[method]) continue;
     const params = [...path.matchAll(/\{([^}]+)\}/g)].map((m) => ({
       name: m[1],

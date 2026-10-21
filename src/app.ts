@@ -1447,6 +1447,7 @@ export function createApp({
   app.get("/ar/new", (c) => appPage(c, newHtml("ar", config)));
   // Team dashboard, sign-in and the admin console (server-rendered, session cookies).
   mountWebRoutes(app, {
+    docs,
     config,
     store,
     teams,

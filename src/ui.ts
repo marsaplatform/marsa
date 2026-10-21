@@ -1014,6 +1014,8 @@ export interface TeamOverview {
   members: number;
   invites: number;
   workers: { enabled: boolean; count: number; max: number };
+  /** 0.16.0: getting-started steps; unset or empty = hidden (dismissed). */
+  checklist?: ChecklistStep[];
 }
 
 /** Team overview: stat cards, recent spaces, quick publish and recent activity. */
@@ -1067,6 +1069,7 @@ export function teamHtml(
   const body = `<div class="page-wide">
   ${teamHead(lang, o, d.overviewSub, "overview", actions)}
   ${flashBox(lang, o.flash)}
+  ${ov.checklist ? checklistHtml(lang, ov.checklist, { csrf: o.csrf, canDismiss: (o.me?.role ?? "owner") === "owner" }) : ""}
   ${cards}
   ${statusList(lang, o)}
   <div class="dash-cols">
@@ -2098,12 +2101,12 @@ export const WS = {
     left: "Defaults: WORKERS_DEFAULT_MAX Workers and WORKER_MAX_KB KB per team.",
   },
   ar: {
-    nav: "الوركرز",
-    title: "الوركرز",
-    sub: "انشر وركرز صغيرة على كلاودفلير (واجهات API أو خوادم MCP) لفريقك. المساحات تنشرها نيابةً عنك، ولا تحتاج أبدًا مفتاح كلاودفلير.",
-    off: "الوركرز غير مفعّلة لهذا الفريق. اطلب من المسؤول تفعيلها.",
+    nav: "الوركرات",
+    title: "الوركرات",
+    sub: "انشر وركرات صغيرة على كلاودفلير (واجهات API أو خوادم MCP) لفريقك. المساحات تنشرها نيابةً عنك، ولا تحتاج أبدًا مفتاح كلاودفلير.",
+    off: "الوركرات غير مفعّلة لهذا الفريق. اطلب من المسؤول تفعيلها.",
     notConfigured: "لم يربط المسؤول حساب كلاودفلير بعد.",
-    none: "لا توجد وركرز بعد",
+    none: "لا توجد وركرات بعد",
     noneSub: "انشر واحدًا من النموذج بالأسفل أو من الـ API أو من MCP المساحة.",
     name: "الاسم",
     url: "العنوان",
@@ -2135,12 +2138,12 @@ export const WS = {
     deployed1: "تم النشر.",
     deleted: "تم حذف الوركر.",
     quota: (n: number, max: number, kb: number) =>
-      `${n} من ${max} وركرز · حتى ${kb} كيلوبايت للسكربت`,
+      `${n} من ${max} وركرات · حتى ${kb} كيلوبايت للسكربت`,
     agentsTitle: "للوكلاء",
     agentsSub:
       "الوكيل يستخدم مفتاح الفريق (أو رمز MCP للمساحة بصلاحية قراءة وكتابة: الأدوات list_workers وdeploy_worker وdelete_worker). لا يحتاج أبدًا مفتاح كلاودفلير.",
-    viewOnly: "المشاهد يرى الوركرز ولا يستطيع تعديلها.",
-    adminTitle: "الوركرز",
+    viewOnly: "المشاهد يرى الوركرات ولا يستطيع تعديلها.",
+    adminTitle: "الوركرات",
     adminSub: "مفتاح كلاودفلير واحد للمنصة كلها. الفرق تنشر عبر المساحات ولا تراه أبدًا.",
     settings: "ربط كلاودفلير",
     tokenSet: (l4: string) => `المفتاح محفوظ (…${l4})`,
@@ -2157,27 +2160,27 @@ export const WS = {
     save: "احفظ وتحقّق",
     verify: "تحقّق من المفتاح",
     clear: "احذف المفتاح",
-    confirmClear: "تحذف مفتاح كلاودفلير؟ (ممكن فقط إذا لم توجد وركرز للفرق.)",
+    confirmClear: "تحذف مفتاح كلاودفلير؟ (ممكن فقط إذا لم توجد وركرات للفرق.)",
     verified: "آخر تحقّق",
     saved: "تم الحفظ، وتحقّقت كلاودفلير من المفتاح.",
     verifiedFlash: (s: string) => `حالة المفتاح عند كلاودفلير: ${s}`,
     cleared: "تم حذف المفتاح.",
     teamsTitle: "الفرق",
-    enabled: "الوركرز",
+    enabled: "الوركرات",
     slug: "الاسم المختصر",
     slugHelp:
-      "من 2 إلى 20 حرفًا إنجليزيًا صغيرًا أو رقمًا؛ يُستخدم في أسماء السكربتات والعناوين. لا يتغير طالما للفريق وركرز.",
+      "من 2 إلى 20 حرفًا إنجليزيًا صغيرًا أو رقمًا؛ يُستخدم في أسماء السكربتات والعناوين. لا يتغير طالما للفريق وركرات.",
     maxWorkers: "أقصى عدد",
     maxKb: "أقصى حجم KB",
-    count: "الوركرز",
-    turnOffConfirm: "توقف الوركرز لهذا الفريق؟ سيتم حذف كل وركرز الفريق.",
-    allTitle: "كل وركرز الفرق",
+    count: "الوركرات",
+    turnOffConfirm: "توقف الوركرات لهذا الفريق؟ سيتم حذف كل وركرات الفريق.",
+    allTitle: "كل وركرات الفرق",
     team: "الفريق",
     disable: "أوقف",
     enable: "شغّل",
-    teamSaved: "تم حفظ إعدادات وركرز الفريق.",
+    teamSaved: "تم حفظ إعدادات وركرات الفريق.",
     platformLog: "سجل المنصة",
-    left: "الافتراضي: WORKERS_DEFAULT_MAX وركرز وWORKER_MAX_KB كيلوبايت لكل فريق.",
+    left: "الافتراضي: WORKERS_DEFAULT_MAX وركرات وWORKER_MAX_KB كيلوبايت لكل فريق.",
   },
 } as const;
 
@@ -2845,7 +2848,7 @@ export const DS = {
     nav: {
       overview: "نظرة عامة",
       sites: "المساحات",
-      workers: "الوركرز",
+      workers: "الوركرات",
       mcp: "خوادم MCP",
       notes: "ملاحظات الوكلاء",
       members: "الأعضاء",
@@ -2856,7 +2859,7 @@ export const DS = {
       settings: "الإعدادات",
     } as Record<string, string>,
     overview: "نظرة عامة",
-    overviewSub: "فريقك في لمحة: المساحات والزيارات والأعضاء والوركرز.",
+    overviewSub: "فريقك في لمحة: المساحات والزيارات والأعضاء والوركرات.",
     stats: {
       spaces: "المساحات الحية",
       storage: "التخزين",
@@ -2864,7 +2867,7 @@ export const DS = {
       views7: (n: string) => `${n} في آخر 7 أيام`,
       members: "الأعضاء",
       invites: (n: number) => (n === 1 ? "دعوة واحدة معلّقة" : `${n} دعوات معلّقة`),
-      workers: "الوركرز",
+      workers: "الوركرات",
       workersOff: "غير مفعّلة لهذا الفريق",
       of: (a: string, b: string) => `${a} من ${b}`,
       teams: "الفرق",
@@ -2904,7 +2907,7 @@ export const DS = {
     teamInfo: "الفريق",
     name: "الاسم",
     id: "معرّف الفريق",
-    slug: "الاسم المختصر للوركرز",
+    slug: "الاسم المختصر للوركرات",
     features: "المزايا",
     quotas: "الحصص والاستخدام",
     api: "الوصول عبر الـ API",
@@ -2913,7 +2916,7 @@ export const DS = {
     on: "مفعّل",
     off: "متوقف",
     adminOverviewSub:
-      "المنصة كلها: الفرق والمساحات والوركرز والزيارات. أدِر الفرق من الجدول بالأسفل.",
+      "المنصة كلها: الفرق والمساحات والوركرات والزيارات. أدِر الفرق من الجدول بالأسفل.",
     newTeam: "فريق جديد",
     more: "المزيد",
     dangerZone: "منطقة الخطر",
@@ -2921,9 +2924,9 @@ export const DS = {
       "إصدار مفتاح جديد: يظهر مرة واحدة فقط، ويتوقف المفتاح القديم فورًا، فتفشل الوكلاء والسكربتات التي تستخدمه حتى تحصل على الجديد.",
     rotateConfirm:
       "تصدر مفتاحًا جديدًا للفريق؟ سيتوقف المفتاح الحالي الآن، وستفشل الوكلاء والسكربتات التي تستخدمه حتى تعطيها المفتاح الجديد.",
-    workersCol: "الوركرز",
+    workersCol: "الوركرات",
     manage: "إدارة",
-    adminSettingsSub: "ربط كلاودفلير لوركرز الفرق، وإعدادات هذا الخادم.",
+    adminSettingsSub: "ربط كلاودفلير لوركرات الفرق، وإعدادات هذا الخادم.",
     server: "الخادم",
     version: "الإصدار",
     publicUrl: "العنوان العام",
@@ -2998,6 +3001,7 @@ const ICONS: Record<string, string> = {
   rotate: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5"/>',
   health: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
   notes: '<path d="M5 4h14v12l-4 4H5zM15 20v-4h4M8 9h8M8 13h5"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
@@ -3027,7 +3031,7 @@ export interface DashOpts {
   crumbs?: { label: string; href?: string }[];
 }
 
-const TEAM_NAV = [
+export const TEAM_NAV = [
   ["overview", "/team"],
   ["sites", "/team/sites"],
   ["workers", "/team/workers"],
@@ -3040,7 +3044,7 @@ const TEAM_NAV = [
   ["activity", "/team/activity"],
   ["settings", "/team/settings"],
 ] as const;
-const ADMIN_NAV = [
+export const ADMIN_NAV = [
   ["overview", "/admin"],
   ["sites", "/admin/sites"],
   ["workers", "/admin/workers"],
@@ -3051,6 +3055,118 @@ const ADMIN_NAV = [
   ["alerts", "/admin/notifications"],
   ["settings", "/admin/settings"],
 ] as const;
+
+/** 0.16.0: global search (⌘K) and the getting-started checklist. */
+export const K16 = {
+  en: {
+    search: "Search",
+    searchLabel: "Search the dashboard",
+    searchPh: "Spaces, Workers, MCP servers, notes, docs…",
+    searchNone: "No results",
+    searchHint: "↑ ↓ to move · Enter to open · Esc to close",
+    searchFail: "Search failed. Try again.",
+    checklist: "Getting started",
+    checklistSub: (done: number, all: number) => `${done} of ${all} done`,
+    dismiss: "Hide",
+    dismissLabel: "Hide the getting-started checklist",
+    stepSpace: "Publish your first space",
+    stepSpaceHelp: "Drop a folder or a .zip below, or let an agent publish it.",
+    stepMember: "Invite a teammate",
+    stepMemberHelp: "Each person gets their own sign-in and role.",
+    stepAgent: "Create an agent key",
+    stepAgentHelp: "Give each agent a scoped, expiring key instead of the team key.",
+    stepWorker: "Deploy a Worker",
+    stepWorkerHelp: "APIs, webhooks and MCP servers, without a Cloudflare key.",
+    stepDocs: "Read the guide for agents",
+    stepDocsHelp: "A prompt and snippets so an agent can publish and return a link.",
+    done: "Done",
+    todo: "To do",
+  },
+  ar: {
+    search: "بحث",
+    searchLabel: "البحث في اللوحة",
+    searchPh: "المساحات والوركرات وخوادم MCP والملاحظات والتوثيق…",
+    searchNone: "لا نتائج",
+    searchHint: "↑ ↓ للتنقل · Enter للفتح · Esc للإغلاق",
+    searchFail: "تعذّر البحث. حاول مرة أخرى.",
+    checklist: "خطوات البدء",
+    checklistSub: (done: number, all: number) =>
+      `${done.toLocaleString("ar-EG")} من ${all.toLocaleString("ar-EG")} مكتملة`,
+    dismiss: "إخفاء",
+    dismissLabel: "إخفاء قائمة خطوات البدء",
+    stepSpace: "انشر أول مساحة",
+    stepSpaceHelp: "أفلت مجلدًا أو ملف zip أدناه، أو دع وكيلًا ينشرها.",
+    stepMember: "ادعُ زميلًا",
+    stepMemberHelp: "لكل شخص دخوله ودوره الخاص.",
+    stepAgent: "أنشئ مفتاح وكيل",
+    stepAgentHelp: "أعطِ كل وكيل مفتاحًا محدد الصلاحيات ينتهي، بدل مفتاح الفريق.",
+    stepWorker: "انشر وركر",
+    stepWorkerHelp: "واجهات API وWebhooks وخوادم MCP، بلا مفتاح Cloudflare.",
+    stepDocs: "اقرأ دليل الوكلاء",
+    stepDocsHelp: "تعليمات ومقتطفات ليتمكن الوكيل من النشر وإعادة رابط.",
+    done: "مكتملة",
+    todo: "لم تكتمل",
+  },
+};
+
+export interface ChecklistStep {
+  key: "space" | "member" | "agent" | "worker" | "docs";
+  done: boolean;
+  href: string;
+}
+
+/** The team overview's getting-started card (0.16.0). Hidden when every step is done. */
+export function checklistHtml(
+  lang: Lang,
+  steps: ChecklistStep[],
+  o: { csrf: string; canDismiss: boolean },
+): string {
+  const k = K16[lang];
+  const doneN = steps.filter((x) => x.done).length;
+  if (!steps.length || doneN === steps.length) return "";
+  const label = (key: ChecklistStep["key"]) =>
+    ({
+      space: [k.stepSpace, k.stepSpaceHelp],
+      member: [k.stepMember, k.stepMemberHelp],
+      agent: [k.stepAgent, k.stepAgentHelp],
+      worker: [k.stepWorker, k.stepWorkerHelp],
+      docs: [k.stepDocs, k.stepDocsHelp],
+    })[key];
+  const items = steps
+    .map((x) => {
+      const [title, help] = label(x.key);
+      return `<li class="check-step${x.done ? " is-done" : ""}"><span class="check-mark" aria-hidden="true">${x.done ? "✓" : ""}</span><div><a href="${esc(localePath(lang, x.href))}">${esc(title ?? "")}</a><span class="sr-only"> (${esc(x.done ? k.done : k.todo)})</span><span class="meta">${esc(help ?? "")}</span></div></li>`;
+    })
+    .join("");
+  const hide = o.canDismiss
+    ? postForm(
+        localePath(lang, "/team/checklist/hide"),
+        o.csrf,
+        `<button class="button ghost small" type="submit" aria-label="${esc(k.dismissLabel)}">${esc(k.dismiss)}</button>`,
+      )
+    : "";
+  const pct = Math.round((doneN / steps.length) * 100);
+  return `<section class="card checklist" aria-labelledby="checklist-h">
+  <div class="checklist-head"><div><h2 id="checklist-h" class="h3">${esc(k.checklist)}</h2><p class="meta">${esc(k.checklistSub(doneN, steps.length))}</p></div>${hide}</div>
+  <progress class="checklist-bar" max="100" value="${pct}" aria-label="${esc(k.checklistSub(doneN, steps.length))}">${pct}%</progress>
+  <ol class="check-steps">${items}</ol>
+</section>`;
+}
+
+/** The ⌘K button for the top bar and its dialog (filled by app.js from /team|admin/search). */
+function searchUi(lang: Lang, kind: "team" | "admin"): { button: string; dialog: string } {
+  const k = K16[lang];
+  const url = localePath(lang, kind === "team" ? "/team/search" : "/admin/search");
+  return {
+    button: `<button type="button" class="search-open js-only" data-search-open aria-haspopup="dialog" aria-controls="search-dialog">${icon("search")}<span class="search-open-text">${esc(k.search)}</span><kbd data-search-kbd>Ctrl K</kbd></button>`,
+    dialog: `<dialog class="search-dialog" id="search-dialog" aria-label="${esc(k.searchLabel)}" data-url="${esc(url)}" data-none="${esc(k.searchNone)}" data-fail="${esc(k.searchFail)}">
+  <div class="search-box">${icon("search")}<label class="sr-only" for="search-q">${esc(k.searchLabel)}</label><input id="search-q" type="search" role="combobox" aria-expanded="false" aria-controls="search-results" aria-autocomplete="list" autocomplete="off" spellcheck="false" maxlength="100" placeholder="${esc(k.searchPh)}"><kbd>Esc</kbd></div>
+  <ul id="search-results" class="search-results" role="listbox" aria-label="${esc(k.searchLabel)}"></ul>
+  <p class="search-status meta" role="status" aria-live="polite"></p>
+  <p class="search-hint meta">${esc(k.searchHint)}</p>
+</dialog>`,
+  };
+}
 
 /** The signed-in app shell: top bar, sidebar navigation (a drawer on phones), breadcrumbs. */
 /**
@@ -3109,6 +3225,7 @@ export function dashLayout(o: DashOpts): string {
         : `<li><a href="${esc(c.href ?? "#")}"><bdi>${esc(c.label)}</bdi></a></li>`,
     )
     .join("")}</ol></nav>`;
+  const su = searchUi(o.lang, o.kind);
   const ctx = `<div class="side-ctx"><span class="side-avatar" aria-hidden="true">${esc(initialOf(o.ctx.name ?? "M"))}</span><div><strong>${o.ctx.name ? `<bdi>${esc(o.ctx.name)}</bdi>` : esc(area)}</strong>${o.ctx.sub ? `<span class="meta">${esc(o.ctx.sub)}</span>` : ""}</div></div>`;
   return `<!doctype html>
 <html lang="${o.lang}" dir="${t.dir}">
@@ -3131,6 +3248,7 @@ export function dashLayout(o: DashOpts): string {
   <a class="wordmark" href="${href("/")}" aria-label="${esc(`${t.product}: ${t.nav.home}`)}">${brandMark(o.lang)}</a>
   <span class="dash-area">${esc(area)}</span>
   <div class="dash-top-tools">
+    ${su.button}
     <!--marsa:bell:${o.kind}:${o.lang}-->
     <a class="locale-link" href="${localePath(other, o.path)}" hreflang="${other}" lang="${other}">${esc(t.switchLabel)}</a>
   </div>
@@ -3152,6 +3270,7 @@ export function dashLayout(o: DashOpts): string {
   </main>
 </div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+${su.dialog}
 <dialog class="confirm-dialog" id="confirm-dialog" aria-labelledby="confirm-text">
   <form method="dialog">
     <p id="confirm-text"></p>
@@ -3386,9 +3505,9 @@ export const V14 = {
     viaInvite: "عبر دعوة",
     ownersOnly: "إدارة مفاتيح الوكلاء لمالكي الفريق فقط.",
     scopeHelp: {
-      "workers:read": "عرض الوركرز وإصداراتها وكودها",
-      "workers:deploy": "نشر الوركرز وإعادة نشرها والرجوع بها وحذفها",
-      "workers:secrets": "إضافة أسرار الوركرز وتغييرها وحذفها (كتابة فقط)",
+      "workers:read": "عرض الوركرات وإصداراتها وكودها",
+      "workers:deploy": "نشر الوركرات وإعادة نشرها والرجوع بها وحذفها",
+      "workers:secrets": "إضافة أسرار الوركرات وتغييرها وحذفها (كتابة فقط)",
       "spaces:read": "عرض مساحات الفريق وقراءتها",
       "spaces:write": "نشر المساحات واستبدالها وتمديدها وحذفها",
       "kv:read": "قراءة قيم KV والملفات المرفوعة",
@@ -3862,19 +3981,19 @@ function privacyText(
         ],
       ],
       [
-        "وركرز الفرق",
+        "وركرات الفرق",
         [
           "كل نشر يُحفظ كإصدار على هذا الخادم: الكود والمتغيرات العادية وأسماء الأسرار ومن نشره ومتى وحجمه وبصمته SHA-256 وملاحظة اختيارية. تُحفظ آخر 10 إصدارات لكل وركر وتُحذف معه.",
           "لا تحفظ Spaces قيم الأسرار أبدًا: تذهب مباشرة إلى Cloudflare ونحفظ أسماءها فقط.",
           "فحوص الصحة: إذا أبقاها الفريق مفعّلة، تطلب مساحات عنوان كل وركر (أو ترسل طلب MCP initialize) كل بضع دقائق وتحفظ الوقت والنتيجة ورمز الحالة وزمن الاستجابة. تُحفظ الفحوص المفردة 7 أيام والمجاميع اليومية 31 يومًا، وتُحذف مع الوركر.",
-          "السجلات والإحصاءات: لصفحات الوركرز تقرأ مساحات من Cloudflare عدد الطلبات والأخطاء ووقت المعالج وآخر سطور السجل. تبقى في الذاكرة فقط لبضع دقائق، ويُحجب قبل العرض كل ما يشبه مفتاحًا أو كلمة مرور.",
+          "السجلات والإحصاءات: لصفحات الوركرات تقرأ مساحات من Cloudflare عدد الطلبات والأخطاء ووقت المعالج وآخر سطور السجل. تبقى في الذاكرة فقط لبضع دقائق، ويُحجب قبل العرض كل ما يشبه مفتاحًا أو كلمة مرور.",
           "فحص المستودعات: إذا ربط فريق وركر أو مساحة بمستودع GitHub، تسأل مساحات الـ API العامة لـ GitHub إن كان المستودع عامًا وإن كان الـ commit المنشور هو الأحدث. يصل إلى GitHub اسم المستودع وعنوان IP للخادم، وتُحفظ الإجابات مؤقتًا في الذاكرة.",
         ],
       ],
       [
         "الأغراض والأسس القانونية",
         [
-          "تشغيل الخدمة التي تستخدمها أنت أو فريقك (الحسابات وتسجيل الدخول ونشر المواقع والوركرز والمفاتيح والبيانات والملفات والإشعارات والـ Webhooks): تنفيذ عقد أو خطوات تسبقه (المادة 6(1)(ب) من GDPR).",
+          "تشغيل الخدمة التي تستخدمها أنت أو فريقك (الحسابات وتسجيل الدخول ونشر المواقع والوركرات والمفاتيح والبيانات والملفات والإشعارات والـ Webhooks): تنفيذ عقد أو خطوات تسبقه (المادة 6(1)(ب) من GDPR).",
           "الأمان ومنع إساءة الاستخدام (حدود المعدل وسجل النشاط وتنبيهات الشبكات الجديدة لمفاتيح الوكلاء وحفظ المفاتيح والرموز كبصمات): مصلحتنا المشروعة في حماية الخدمة ومستخدميها (المادة 6(1)(و) من GDPR).",
           "مجاميع الزيارات اليومية المجهولة التي يراها أصحاب المواقع: مصلحتنا المشروعة في تقديم إحصاءات أساسية دون تتبع الأشخاص (المادة 6(1)(و) من GDPR).",
           "مفاتيح API للمستخدمين: يمكن للفريق إدخال اسم وبريد اختياري لكل مفتاح. الفريق يقرر إدخالهما وعليه إبلاغ أصحابهما؛ وتستخدمهما مساحات فقط لعرضهما على الفريق وللتحقق من المفاتيح.",
@@ -3883,9 +4002,9 @@ function privacyText(
       [
         "مزودو الخدمة (المعالجون) والجهات المتلقية",
         [
-          "Cloudflare: إذا فعّل المدير خلفية البيانات والملفات، تُحفظ قيم KV والملفات المرفوعة للمواقع المسموح لها لدى Cloudflare ‏(Workers KV وR2). وتُنشر وركرز الفرق على شبكة Cloudflare عبر حساب Cloudflare الخاص بالمنصة، وتحفظ Cloudflare كودها ومتغيراتها وأسرارها.",
+          "Cloudflare: إذا فعّل المدير خلفية البيانات والملفات، تُحفظ قيم KV والملفات المرفوعة للمواقع المسموح لها لدى Cloudflare ‏(Workers KV وR2). وتُنشر وركرات الفرق على شبكة Cloudflare عبر حساب Cloudflare الخاص بالمنصة، وتحفظ Cloudflare كودها ومتغيراتها وأسرارها.",
           "يُقدَّم هذا الموقع، ومنه لوحات التحكم بعد تسجيل الدخول، عبر Cloudflare التي تضيف سكربت Web Analytics الخاص بها (static.cloudflareinsights.com). يعدّ مشاهدات الصفحات ويقيس سرعة التحميل بلا كوكيز، ويصل إلى Cloudflare عنوان الصفحة والصفحة السابقة ونوع المتصفح وعنوان IP. الخطوط وبقية الملفات تُقدَّم من هذا الخادم.",
-          "النسخ الاحتياطية: مرة كل يوم يُشفَّر مجلد البيانات كاملًا (الحسابات بكلمات مرور مبصومة، والمفاتيح كبصمات، والنشاط والملاحظات وكود الوركرز وإصداراتها والإعدادات) على هذا الخادم بـ AES-256-GCM ويُحفظ في Cloudflare R2. لا تستطيع Cloudflare قراءته، والمفتاح لا يُحفظ مع النسخ.",
+          "النسخ الاحتياطية: مرة كل يوم يُشفَّر مجلد البيانات كاملًا (الحسابات بكلمات مرور مبصومة، والمفاتيح كبصمات، والنشاط والملاحظات وكود الوركرات وإصداراتها والإعدادات) على هذا الخادم بـ AES-256-GCM ويُحفظ في Cloudflare R2. لا تستطيع Cloudflare قراءته، والمفتاح لا يُحفظ مع النسخ.",
           "GitHub: لفحص المستودعات فقط (أعلاه)، وللمستودعات التي يربطها فريق فقط.",
           "ترسل الـ Webhooks الصادرة نص الإشعار (اسم الفريق ومن فعل ماذا) فقط إلى الروابط التي يحددها مالك الفريق أو المدير.",
           "المواقع المنشورة عامة بطبيعتها: يستطيع أي شخص لديه الرابط رؤيتها.",
@@ -3905,7 +4024,7 @@ function privacyText(
           "المواقع: حتى تنتهي مدتها أو تُحذف. الحسابات والمفاتيح ووصفات الفريق: حتى تُحذف أو تُلغى أو يُحذف الفريق.",
           "مجاميع الزيارات: 90 يومًا افتراضيًا. سجل النشاط: آخر 500 عملية لكل فريق. الإشعارات: آخر 200 لكل فريق. إصدارات الوركر: آخر 10 لكل وركر. عدّادات مفاتيح المستخدمين: 7 أيام.",
           "كوكي الجلسة: 7 أيام (للفرق) أو 12 ساعة (للمدير) على الأكثر. بيانات حدود المعدل في الذاكرة فقط.",
-          "فحوص الصحة: 7 أيام (المجاميع اليومية 31 يومًا). ملاحظات الوكلاء: آخر 500 لكل فريق. سجلات الوركرز وإحصاءاتها: بضع دقائق في الذاكرة.",
+          "فحوص الصحة: 7 أيام (المجاميع اليومية 31 يومًا). ملاحظات الوكلاء: آخر 500 لكل فريق. سجلات الوركرات وإحصاءاتها: بضع دقائق في الذاكرة.",
           "الفرق المحذوفة: تبقى 7 أيام ليستطيع المدير استعادتها، ثم تُحذف نهائيًا. ويبقى التصدير المأخوذ عند الحذف 30 يومًا أخرى ثم يُحذف.",
           "النسخ الاحتياطية: 14 نسخة يومية و8 أسبوعية، لذا قد تبقى البيانات المحذوفة في نسخة مشفّرة نحو 8 أسابيع على الأكثر قبل أن تُستبدل.",
         ],
@@ -3923,7 +4042,7 @@ function privacyText(
       [
         "حقوقك",
         [
-          "تستطيع حذف مواقعك وقيم KV والملفات، وإلغاء المفاتيح والرموز، من لوحة التحكم أو الـ API في أي وقت. يستطيع مالك الفريق إزالة الأعضاء وإخراج الفريق كله من كل الأجهزة، ويستطيع المدير تصدير فريق (ملف zip قابل للنقل) وحذفه، فتُحذف أعضاؤه ومفاتيحه وإشعاراته وملاحظاته ووركرزه بعد مهلة 7 أيام.",
+          "تستطيع حذف مواقعك وقيم KV والملفات، وإلغاء المفاتيح والرموز، من لوحة التحكم أو الـ API في أي وقت. يستطيع مالك الفريق إزالة الأعضاء وإخراج الفريق كله من كل الأجهزة، ويستطيع المدير تصدير فريق (ملف zip قابل للنقل) وحذفه، فتُحذف أعضاؤه ومفاتيحه وإشعاراته وملاحظاته ووركراته بعد مهلة 7 أيام.",
           "بموجب GDPR لك الحق في الاطلاع على بياناتك الشخصية، وتصحيحها أو محوها، وتقييد معالجتها، والحصول عليها بصيغة قابلة للنقل، والاعتراض على المعالجة القائمة على المصلحة المشروعة (المواد 15 إلى 21).",
           `لممارسة هذه الحقوق راسلنا على ${op.email}. نرد خلال شهر واحد كما تشترط اللائحة.`,
           `ولك أيضًا الحق في تقديم شكوى إلى سلطة رقابية لحماية البيانات: ${auth}.`,
@@ -4450,7 +4569,7 @@ export const K14 = {
     cache: (n: number) =>
       `يتحقق المساعد من كل طلب (حدود دقيقة). الخيار { cache: ${n} } أسرع، لكن لكل نسخة من الوركر ذاكرتها فقد يتجاوز المفتاح حدّه قليلًا.`,
     readOnly: "يدير المفاتيح المالكون والمحررون فقط.",
-    notConfigured: "الوركرز غير مضبوطة على هذا الخادم.",
+    notConfigured: "الوركرات غير مضبوطة على هذا الخادم.",
     rowActions: "إجراءات",
   },
 };

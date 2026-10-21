@@ -106,7 +106,7 @@ describe("0.16.0 Arabic glossary", () => {
         .filter((f) => f.endsWith(".ar.md"))
         .map((f) => `docs/recipes/${f}`),
     ];
-    const banned = /إيجنت|ايجنت|سيرفر|فحص الحالة/;
+    const banned = /إيجنت|ايجنت|سيرفر|فحص الحالة|وركرز/;
     const hits: string[] = [];
     for (const f of files) {
       const text = await readFile(f, "utf8");

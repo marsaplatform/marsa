@@ -432,3 +432,101 @@ describe("0.16.0 times and charts in the user's time zone", () => {
     expect(timeTag("en", "2026-10-14T09:26:00.000Z")).toContain("13:26");
   });
 });
+
+describe("0.16.0 global search (⌘K)", () => {
+  it("searches what the team can see, never other teams", async () => {
+    t = await makeApp();
+    const team = await t.createTeam("Crew", { backend: true });
+    const other = await t.createTeam("Others", { backend: true });
+    await t.publish(team.key, "<title>Quarterly report</title>");
+    await t.publish(other.key, "<title>Quarterly secret</title>");
+    const { b } = await t.signIn(team.key);
+    const page = await (await b.get("/team")).text();
+    expect(page).toContain('id="search-dialog"');
+    expect(page).toContain('data-url="/team/search"');
+    expect(page).toContain("data-search-open");
+    const j = (await (
+      await b.get("/team/search?q=quarterly", { accept: "application/json" })
+    ).json()) as { results: { kind: string; title: string; url: string; label: string }[] };
+    expect(j.results.map((r) => r.title)).toEqual(["Quarterly report"]);
+    expect(j.results[0]?.kind).toBe("space");
+    expect(j.results[0]?.url).toMatch(/^\/team\/sites\//);
+    // Pages and docs are found too; Arabic labels on /ar.
+    const pages = (await (await b.get("/team/search?q=members")).json()) as {
+      results: { kind: string; url: string }[];
+    };
+    expect(pages.results.some((r) => r.kind === "page" && r.url === "/team/members")).toBe(true);
+    const docs = (await (await b.get("/team/search?q=workers")).json()) as {
+      results: { kind: string; url: string }[];
+    };
+    expect(docs.results.some((r) => r.kind === "doc" && r.url === "/docs/workers")).toBe(true);
+    const ar = (await (await b.get("/ar/team/search?q=الوركرات")).json()) as {
+      results: { kind: string; url: string; label: string }[];
+    };
+    expect(ar.results.some((r) => r.url === "/ar/docs/workers" && r.label === "التوثيق")).toBe(
+      true,
+    );
+    expect((await (await b.get("/team/search?q=")).json()).results).toEqual([]);
+    // Signed out: 401 JSON for fetch, redirect for a browser.
+    const { Browser } = await import("./helpers.js");
+    const anon = new Browser(t.app);
+    expect((await anon.get("/team/search?q=x", { accept: "application/json" })).status).toBe(401);
+    expect((await anon.get("/admin/search?q=x")).status).toBe(401);
+  });
+
+  it("lets the admin search teams, spaces of every team and docs", async () => {
+    t = await makeApp();
+    const team = await t.createTeam("Crew", { backend: true });
+    await t.publish(team.key, "<title>Quarterly report</title>");
+    const a = await t.adminBrowser();
+    const html = await (await a.get("/admin")).text();
+    expect(html).toContain('data-url="/admin/search"');
+    const j = (await (await a.get("/admin/search?q=crew")).json()) as {
+      results: { kind: string; url: string }[];
+    };
+    expect(j.results[0]).toMatchObject({ kind: "team", url: `/admin/teams/${team.team.id}` });
+    const s = (await (await a.get("/admin/search?q=quarterly crew")).json()) as {
+      results: { kind: string; sub: string }[];
+    };
+    expect(s.results[0]?.kind).toBe("space");
+    expect(s.results[0]?.sub).toContain("Crew");
+  });
+
+  it("folds Arabic letter forms and ranks title prefixes first", async () => {
+    const { searchItems, normalize } = await import("../src/search.js");
+    expect(normalize("إدارة")).toBe(normalize("اداره"));
+    const hits = searchItems(
+      "en",
+      [
+        { kind: "doc", title: "About reports", url: "/a" },
+        { kind: "space", title: "Reports 2026", url: "/b" },
+        { kind: "worker", title: "x", sub: "reports api", url: "/c" },
+      ],
+      "reports",
+    );
+    expect(hits.map((h) => h.url)).toEqual(["/b", "/a", "/c"]);
+  });
+});
+
+describe("0.16.0 getting-started checklist", () => {
+  it("shows open steps on the team overview, ticks them off and can be hidden by an owner", async () => {
+    t = await makeApp();
+    const team = await t.createTeam("Crew", { backend: true });
+    const { b } = await t.signIn(team.key);
+    let html = await (await b.get("/team")).text();
+    expect(html).toContain('class="card checklist"');
+    expect(html).toMatch(/0 of 3 done/);
+    await t.publish(team.key);
+    html = await (await b.get("/team")).text();
+    expect(html).toMatch(/1 of 3 done/);
+    expect(html).toMatch(/check-step is-done[\s\S]*Publish your first space/);
+    const ar = await (await (await t.signIn(team.key, "/ar")).b.get("/ar/team")).text();
+    expect(ar).toContain("خطوات البدء");
+    expect(ar).toContain("١ من ٣ مكتملة");
+    const csrf = await b.csrf("/team");
+    const r = await b.post("/team/checklist/hide", { _csrf: csrf });
+    expect(r.status).toBe(303);
+    html = await (await b.get("/team")).text();
+    expect(html).not.toContain('class="card checklist"');
+  });
+});
