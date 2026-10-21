@@ -176,7 +176,8 @@ export function mountUserKeyRoutes(app: Hono, d: UserKeyDeps, ops: UserKeyOps): 
   });
   app.get("/api/keys/helper.js", (c) => {
     c.header("Content-Type", "text/javascript; charset=utf-8");
-    c.header("Cache-Control", "public, max-age=3600");
+    // no-cache: the edge must not hand out an old helper after a Spaces update.
+    c.header("Cache-Control", "no-cache");
     return c.body(keysHelperSource(config.publicUrl));
   });
 }
