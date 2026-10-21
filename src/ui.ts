@@ -3914,7 +3914,12 @@ function policyLine(x: string, op: Operator): string {
   let h = esc(x);
   const mail = esc(op.email);
   if (op.email)
-    h = h.split(mail).join(`<a class="text-link ltr" dir="ltr" href="mailto:${mail}">${mail}</a>`);
+    h = h
+      .split(mail)
+      // email_off: keep the address readable (Cloudflare would otherwise obfuscate it behind JS).
+      .join(
+        `<!--email_off--><a class="text-link ltr" dir="ltr" href="mailto:${mail}">${mail}</a><!--/email_off-->`,
+      );
   const url = op.authority.url;
   if (url && /^https:\/\/[^\s"<>]+$/.test(url))
     h = h
