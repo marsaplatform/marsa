@@ -603,7 +603,7 @@ export async function requireKey(request, env, opts = {}) {
   }
   __marsaCache.delete(key);
   if (!res || !res.allow) return deny(res?.status || 401, res?.code || "INVALID_KEY", { retryAfter: res?.retryAfter });
-  if (res.cacheSeconds > 0) {
+  if (res.cacheSeconds > 0 && opts.cache !== false) {
     if (__marsaCache.size > 1000) __marsaCache.clear();
     // Serve at most the remaining minute quota from cache.
     __marsaCache.set(key, { until: now + res.cacheSeconds * 1000, res, uses: 0, left: Math.max(0, Math.min(res.remaining?.minute ?? 0, res.remaining?.day ?? 0)) });

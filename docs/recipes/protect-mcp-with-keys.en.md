@@ -22,7 +22,7 @@ Only people you gave a key to can call your MCP server (or any team Worker), eac
 3. Your Worker reads the caller's key (`Authorization: Bearer msk_…` or `X-Api-Key`) and calls `POST $MARSA_KEYS_URL` with `{key, tool, uses}`. Spaces answers `allow`, `status` (200/401/403/429), `remaining` and `tools`, and counts the request.
 4. The helper caches an allow for up to `cacheSeconds` (30 s by default, never past the minute quota) and reports the cached uses on the next check, so counts catch up within that window.
 
-**Honest limits:** counting happens in the Spaces server (in memory, saved every ~15 s), so a Spaces restart can lose a few seconds of counts; with the cache on, a key can exceed its per-minute limit by up to one cache window before the next check denies it; and if Spaces is unreachable the helper fails closed (503) unless you pass `failOpen: true`.
+**Honest limits:** counting happens in the Spaces server (in memory, saved every ~15 s), so a Spaces restart can lose a few seconds of counts; with the cache on, a key can exceed its per-minute limit within one cache window, and because each Worker isolate (Cloudflare may run several at once) holds its own cache, the overshoot can be up to the remaining minute quota per isolate; and if Spaces is unreachable the helper fails closed (503) unless you pass `failOpen: true`.
 
 ## Steps
 
@@ -81,5 +81,5 @@ export default {
 - **Turning keys on before the helper is deployed**: the Worker still answers everyone (Spaces cannot block requests the Worker does not check).
 - **Checking the key after doing the work**: always gate first.
 - **Logging the `Authorization` header** in the Worker: never log keys.
-- **Expecting exact counts with caching**: set the helper's cache low (Spaces returns `cacheSeconds`) or accept the window.
+- **Expecting exact counts with caching**: call `requireKey(request, env, { cache: false })` so every request is checked by Spaces, or accept the window.
 - **Using `failOpen: true`** on something expensive: if Spaces is unreachable everyone gets in.
