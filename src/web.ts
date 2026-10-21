@@ -39,8 +39,9 @@ import {
 import { fingerprint, type Session, type Sessions, sameOrigin } from "./session.js";
 import type { SiteMeta, SiteStore } from "./store.js";
 import { cleanTeamName, type Team, type TeamPatch, type TeamStore } from "./teams.js";
-import { safeEqual } from "./tokens.js";
+import { hashToken, newEditToken, safeEqual } from "./tokens.js";
 import {
+  ADMIN_CTX,
   type AdminSiteRow,
   type AdminStats,
   type AuditView,
@@ -64,17 +65,23 @@ import {
   type TeamSiteRow,
   teamActivityHtml,
   teamAgentsHtml,
+  teamCtx,
   teamHtml,
   teamNotificationsHtml,
   teamSettingsHtml,
-  teamSiteHtml,
   teamSitesHtml,
+  teamUploader,
   teamWorkersHtml,
   V14,
   WS,
-  workerKeysHtml,
-  workerVersionsHtml,
 } from "./ui.js";
+import {
+  adminTeamHtml,
+  type BackendBrowser,
+  DX,
+  siteDetailHtml,
+  workerDetailHtml,
+} from "./ui-detail.js";
 import type { UserKeyOps } from "./user-key-routes.js";
 import { UserKeyError, type UserKeyStore } from "./user-keys.js";
 import type { VisitCounter, VisitSummary } from "./visits.js";
@@ -143,6 +150,11 @@ export interface WebDeps {
   recipes: RecipeStore;
   userKeys: UserKeyStore;
   userKeyOps: UserKeyOps;
+  /** Preview image of a space for the dashboard: its cover, or the drawn placeholder. */
+  previewImage?: (
+    m: SiteMeta,
+    teamId: string | null,
+  ) => Promise<{ type: string; body: Uint8Array | string }>;
 }
 
 /** "NAME=value" lines into an object (blank lines and # comments skipped). */
@@ -237,7 +249,19 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
   const wantsJson = (c: Context) => (c.req.header("accept") ?? "").includes("application/json");
 
   /** Redirect after a POST (or JSON for the page script). */
-  const done = (c: Context, s: Session, to: string, flash?: Flash) => {
+  /**
+   * 0.15.0: a form may say where to go back to (`back` = a dashboard path), so actions on
+   * a detail page return to that page. Only same-site dashboard paths are accepted.
+   */
+  const backTo = new WeakMap<Context, string>();
+  const safeBack = (raw: string): string | null =>
+    /^\/(ar\/)?(team|admin)(\/[A-Za-z0-9._~\-/]*)?(\?[A-Za-z0-9=&_-]*)?$/.test(raw) &&
+    !raw.includes("//") &&
+    !raw.includes("..")
+      ? raw
+      : null;
+  const done = (c: Context, s: Session, target: string, flash?: Flash) => {
+    const to = backTo.get(c) ?? target;
     const hashAt = to.indexOf("#");
     const path = hashAt < 0 ? to : to.slice(0, hashAt);
     const hash = hashAt < 0 ? "" : to.slice(hashAt);
@@ -291,6 +315,8 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     const form = await formOf(c);
     const token = c.req.header("x-csrf-token") || field(form, "_csrf");
     if (!sessions.checkCsrf(s, token)) return forbidden(c, lang, back);
+    const wanted = safeBack(field(form, "back"));
+    if (wanted) backTo.set(c, wanted);
     return form ?? new FormData();
   }
 
@@ -385,6 +411,17 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
   });
 
   const live = (m: SiteMeta) => Date.parse(m.expiresAt) > now();
+  /** The dashboard preview image (private: only for signed-in viewers of the space). */
+  const previewResponse = async (c: Context, m: SiteMeta, team: Team | null) => {
+    if (!d.previewImage) return c.body(null, 404);
+    const img = await d.previewImage(m, team?.id ?? null);
+    c.header("Content-Type", img.type);
+    c.header("Cache-Control", "private, max-age=300");
+    c.header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("Cross-Origin-Resource-Policy", "same-origin");
+    return c.body(img.body as never);
+  };
 
   for (const prefix of ["", "/ar"] as const) {
     const lang: Lang = prefix ? "ar" : "en";
@@ -507,6 +544,46 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       };
     };
 
+    /** Data for a Worker detail page (team and admin views share it). */
+    const workerDetailData = async (
+      rec: NonNullable<ReturnType<typeof d.workers.find>>,
+      tab: string,
+    ) => {
+      const versions = (await d.workers.listVersions(rec)).map(versionMeta);
+      const latest = versions.length ? await d.workers.getVersion(rec, versions[0]?.n ?? 0) : null;
+      const keys = await d.userKeyOps.view(rec);
+      const nameRe = new RegExp(`^${rec.name.replace(/[^a-z0-9-]/g, "")}($|[ :])`);
+      const audit = members
+        .entries(rec.teamId, undefined, 300)
+        .filter((e) => /^(worker-|user-key)/.test(e.action) && nameRe.test(e.detail ?? ""))
+        .slice(0, 100)
+        .map((e) => auditView(e));
+      const view = workerView(rec);
+      return {
+        worker: view,
+        disabledBy: rec.status === "disabled" ? (rec.disabledBy ?? "admin") : null,
+        versions,
+        // The live check runs on the overview only (it calls the Worker).
+        health:
+          tab === "overview" || tab === ""
+            ? rec.status === "active"
+              ? await d.workers.probe(rec)
+              : null
+            : null,
+        mcp:
+          latest && rec.url && /["'`]\/mcp\b/.test(latest.code)
+            ? `${rec.url.replace(/\/$/, "")}/mcp`
+            : null,
+        keys: {
+          settings: keys.settings,
+          keys: keys.keys,
+          verifyUrl: keys.verifyUrl,
+          helperUrl: keys.helperUrl,
+        },
+        audit,
+      };
+    };
+
     app.get(`${prefix}/team`, async (c) => {
       const ts = needTeam(c);
       if (ts instanceof Response) return ts;
@@ -626,17 +703,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       }
     });
 
-    app.get(`${prefix}/team/sites/:id`, async (c) => {
-      const ts = needTeam(c);
-      if (ts instanceof Response) return ts;
-      const { s, team } = ts;
-      const m = await ownSite(c, team);
-      if (!m) return notYours(c, s);
-      let backendBrowser: Parameters<typeof teamSiteHtml>[2]["backendBrowser"] = {
+    /** Everything a space detail page shows (team and admin views share it). */
+    const siteDetailData = async (m: SiteMeta, team: Team | null) => {
+      let backendBrowser: BackendBrowser = {
         state: "off",
-        ...(team.backend && !backend ? { reason: t.team.backendNotConfigured } : {}),
+        ...(team?.backend && !backend ? { reason: t.team.backendNotConfigured } : {}),
       };
-      if (backend && (team.backend || config.backend.guestAccess)) {
+      if (backend && (team?.backend || config.backend.guestAccess)) {
         const base = `${config.publicUrl}/api/sites/${m.id}/files`;
         try {
           const [keys, files] = await Promise.all([
@@ -666,8 +739,11 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           };
         }
       }
+      const row = team
+        ? teamRow(m, team)
+        : { ...teamRow(m, { directory: false } as Team), listed: false };
       const site = {
-        ...teamRow(m, team),
+        ...row,
         visits: d.visits.enabled ? await d.visits.summary(m.id) : undefined,
         files: Object.entries(m.files)
           .map(([p, f]) => [p, f.size] as [string, number])
@@ -684,21 +760,60 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           createdAt,
         })),
       };
+      const audit = team ? members.entries(team.id, m.id, 50).map((e) => auditView(e)) : [];
+      return { site, backendBrowser, mcp, audit };
+    };
+    const previewVersion = (m: SiteMeta) => encodeURIComponent(m.updatedAt);
+
+    app.get(`${prefix}/team/spaces/:id`, (c) =>
+      c.redirect(href(`/team/sites/${encodeURIComponent(c.req.param("id") ?? "")}`), 301),
+    );
+    app.get(`${prefix}/team/sites/:id`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const m = await ownSite(c, team);
+      if (!m) return notYours(c, s);
+      const data = await siteDetailData(m, team);
+      const editor = roleRank[ts.role] >= roleRank.editor;
+      const csrf = sessions.csrfFor(s);
       return page(
         c,
-        teamSiteHtml(lang, config, {
-          ...(await teamInfo(team)),
-          backendConfigured: !!backend,
-          sites: [],
-          site,
-          backendBrowser,
-          mcp,
-          me: meOf(ts),
-          audit: members.entries(team.id, m.id, 30).map((e) => auditView(e)),
-          csrf: sessions.csrfFor(s),
+        siteDetailHtml(lang, config, {
+          kind: "team",
+          tab: c.req.query("tab") ?? "overview",
+          base: `/team/sites/${m.id}`,
+          ctx: teamCtx(lang, { team, me: meOf(ts) }),
+          csrf,
           flash: takeFlash(c, s),
+          canEdit: editor,
+          owner: { id: team.id, name: team.name },
+          teamPermanent: team.permanent,
+          teamDirectory: team.directory,
+          ...data,
+          preview: href(`/team/sites/${m.id}/preview?v=${previewVersion(m)}`),
+          replaceForm: editor
+            ? teamUploader(
+                lang,
+                config,
+                csrf,
+                href(`/team/sites/${m.id}/replace`),
+                t.team.replace,
+                t.team.replaceHelp,
+                t.team.replace,
+                false,
+                true,
+              )
+            : "",
         }),
       );
+    });
+    app.get(`${prefix}/team/sites/:id/preview`, async (c) => {
+      const ts = teamSession(c);
+      if (!ts) return c.body(null, 404);
+      const m = await ownSite(c, ts.team);
+      if (!m) return c.body(null, 404);
+      return previewResponse(c, m, ts.team);
     });
 
     /** A POST on one of the team's own sites. */
@@ -807,7 +922,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       const { secret } = addMcpToken(m, name, scope, now());
       await store.updateMeta(m);
       await log("mcp-token", `${name} (${scope})`);
-      return done(c, s, `${back}#mcp`, {
+      return done(c, s, `${back}?tab=mcp`, {
         kind: "ok",
         text: t.mcp.created,
         secret: { label: `${t.mcp.tokens}: ${name}`, note: t.mcp.createdNote, value: secret },
@@ -821,7 +936,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       m.mcpTokens = (m.mcpTokens ?? []).filter((x) => x.id !== tid);
       if (!m.mcpTokens.length) delete m.mcpTokens;
       await store.updateMeta(m);
-      return done(c, s, `${back}#mcp`, { kind: "ok", text: t.mcp.revoked });
+      return done(c, s, `${back}?tab=mcp`, { kind: "ok", text: t.mcp.revoked });
     });
 
     const backendFor = (team: Team) =>
@@ -845,6 +960,18 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         await log("file-delete", id);
       }
       return done(c, s, back, { kind: "ok", text: t.team.fileDeleted });
+    });
+
+    sitePost("token", async (c, { s, m, back, log }) => {
+      const token = newEditToken();
+      m.tokenHash = hashToken(token);
+      await store.updateMeta(m);
+      await log("edit-token-rotate");
+      return done(c, s, `${back}?tab=settings`, {
+        kind: "ok",
+        text: DX[lang].tokenDone,
+        secret: { label: DX[lang].tokenNew, note: DX[lang].tokenDone, value: token },
+      });
     });
 
     // ---- members ----------------------------------------------------------------------
@@ -1019,7 +1146,12 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       const ts = needTeam(c);
       if (ts instanceof Response) return ts;
       const { s, team } = ts;
-      const info = teamWorkersInfo(d.workers, team);
+      const base = teamWorkersInfo(d.workers, team);
+      const rich = await workerList(d.workers.list(team.id));
+      const info = {
+        ...base,
+        workers: base.workers.map((w) => rich.find((r) => r.id === w.id) ?? w),
+      };
       return page(
         c,
         teamWorkersHtml(lang, config, {
@@ -1116,7 +1248,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     workerPost("/team/workers/:name/rollback", async (c, { s, team, form, actor }) => {
       const rec = d.workers.find(team.id, c.req.param("name") ?? "");
       if (!rec) return done(c, s, workersBack, { kind: "err", text: t.notFound });
-      const back = href(`/team/workers/${rec.name}/versions`);
+      const back = href(`/team/workers/${rec.name}?tab=versions`);
       const n = Number(field(form, "version"));
       try {
         const r = await d.workers.rollback(team, rec, n, actor);
@@ -1131,28 +1263,12 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         throw e;
       }
     });
-    app.get(`${prefix}/team/workers/:name/versions`, async (c) => {
-      const ts = needTeam(c);
-      if (ts instanceof Response) return ts;
-      const { s, team } = ts;
-      const rec = d.workers.find(team.id, c.req.param("name") ?? "");
-      if (!rec) return done(c, s, workersBack, { kind: "err", text: t.notFound });
-      const info = teamWorkersInfo(d.workers, team);
-      return page(
-        c,
-        workerVersionsHtml(lang, config, {
-          ...(await teamInfo(team)),
-          backendConfigured: !!backend,
-          sites: [],
-          me: meOf(ts),
-          worker: workerView(rec),
-          versions: (await d.workers.listVersions(rec)).map(versionMeta),
-          canDeploy: info.enabled && info.configured && roleRank[ts.role] >= roleRank.editor,
-          csrf: sessions.csrfFor(s),
-          flash: takeFlash(c, s),
-        }),
-      );
-    });
+    app.get(`${prefix}/team/workers/:name/versions`, (c) =>
+      c.redirect(
+        href(`/team/workers/${encodeURIComponent(c.req.param("name") ?? "")}?tab=versions`),
+        301,
+      ),
+    );
     app.get(`${prefix}/team/workers/:name/versions/:n/code`, async (c) => {
       const ts = needTeam(c, "editor");
       if (ts instanceof Response) return ts;
@@ -1161,6 +1277,89 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       if (!rec || !v) return done(c, ts.s, workersBack, { kind: "err", text: t.notFound });
       return codeDownload(c, rec.name, v.n, v.code);
     });
+
+    // ---- Worker detail (0.15.0) ---------------------------------------------------------
+    app.get(`${prefix}/team/workers/:name`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const rec = d.workers.find(team.id, c.req.param("name") ?? "");
+      if (!rec) return done(c, s, workersBack, { kind: "err", text: t.notFound });
+      const tab = c.req.query("tab") ?? "overview";
+      return page(
+        c,
+        workerDetailHtml(lang, config, {
+          kind: "team",
+          tab,
+          base: `/team/workers/${rec.name}`,
+          team: { id: team.id, name: team.name },
+          ctx: teamCtx(lang, { team, me: meOf(ts) }),
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+          ...(await workerDetailData(rec, tab)),
+          canEdit: roleRank[ts.role] >= roleRank.editor,
+        }),
+      );
+    });
+    const workerEdit = (
+      path: string,
+      fn: (
+        c: Context,
+        ctx: TeamCtx & {
+          form: FormData;
+          rec: NonNullable<ReturnType<typeof d.workers.find>>;
+          back: string;
+        },
+      ) => Promise<Response>,
+    ) =>
+      workerPost(`/team/workers/:name/${path}`, async (c, ctx) => {
+        const rec = d.workers.find(ctx.team.id, c.req.param("name") ?? "");
+        if (!rec) return done(c, ctx.s, workersBack, { kind: "err", text: t.notFound });
+        const back = href(`/team/workers/${rec.name}?tab=settings`);
+        try {
+          return await fn(c, { ...ctx, rec, back });
+        } catch (e) {
+          if (e instanceof WorkerError)
+            return done(c, ctx.s, back, { kind: "err", text: e.message });
+          throw e;
+        }
+      });
+    workerEdit("vars", async (c, { s, team, form, actor, rec, back }) => {
+      const vars = envLines(field(form, "vars"));
+      if (typeof vars === "string") return done(c, s, back, { kind: "err", text: t.badRequest });
+      const w = await d.workers.editEnv(team, rec, { vars }, actor);
+      return done(c, s, back, {
+        kind: "ok",
+        text: v14.redeployed,
+        ...(w.url ? { link: w.url } : {}),
+      });
+    });
+    workerEdit("secrets", async (c, { s, team, form, actor, rec, back }) => {
+      const raw = envLines(field(form, "secrets"));
+      if (typeof raw === "string" || !Object.keys(raw).length)
+        return done(c, s, back, { kind: "err", text: t.badRequest });
+      const secrets: Record<string, string | null> = {};
+      for (const [k, v] of Object.entries(raw)) secrets[k] = v === "" ? null : v;
+      const w = await d.workers.editEnv(team, rec, { secrets }, actor);
+      return done(c, s, back, {
+        kind: "ok",
+        text: v14.redeployed,
+        ...(w.url ? { link: w.url } : {}),
+      });
+    });
+    for (const [act, off] of [
+      ["disable", true],
+      ["enable", false],
+    ] as const) {
+      workerEdit(act, async (c, { s, actor, rec, back }) => {
+        // A Worker the admin disabled stays off until the admin enables it.
+        if (rec.status === "disabled" && (rec.disabledBy ?? "admin") === "admin")
+          return done(c, s, back, { kind: "err", text: DX[lang].disabledByAdmin });
+        if (off === (rec.status === "disabled")) return done(c, s, back);
+        await d.workers.setDisabled(rec, off, actor);
+        return done(c, s, back, { kind: "ok", text: t.admin.saved });
+      });
+    }
 
     // ---- agent keys and invites (0.14.0) ---------------------------------------------
     const agentsBack = href("/team/agents");
@@ -1270,31 +1469,12 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
 
     // ---- Worker API keys for end users (0.14.0) ---------------------------------------
     const k14 = K14[lang];
-    app.get(`${prefix}/team/workers/:name/keys`, async (c) => {
-      const ts = needTeam(c);
-      if (ts instanceof Response) return ts;
-      const { s, team } = ts;
-      const rec = d.workers.find(team.id, c.req.param("name") ?? "");
-      if (!rec) return done(c, s, workersBack, { kind: "err", text: t.notFound });
-      const v = await d.userKeyOps.view(rec);
-      return page(
-        c,
-        workerKeysHtml(lang, config, {
-          ...(await teamInfo(team)),
-          backendConfigured: !!backend,
-          sites: [],
-          me: meOf(ts),
-          worker: workerView(rec),
-          settings: v.settings,
-          keys: v.keys,
-          verifyUrl: v.verifyUrl,
-          helperUrl: v.helperUrl,
-          canManage: roleRank[ts.role] >= roleRank.editor,
-          csrf: sessions.csrfFor(s),
-          flash: takeFlash(c, s),
-        }),
-      );
-    });
+    app.get(`${prefix}/team/workers/:name/keys`, (c) =>
+      c.redirect(
+        href(`/team/workers/${encodeURIComponent(c.req.param("name") ?? "")}?tab=keys`),
+        301,
+      ),
+    );
     const ukPost = (
       path: string,
       fn: (
@@ -1310,7 +1490,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         const ts = needTeam(c, "editor");
         if (ts instanceof Response) return ts;
         const rec = d.workers.find(ts.team.id, c.req.param("name") ?? "");
-        const back = rec ? href(`/team/workers/${rec.name}/keys`) : workersBack;
+        const back = rec ? href(`/team/workers/${rec.name}?tab=keys`) : workersBack;
         const form = await guardPost(c, ts.s, lang, back);
         if (form instanceof Response) return form;
         if (!rec) return done(c, ts.s, workersBack, { kind: "err", text: t.notFound });
@@ -1769,9 +1949,12 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
 
     adminPost("/admin/teams/:id/update", async (c, { s, form }) => {
       const patch: TeamPatch = {};
+      // The team detail form sends every checkbox (features=1); the overview toggles send one field.
+      const all = field(form, "features") === "1";
       for (const k of ["backend", "directory", "permanent"] as const) {
         const v = field(form, k);
-        if (v === "1" || v === "0") patch[k] = v === "1";
+        if (all) patch[k] = form.getAll(k).includes("1");
+        else if (v === "1" || v === "0") patch[k] = v === "1";
       }
       for (const k of ["maxSites", "maxMb"] as const) {
         if (!form.has(k)) continue;
@@ -1842,6 +2025,224 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       await d.recipes.purgeTeam(id);
       d.invalidateDirectory();
       return done(c, s, href("/admin"), { kind: "ok", text: t.admin.deleted });
+    });
+
+    // ---- admin: team, Worker and space detail pages (0.15.0) ---------------------------
+    const adminTeamRows = async (team: Team) => {
+      const sites = (await store.list())
+        .filter((m) => m.teamId === team.id && live(m))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .map((m) => teamRow(m, team));
+      await withVisits(sites);
+      return sites;
+    };
+    const workerList = async (recs: ReturnType<typeof d.workers.list>) =>
+      Promise.all(
+        recs.map(async (r) => {
+          const team = teams.get(r.teamId);
+          const v = await d.userKeyOps.view(r).catch(() => null);
+          const active = v ? v.keys.filter((k) => k.state === "active").length : 0;
+          return {
+            ...workerView(r),
+            team: { id: r.teamId, name: team?.name ?? null },
+            keysOn: !!v?.settings.required,
+            keysCount: active,
+            requests7: v?.keys.length ? v.keys.reduce((n, k) => n + k.usage.last7d, 0) : null,
+          };
+        }),
+      );
+    app.get(`${prefix}/admin/teams/:id`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      const team = teams.get(c.req.param("id") ?? "");
+      if (!team) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
+      await d.agentKeys.ready();
+      const sites = await adminTeamRows(team);
+      const usage = await d.usageOf(team);
+      const wq = d.workers.quotaOf(team);
+      return page(
+        c,
+        adminTeamHtml(lang, config, {
+          tab: c.req.query("tab") ?? "overview",
+          team: {
+            id: team.id,
+            name: team.name,
+            slug: team.slug ?? null,
+            keyPrefix: team.keyPrefix,
+            createdAt: team.createdAt,
+            backend: team.backend,
+            directory: team.directory,
+            permanent: team.permanent,
+            workers: !!team.workers,
+            maxSites: team.maxSites ?? null,
+            maxMb: team.maxMb ?? null,
+            maxWorkers: team.maxWorkers ?? null,
+            maxWorkerKb: team.maxWorkerKb ?? null,
+          },
+          quota: { ...d.quotaOf(team), workers: wq.workers, kb: wq.kb },
+          usage,
+          views7: d.visits.enabled ? sites.reduce((n, x) => n + (x.visits?.views7 ?? 0), 0) : null,
+          views30: d.visits.enabled
+            ? sites.reduce((n, x) => n + (x.visits?.views30 ?? 0), 0)
+            : null,
+          members: members.list(team.id).map((m) => ({
+            id: m.id,
+            name: m.name,
+            username: m.username,
+            role: m.role,
+            createdAt: m.createdAt,
+            lastLoginAt: m.lastLoginAt ?? null,
+          })),
+          invites: members.listInvites(team.id).length,
+          sites: sites.map((x) => ({ ...x, owner: { id: team.id, name: team.name } })),
+          workers: await workerList(d.workers.list(team.id)),
+          agentKeys: d.agentKeys.list(team.id).map((k) => d.agentKeys.view(k)),
+          audit: members.entries(team.id, undefined, 100).map((e) => auditView(e)),
+          cfConfigured: d.workers.settingsView().configured,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+    const adminWorker = (c: Context) => {
+      const team = teams.get(c.req.param("id") ?? "");
+      const rec = team ? d.workers.find(team.id, c.req.param("name") ?? "") : null;
+      return team && rec ? { team, rec } : null;
+    };
+    app.get(`${prefix}/admin/teams/:id/workers/:name`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      const x = adminWorker(c);
+      if (!x) return done(c, s, href("/admin/workers"), { kind: "err", text: t.notFound });
+      const tab = c.req.query("tab") ?? "overview";
+      return page(
+        c,
+        workerDetailHtml(lang, config, {
+          kind: "admin",
+          tab,
+          base: `/admin/teams/${x.team.id}/workers/${x.rec.name}`,
+          team: { id: x.team.id, name: x.team.name },
+          ctx: ADMIN_CTX(lang),
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+          ...(await workerDetailData(x.rec, tab)),
+          canEdit: true,
+        }),
+      );
+    });
+    app.get(`${prefix}/admin/teams/:id/workers/:name/versions/:n/code`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      const x = adminWorker(c);
+      const v = x ? await d.workers.getVersion(x.rec, Number(c.req.param("n"))) : null;
+      if (!x || !v) return done(c, s, href("/admin/workers"), { kind: "err", text: t.notFound });
+      return codeDownload(c, x.rec.name, v.n, v.code);
+    });
+    const adminMember = (c: Context) => {
+      const m = members.get(c.req.param("mid") ?? "");
+      return m && m.teamId === c.req.param("id") ? m : null;
+    };
+    adminPost("/admin/teams/:id/members/:mid/role", async (c, { s, form }) => {
+      const m = adminMember(c);
+      const role = field(form, "role");
+      if (!m) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
+      if (!isRole(role)) return done(c, s, href("/admin"), { kind: "err", text: t.badRequest });
+      await members.setRole(m.id, role);
+      await d.audit({
+        teamId: m.teamId,
+        actor: ADMIN_ACTOR,
+        action: "member-role",
+        detail: `${m.name} → ${t.members.roles[role]}`,
+      });
+      return done(c, s, href(`/admin/teams/${m.teamId}?tab=members`), {
+        kind: "ok",
+        text: t.members.roleSaved,
+      });
+    });
+    adminPost("/admin/teams/:id/members/:mid/delete", async (c, { s }) => {
+      const m = adminMember(c);
+      if (!m) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
+      await members.remove(m.id);
+      await d.audit({
+        teamId: m.teamId,
+        actor: ADMIN_ACTOR,
+        action: "member-remove",
+        detail: m.name,
+      });
+      return done(c, s, href(`/admin/teams/${m.teamId}?tab=members`), {
+        kind: "ok",
+        text: t.members.removed,
+      });
+    });
+    adminPost("/admin/teams/:id/agents/:kid/revoke", async (c, { s }) => {
+      const id = c.req.param("id") ?? "";
+      await d.agentKeys.ready();
+      const k = teams.get(id)
+        ? await d.agentKeys.revoke(id, c.req.param("kid") ?? "", "admin")
+        : null;
+      if (!k) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
+      await d.audit({
+        teamId: id,
+        actor: ADMIN_ACTOR,
+        action: "agent-key-revoke",
+        detail: `${k.name} (${k.prefix}…)`,
+      });
+      return done(c, s, href(`/admin/teams/${id}?tab=agents`), { kind: "ok", text: v14.revoked });
+    });
+
+    app.get(`${prefix}/admin/spaces/:id`, (c) =>
+      c.redirect(href(`/admin/sites/${encodeURIComponent(c.req.param("id") ?? "")}`), 301),
+    );
+    app.get(`${prefix}/admin/sites/:id`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      const m = await store.get(c.req.param("id") ?? "");
+      if (!m) return done(c, s, href("/admin/sites"), { kind: "err", text: t.notFound });
+      const team = teams.get(m.teamId) ?? null;
+      const data = await siteDetailData(m, team);
+      const audit = members.entries(team?.id ?? PLATFORM_AUDIT, m.id, 50).map((e) => auditView(e));
+      return page(
+        c,
+        siteDetailHtml(lang, config, {
+          kind: "admin",
+          tab: c.req.query("tab") ?? "overview",
+          base: `/admin/sites/${m.id}`,
+          ctx: ADMIN_CTX(lang),
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+          canEdit: true,
+          owner: team ? { id: team.id, name: team.name } : null,
+          teamPermanent: !!team?.permanent,
+          teamDirectory: !!team?.directory,
+          ...data,
+          audit,
+          preview: href(`/admin/sites/${m.id}/preview?v=${previewVersion(m)}`),
+        }),
+      );
+    });
+    app.get(`${prefix}/admin/sites/:id/preview`, async (c) => {
+      if (!adminSession(c)) return c.body(null, 404);
+      const m = await store.get(c.req.param("id") ?? "");
+      if (!m) return c.body(null, 404);
+      return previewResponse(c, m, teams.get(m.teamId) ?? null);
+    });
+    adminPost("/admin/sites/:id/token", async (c, { s }) => {
+      const m = await store.get(c.req.param("id") ?? "");
+      if (!m) return done(c, s, href("/admin/sites"), { kind: "err", text: t.notFound });
+      const token = newEditToken();
+      m.tokenHash = hashToken(token);
+      await store.updateMeta(m);
+      await d.audit({
+        teamId: teams.get(m.teamId) ? m.teamId : PLATFORM_AUDIT,
+        siteId: m.id,
+        actor: ADMIN_ACTOR,
+        action: "edit-token-rotate",
+      });
+      return done(c, s, href(`/admin/sites/${m.id}?tab=settings`), {
+        kind: "ok",
+        text: DX[lang].tokenDone,
+        secret: { label: DX[lang].tokenNew, note: DX[lang].tokenDone, value: token },
+      });
     });
 
     // ---- admin: notification center + platform webhook (0.14.0) ------------------------
@@ -1985,10 +2386,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             quota: d.workers.quotaOf(x),
             count: d.workers.list(x.id).length,
           })),
-          workers: d.workers.list().map((r) => ({
-            ...workerView(r),
-            team: { id: r.teamId, name: teams.get(r.teamId)?.name ?? null },
-          })),
+          workers: await workerList(d.workers.list()),
           audit: members.entries(PLATFORM_AUDIT, undefined, 30).map((e) => auditView(e)),
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
@@ -2196,6 +2594,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
             createdAt: m.createdAt,
             expiresAt: m.expiresAt,
             totalBytes: m.totalBytes,
+            fileCount: m.fileCount,
             permanent: !!m.permanent,
           } as AdminSiteRow;
         });

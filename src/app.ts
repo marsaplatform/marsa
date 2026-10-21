@@ -1116,6 +1116,17 @@ export function createApp({
     recipes,
     userKeys,
     userKeyOps: ukOps,
+    previewImage: async (meta, teamId) => {
+      const cover = await coverOf(meta);
+      const path = cover ? store.filePath(meta, cover.path) : null;
+      const body = cover && path ? await readFile(path).catch(() => null) : null;
+      if (cover && body && body.byteLength <= COVER_MAX_BYTES && looksLike(cover.mime, body))
+        return { type: cover.mime, body: new Uint8Array(body) };
+      return {
+        type: "image/svg+xml; charset=utf-8",
+        body: placeholderSvg(meta.title || meta.id, teamId ?? meta.id),
+      };
+    },
   });
   app.get("/privacy", (c) => appPage(c, privacyHtml("en", config)));
   app.get("/ar/privacy", (c) => appPage(c, privacyHtml("ar", config)));

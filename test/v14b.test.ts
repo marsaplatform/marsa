@@ -349,7 +349,7 @@ describe("0.14.0 Worker API keys", () => {
 
     // Dashboard page renders for the team (Arabic).
     const { b } = await t.signIn(team.key, "/ar");
-    const html = await (await b.get("/ar/team/workers/mcp/keys")).text();
+    const html = await (await b.get("/ar/team/workers/mcp?tab=keys")).text();
     expect(html).toContain("مفاتيح API");
     expect(html).toContain("Noisy");
     expect(html).not.toContain(k.secret);

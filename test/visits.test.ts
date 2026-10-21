@@ -116,7 +116,7 @@ describe("visit counts", () => {
     const dash = await (await b.get("/team")).text();
     expect(dash).toContain('class="spark"');
     expect(dash).toContain("7 d: 3 · 30 d: 3");
-    const page = await (await b.get(`/team/sites/${site.id}`)).text();
+    const page = await (await b.get(`/team/sites/${site.id}?tab=visits`)).text();
     expect(page).toContain('id="visits-title"');
     expect(page).toContain("no cookies, no IP addresses stored");
     expect(page).toContain("2026-01-01: 3 views, 1 visitors");
@@ -134,7 +134,7 @@ describe("visit counts", () => {
     expect(res.headers.get("set-cookie")).toBeNull();
     expect((await t.visits.summary(site.id)).views30).toBe(0);
     const { b } = await t.signIn(team.key);
-    expect(await (await b.get(`/team/sites/${site.id}`)).text()).toContain(
+    expect(await (await b.get(`/team/sites/${site.id}?tab=visits`)).text()).toContain(
       "Visit counting is turned off",
     );
   });

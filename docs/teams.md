@@ -106,10 +106,14 @@ After signing in, a team member lands on `/team` (or `/ar/team`):
 - **Live sites**: title, link, expiry, size and home-page visibility, with **Manage** and **Delete**.
 - **Publish a new site**: drag and drop files, a folder or one `.zip`, or pick them, then choose when
   it expires (within the instance limits).
-- **Manage a site** (`/team/sites/<id>`): copy the link, **extend** the expiry (never past created +
-  `MAX_TTL_HOURS`), **hide from / show on the home page**, **replace the files** (same link), **delete**,
-  see the published files, and, for teams with backend access, a small **browser of the site's KV
-  values and uploaded files** with delete buttons.
+- **Space detail** (`/team/sites/<id>`, 0.15.0): tabs **Overview** (preview, copy/open the link,
+  **extend** the expiry — never past created + `MAX_TTL_HOURS` — permanence, home-page visibility),
+  **Visits** (30-day chart), **Files**, **Data** (for teams with backend access, a browser of the
+  site's KV values and uploaded files: view and delete), **MCP**, **Activity** and **Settings**
+  (replace the files with the same link, regenerate the edit token — shown once — and delete).
+- Every table row opens its detail page (click, or focus it and press Enter); actions are icon
+  buttons plus a labelled ⋮ menu. Tables have search, filters, sort, pagination and a card view on
+  phones.
 - **Snippets for agents**: a `curl` call and a prompt using `$MARSA_TEAM_KEY` (never the real key).
 
 Team sites are managed through the session: nobody on the team needs the per-site edit token.
@@ -126,9 +130,12 @@ Sign in at `/admin/login` with `ADMIN_TOKEN`. The sidebar has five pages:
    once** after creating or rotating; Marsa stores only its SHA-256. Each row has switches for
    *Data and files*, *On home page*, *Permanent* and *Workers*, the quotas, and a **More** menu with
    **Invite**, **New key** (the old key and its sessions stop at once) and **Delete** (optionally
-   with its sites; otherwise they stay up as ordinary links until they expire).
+   with its sites; otherwise they stay up as ordinary links until they expire). Click a team to open
+   its **detail page** (`/admin/teams/<id>`, 0.15.0): stats, members (change role, remove), spaces,
+   Workers, agent keys (revoke), quotas and features (including Workers), activity and a danger zone.
 2. **Spaces** (`/admin/sites`): every live site with its owner (a team or *Guest*), link, expiry and
-   size. Filter by team, guests or permanent, search, sort, and delete any site.
+   size. Filter by team, guests or permanent, search, sort, and delete any site. A row opens
+   `/admin/sites/<id>` (the same tabs as the team page).
 3. **Workers** (`/admin/workers`): per-team Workers settings and every team Worker.
 4. **Activity** (`/admin/activity`): every team's activity log plus the platform log, filtered by
    team, actor kind and text.

@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.15.0] - 2026-10-21
+
+### Added
+- **Worker detail page** (`/team/workers/<name>`, admin `/admin/teams/<id>/workers/<name>`, AR and EN)
+  with breadcrumbs and tabs: **Overview** (status, live URL with copy/open, MCP endpoint when the code
+  serves `/mcp`, last deploy and by whom, size, SHA-256, var and secret *names*, health check, API-key
+  requests in the last 7 days), **Versions** (roll back, download), **API keys**, **Settings**
+  (require keys, limits, edit env vars, set/remove secrets, disable/enable, delete with confirmation)
+  and **Activity**. Editing vars or secrets redeploys the latest stored code and is saved as a new
+  version. A team cannot re-enable a Worker the admin disabled. The admin view is read-only for code.
+- **Admin team detail** (`/admin/teams/<id>`): stats, members (change role, remove), spaces, Workers,
+  agent keys (revoke), quotas and features including the Workers toggle, activity, and a danger zone
+  (new team key, delete).
+- **Space detail** (`/team/sites/<id>`, admin `/admin/sites/<id>`) with tabs: preview thumbnail (served
+  privately), open/copy link, 30-day visits chart, files, a KV/uploads browser (view, delete),
+  permanence and expiry, edit-token regeneration (shown once), MCP access, activity and delete.
+- **Tables everywhere** (sites, recent, Workers, members, agent keys, recipes, admin teams, admin
+  Workers, admin sites, activity): the whole row opens the detail page (mouse and keyboard), icon
+  buttons plus a labelled ⋮ menu, more columns, sort, search, filters, pagination, empty states and a
+  card view on phones.
+
+### Changed
+- `/team/workers/<name>/versions` and `/keys` redirect to the matching tab; `/team/spaces/<id>` and
+  `/admin/spaces/<id>` redirect to the space detail page.
+- The Workers page is a table instead of cards; the admin overview's inline switches moved to the
+  team detail page.
+
 ## [0.14.1] - 2026-10-21
 
 ### Changed

@@ -77,6 +77,18 @@ Every successful deploy is stored as a version on the Spaces server: the code, t
 - Workers deployed before 0.14.0 show "No stored version — the next deploy will be saved".
 - Deploy, redeploy, rollback and delete raise a notification for the team's owners (see [Agent keys and alerts](agent-keys.md)).
 
+## The Worker page (0.15.0)
+
+`/team/workers/<name>` (admins: `/admin/teams/<id>/workers/<name>`) has tabs:
+
+- **Overview**: status, live URL (copy/open), the MCP endpoint when the code serves `/mcp`, the last deploy and who did it, size, SHA-256, var and secret **names**, a health check, and API-key requests in the last 7 days (shown only when the Worker uses Marsa API keys).
+- **Versions**: roll back or download any stored version.
+- **API keys**: keys for the Worker's users.
+- **Settings**: require API keys and limits, edit env vars, set or remove secrets (values are write-only and never shown), disable/enable, delete. Saving vars or secrets redeploys the latest stored code and creates a new version. A Worker disabled by the admin can only be re-enabled by the admin.
+- **Activity**: deploys, rollbacks, settings and key changes for this Worker.
+
+The admin view is read-only for code and settings; admins can disable, enable or delete.
+
 ## MCP tools
 
 When Workers are on for the team, a space's MCP server (see [MCP per space](mcp.md)) also offers `list_workers`, `list_worker_versions` and `get_worker_version` (read-only tokens) and `deploy_worker`, `redeploy_worker`, `rollback_worker` and `delete_worker` (read-write tokens), with the same rules as the API.

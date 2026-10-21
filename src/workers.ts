@@ -109,6 +109,8 @@ export interface WorkerRec {
   lastError?: string;
   /** Newest stored version number (0.14.0); unset = nothing stored yet. */
   version?: number;
+  /** Who disabled it (0.15.0): a team may only re-enable what it disabled itself. */
+  disabledBy?: "admin" | "team";
 }
 
 export interface WorkerView {
@@ -755,6 +757,38 @@ export class WorkerService {
     }
   }
 
+  /**
+   * Change env vars and/or secrets (0.15.0): the newest stored code is deployed again with
+   * them, recorded as a new version. `secrets` values of null remove a secret.
+   */
+  async editEnv(
+    team: Team,
+    rec: WorkerRec,
+    change: { vars?: Record<string, string>; secrets?: Record<string, string | null> },
+    actor: Actor,
+  ): Promise<WorkerView> {
+    const v = await this.versions.latest(rec.id);
+    if (!v) {
+      throw new WorkerError(
+        409,
+        "NO_STORED_VERSION",
+        "no stored version yet; deploy the code once and it will be saved",
+      );
+    }
+    return this.deploy(
+      team,
+      {
+        name: rec.name,
+        code: v.code,
+        vars: change.vars ?? rec.vars,
+        ...(change.secrets ? { secrets: change.secrets } : {}),
+        note: change.vars ? "env vars changed" : "secrets changed",
+      },
+      actor,
+      { action: "redeploy" },
+    );
+  }
+
   /** One-click redeploy: deploy the newest stored version again (secrets are kept). */
   async redeploy(team: Team, rec: WorkerRec, actor: Actor, note?: unknown): Promise<WorkerView> {
     const v = await this.versions.latest(rec.id);
@@ -845,6 +879,8 @@ export class WorkerService {
         throw this.cfFail(err, disabled ? "disable failed" : "enable failed");
       }
       next.status = disabled ? "disabled" : "active";
+      if (disabled) next.disabledBy = actor.kind === "admin" ? "admin" : "team";
+      else delete next.disabledBy;
       next.updatedAt = this.iso();
       this.recs.set(next.id, next);
       await this.saveRecs();
