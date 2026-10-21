@@ -7,7 +7,7 @@ import { activityRow, queryActivity, readActivityQuery, sendActivity } from "./a
 import { AgentKeyStore } from "./agent-keys.js";
 import { NoteStore } from "./agent-notes.js";
 import { mountAgentInviteRoutes, mountAgentRoutes } from "./agent-routes.js";
-import { APP_CSS, APP_JS, fontAsset } from "./assets.js";
+import { APP_CSS, APP_JS, ASSET_VERSION, fontAsset } from "./assets.js";
 import { CloudflareBackend, CloudflareError } from "./backend/cloudflare.js";
 import { probeBackend } from "./backend/health.js";
 import { mountBackendRoutes } from "./backend/routes.js";
@@ -338,7 +338,7 @@ export function createApp({
     await members.ready();
     await workerSvc.ready();
     await next();
-    baseHeaders(c.res.headers);
+    baseHeaders(c.res.headers, config.publicUrl.startsWith("https://"));
   });
   app.use("/api/*", async (c, next) => {
     const r = limiter.hit(
@@ -1400,7 +1400,13 @@ export function createApp({
   };
   const asset = (type: string, body: string) => (c: Context) => {
     c.header("Content-Type", type);
-    c.header("Cache-Control", "public, max-age=300");
+    // 0.16.0: versioned URLs (?v=<content hash>) never change, so cache them for a year.
+    c.header(
+      "Cache-Control",
+      c.req.query("v") === ASSET_VERSION
+        ? "public, max-age=31536000, immutable"
+        : "public, max-age=300",
+    );
     return c.body(body);
   };
   const publicText = (c: Context, type: string, body: string) => {

@@ -272,3 +272,21 @@ describe("0.16.0 health checks treat 4xx by Worker type and honour a declared ta
     expect(() => readMeta({ healthExpect: "ok" })).toThrow(/healthExpect/);
   });
 });
+
+describe("0.16.0 headers", () => {
+  it("sends one X-Frame-Options, HSTS with preload, and immutable versioned assets", async () => {
+    t = await makeApp();
+    const home = await t.app.request("/");
+    expect(home.headers.get("x-frame-options")).toBe("DENY");
+    expect(home.headers.get("strict-transport-security")).toContain("preload");
+    const html = await home.text();
+    const v = /app\.css\?v=([a-f0-9]+)/.exec(html)?.[1];
+    expect(v).toBeTruthy();
+    const css = await t.app.request(`/assets/app.css?v=${v}`);
+    expect(css.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    const plain = await t.app.request("/assets/app.css");
+    expect(plain.headers.get("cache-control")).toBe("public, max-age=300");
+    const old = await t.app.request("/assets/app.js?v=stale");
+    expect(old.headers.get("cache-control")).toBe("public, max-age=300");
+  });
+});
