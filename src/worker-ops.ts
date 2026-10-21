@@ -91,6 +91,9 @@ export class WorkerOps {
     if (!isMcp) return null;
     const p = this.d.probes?.get(rec.id, rec.version) ?? null;
     if (p && !p.ok && (p.status === 401 || p.status === 403 || p.note === "protected")) return null;
+    // An MCP server with its own auth answered initialize with 401/403: check it with a GET from now on.
+    const last = this.health.view(rec.id).last;
+    if (last?.via === "mcp" && (last.s === 401 || last.s === 403)) return null;
     return `${rec.url.replace(/\/$/, "")}/mcp`;
   }
 
