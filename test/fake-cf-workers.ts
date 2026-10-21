@@ -26,6 +26,7 @@ export class FakeCfWorkers {
   calls: { method: string; path: string }[] = [];
   tokenStatus = "active";
   failPutScript = false;
+  accountOwned = false;
   private n = 0;
 
   constructor() {
@@ -89,7 +90,14 @@ export class FakeCfWorkers {
     if (auth !== `Bearer ${CF_TOKEN}`) return this.bad(403, "Authentication error");
     const json = async () => JSON.parse(String(init.body ?? "{}"));
     let m: RegExpMatchArray | null;
-    if (path === "/user/tokens/verify") return this.ok({ id: "tok", status: this.tokenStatus });
+    if (path === "/user/tokens/verify") {
+      // Like an account-owned token: the user endpoint refuses it.
+      if (this.accountOwned) return this.bad(401, "Invalid API Token", 1000);
+      return this.ok({ id: "tok", status: this.tokenStatus });
+    }
+    if (path === `/accounts/${CF_ACCOUNT}/tokens/verify`) {
+      return this.ok({ id: "tok", status: this.tokenStatus });
+    }
     if (path === "/zones" && method === "GET") {
       return this.ok(
         url.searchParams.get("name") === ZONE_NAME

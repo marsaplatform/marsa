@@ -326,6 +326,21 @@ export class WorkerService {
       throw new WorkerError(400, "INVALID_REQUEST", "accountId: the 32-character account id");
     }
     return this.serial(async () => {
+      // Zone first: it also tells the account, which account-owned tokens need to verify.
+      let zoneId = "";
+      if (zoneName) {
+        let z: { id: string; accountId: string } | null;
+        try {
+          z = await this.deps.api.zoneId(token, zoneName);
+        } catch (err) {
+          throw this.cfFail(err, "could not read the zone with this token");
+        }
+        if (!z) {
+          throw new WorkerError(400, "ZONE_NOT_FOUND", `the token cannot see the zone ${zoneName}`);
+        }
+        zoneId = z.id;
+        accountId ||= z.accountId;
+      }
       let status: string;
       try {
         status = await this.deps.api.verify({ token, ...(accountId ? { accountId } : {}) });
@@ -334,19 +349,6 @@ export class WorkerService {
       }
       if (status !== "active") {
         throw new WorkerError(400, "TOKEN_NOT_ACTIVE", `Cloudflare says the token is ${status}`);
-      }
-      let zoneId = "";
-      if (zoneName) {
-        let z: { id: string; accountId: string } | null;
-        try {
-          z = await this.deps.api.zoneId(token, zoneName);
-        } catch (err) {
-          throw this.cfFail(err, "could not read the zone");
-        }
-        if (!z)
-          throw new WorkerError(400, "ZONE_NOT_FOUND", `the token cannot see the zone ${zoneName}`);
-        zoneId = z.id;
-        accountId ||= z.accountId;
       }
       if (!accountId) {
         const accts = await this.deps.api.accounts(token).catch(() => []);

@@ -4,7 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SecretBox } from "../src/secrets.js";
-import { CF_TOKEN, FakeCfWorkers, ZONE_NAME } from "./fake-cf-workers.js";
+import { CF_ACCOUNT, CF_TOKEN, FakeCfWorkers, ZONE_NAME } from "./fake-cf-workers.js";
 import { BASE, makeApp } from "./helpers.js";
 
 type App = Awaited<ReturnType<typeof makeApp>>;
@@ -90,6 +90,20 @@ describe("team Workers", () => {
     expect(await fail.text()).not.toContain(CF_TOKEN);
     expect(logs.join("\n")).not.toContain(CF_TOKEN);
     expect(await readFile(join(t.dir, "audit.json"), "utf8")).not.toContain(CF_TOKEN);
+  });
+
+  it("accepts an account-owned token (account found through the zone)", async () => {
+    const cf = new FakeCfWorkers();
+    cf.accountOwned = true;
+    t = await makeApp({ MARSA_SECRETS_KEY: KEY }, { cfFetch: cf.fetch });
+    const r = await t.admin("PUT", "/workers/settings", { token: CF_TOKEN, zone: ZONE_NAME });
+    expect(r.status).toBe(200);
+    expect((await r.json()).settings).toMatchObject({ status: "active", accountId: CF_ACCOUNT });
+    const unknown = await t.admin("PUT", "/workers/settings", {
+      token: CF_TOKEN,
+      zone: "nope.test",
+    });
+    expect(unknown.status).toBe(400);
   });
 
   it("needs MARSA_SECRETS_KEY and a configured token", async () => {
