@@ -39,7 +39,9 @@ export type NoticeKind =
   | "user-key-create"
   | "user-key-revoke"
   | "user-key-spike"
-  | "agent-note-blocker";
+  | "agent-note-blocker"
+  | "worker-down"
+  | "worker-recovered";
 
 /** Audit actions that also raise a notification. */
 const FROM_AUDIT = new Set<string>([
@@ -105,6 +107,8 @@ const T: Record<Lang, Record<NoticeKind, (n: Notice) => string>> = {
     "user-key-revoke": (n) => `${n.actor} revoked a Worker API key: ${n.detail}`,
     "user-key-spike": (n) => `Rate-limit spike on a Worker: ${n.detail}`,
     "agent-note-blocker": (n) => `Blocker note from ${n.actor}: ${n.detail}`,
+    "worker-down": (n) => `Worker down: ${n.detail}`,
+    "worker-recovered": (n) => `Worker back up: ${n.detail}`,
   },
   ar: {
     "worker-deploy": (n) => `${n.actor} نشر Worker جديدًا: ${n.detail}`,
@@ -128,6 +132,8 @@ const T: Record<Lang, Record<NoticeKind, (n: Notice) => string>> = {
     "user-key-revoke": (n) => `${n.actor} ألغى مفتاح API لوركر: ${n.detail}`,
     "user-key-spike": (n) => `ارتفاع في الطلبات المرفوضة بسبب الحد على وركر: ${n.detail}`,
     "agent-note-blocker": (n) => `ملاحظة عائقة من ${n.actor}: ${n.detail}`,
+    "worker-down": (n) => `الوركر متوقف: ${n.detail}`,
+    "worker-recovered": (n) => `الوركر عاد للعمل: ${n.detail}`,
   },
 };
 
@@ -148,9 +154,10 @@ export const noticeTone = (k: NoticeKind): "warn" | "info" | "ok" =>
   k === "team-key-rotate" ||
   k === "user-key-revoke" ||
   k === "user-key-spike" ||
-  k === "agent-note-blocker"
+  k === "agent-note-blocker" ||
+  k === "worker-down"
     ? "warn"
-    : k === "backend-ok"
+    : k === "backend-ok" || k === "worker-recovered"
       ? "ok"
       : "info";
 

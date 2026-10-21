@@ -47,6 +47,23 @@ export interface ScriptUpload {
   compatibilityFlags?: string[];
   /** Service bindings: env name → script name (same team, resolved by the caller). */
   services?: { name: string; script: string }[];
+  /** 0.15.2: Workers Logs (observability) on for this script. */
+  observability?: boolean;
+}
+
+/** A binding as Spaces shows it: name and type only (plain_text values are dropped). */
+export interface CfBindingInfo {
+  name: string;
+  type: string;
+  /** plain_text only: true when the value is an empty string. */
+  empty?: boolean;
+}
+
+/** A GraphQL answer: data, or the error messages (scrubbed). */
+export interface GqlResult<T> {
+  data: T | null;
+  errors: string[];
+  status: number;
 }
 
 /** Cloudflare's limit for one plain_text binding. */
@@ -180,6 +197,7 @@ export class CloudflareWorkersApi {
       // Secrets are set separately and survive redeploys.
       keep_bindings: ["secret_text"],
       tags: ["marsa-spaces"],
+      ...(s.observability ? { observability: { enabled: true, head_sampling_rate: 1 } } : {}),
     };
     form.append(
       "metadata",
@@ -196,6 +214,96 @@ export class CloudflareWorkersApi {
       mod("worker.js", s.code);
     }
     await this.call(a.token, "PUT", `/accounts/${a.accountId}/workers/scripts/${script}`, form);
+  }
+
+  /**
+   * 0.15.2: names and types of a script's bindings (vars, secrets, services…). Values are
+   * never returned: plain_text text is reduced to an "empty" flag, secrets have none.
+   */
+  async scriptBindings(a: CfAccess, script: string): Promise<CfBindingInfo[] | null> {
+    const r = await this.call<{ bindings?: { name?: string; type?: string; text?: unknown }[] }>(
+      a.token,
+      "GET",
+      `/accounts/${a.accountId}/workers/scripts/${script}/settings`,
+      undefined,
+      true,
+    );
+    if (!r) return null;
+    return (r.bindings ?? [])
+      .filter((b) => typeof b.name === "string" && typeof b.type === "string")
+      .map((b) => ({
+        name: b.name as string,
+        type: b.type as string,
+        ...(b.type === "plain_text" ? { empty: b.text === "" } : {}),
+      }));
+  }
+
+  /** 0.15.2: turn Workers Logs on/off for a script (settings only, no new code). */
+  async setObservability(a: CfAccess, script: string, enabled: boolean): Promise<void> {
+    await this.call(
+      a.token,
+      "PATCH",
+      `/accounts/${a.accountId}/workers/scripts/${script}/script-settings`,
+      { observability: { enabled, ...(enabled ? { head_sampling_rate: 1 } : {}) } },
+    );
+  }
+
+  /** 0.15.2: Workers Logs query (POST …/workers/observability/telemetry/query). */
+  async telemetryQuery<T>(a: CfAccess, body: object): Promise<T | null> {
+    return this.call<T>(
+      a.token,
+      "POST",
+      `/accounts/${a.accountId}/workers/observability/telemetry/query`,
+      body,
+    );
+  }
+
+  /** 0.15.2: Cloudflare GraphQL analytics. Errors come back as text, never thrown for 200s. */
+  async graphql<T>(token: string, query: string, variables: object): Promise<GqlResult<T>> {
+    let res: Response;
+    try {
+      res = await this.fetchFn(`${this.apiBase}/graphql`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ query, variables }),
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch (err) {
+      return {
+        data: null,
+        errors: [`could not reach Cloudflare (${(err as Error).name})`],
+        status: 502,
+      };
+    }
+    const json = (await res.json().catch(() => null)) as {
+      data?: T | null;
+      errors?: { message?: string; extensions?: { code?: string } }[] | null;
+    } | null;
+    const errors = (json?.errors ?? []).map((e) =>
+      `${e.extensions?.code ? `${e.extensions.code}: ` : ""}${e.message ?? "error"}`
+        .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]")
+        .slice(0, 300),
+    );
+    if (!res.ok && !errors.length) errors.push(`Cloudflare GraphQL error (HTTP ${res.status})`);
+    return { data: json?.data ?? null, errors, status: res.status };
+  }
+
+  /**
+   * 0.15.2: one harmless read for the permission checklist. Only GET, or a POST to a
+   * read-only query endpoint; the answer body is dropped, only ok/status/message are kept.
+   */
+  async readProbe(
+    token: string,
+    path: string,
+    post?: object,
+  ): Promise<{ ok: boolean; status: number; message: string | null }> {
+    try {
+      await this.call(token, post ? "POST" : "GET", path, post);
+      return { ok: true, status: 200, message: null };
+    } catch (e) {
+      if (e instanceof CfError) return { ok: false, status: e.status, message: e.message };
+      return { ok: false, status: 0, message: "no answer" };
+    }
   }
 
   async putSecret(a: CfAccess, script: string, name: string, value: string): Promise<void> {

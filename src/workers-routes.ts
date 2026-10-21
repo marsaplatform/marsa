@@ -192,6 +192,7 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
       ...("bindings" in body ? { bindings: body.bindings } : {}),
       ...("meta" in body ? { meta: body.meta } : {}),
       ...("repo" in body ? { repo: body.repo } : {}),
+      ...("requiredEnv" in body ? { requiredEnv: body.requiredEnv } : {}),
     };
   };
 
@@ -342,6 +343,7 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
           {
             ...("meta" in body ? { meta: body.meta } : {}),
             ...("repo" in body ? { repo: body.repo } : {}),
+            ...("requiredEnv" in body ? { requiredEnv: body.requiredEnv } : {}),
             ...(spaceId !== undefined ? { spaceId } : {}),
           },
           r.cr.actor,

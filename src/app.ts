@@ -44,6 +44,7 @@ import { type NavAccount, withNavAccount } from "./nav-state.js";
 import { leaveNote, mountAdminNoteRoutes, mountNoteRoutes, noteView } from "./notes-routes.js";
 import { NotificationCenter, type NotifyDeps } from "./notify.js";
 import { openapi } from "./openapi.js";
+import { mountOpsRoutes } from "./ops-routes.js";
 import { RateLimiter } from "./rate-limit.js";
 import { mountAdminRecipeRoutes, mountRecipeRoutes } from "./recipe-routes.js";
 import { loadBuiltinRecipes, RecipeStore, recipeHtml, servedLang, summaryOf } from "./recipes.js";
@@ -91,6 +92,7 @@ import { UserKeyStore } from "./user-keys.js";
 import { VisitCounter } from "./visits.js";
 import { mountWebRoutes } from "./web.js";
 import { ProbeCache } from "./worker-insight.js";
+import { WorkerOps } from "./worker-ops.js";
 import { PLATFORM_AUDIT, WorkerService } from "./workers.js";
 import { ADMIN_ACTOR, mountWorkerRoutes } from "./workers-routes.js";
 
@@ -147,6 +149,7 @@ export interface AppDeps {
     notify: NotificationCenter;
     userKeys: UserKeyStore;
     recipes: RecipeStore;
+    ops: WorkerOps;
   }) => void;
   /** Agent recipes (0.14.0). Built from docs/recipes + <dataDir> when omitted. */
   recipes?: RecipeStore;
@@ -155,6 +158,8 @@ export interface AppDeps {
   /** 0.15.1: MCP tools/list probes and GitHub repo checks (tests inject fakes). */
   mcpProbe?: ProbeCache;
   repoChecker?: RepoChecker;
+  /** 0.15.2: health checks, analytics, env view (tests inject one with a fake fetch). */
+  ops?: WorkerOps;
   now?: () => number;
 }
 
@@ -183,6 +188,7 @@ export function createApp({
   userKeys = new UserKeyStore(config.dataDir, now),
   mcpProbe,
   repoChecker,
+  ops,
 }: AppDeps) {
   const probes = mcpProbe ?? new ProbeCache(cfFetch ?? ((i, init) => fetch(i, init)), now);
   const repos =
@@ -201,7 +207,6 @@ export function createApp({
       ...notifyOpts,
     });
   members.onLog = (e) => notices.fromAudit(e);
-  expose?.({ agentKeys, notify: notices, userKeys, recipes });
   void userKeys.ready().catch((e) => console.error("[user-keys] load failed", e?.message));
   void recipes.ready().catch((e) => console.error("[recipes] load failed", e?.message));
   void agentKeys.ready().catch((e) => console.error("[agent-keys] load failed", e?.message));
@@ -229,7 +234,26 @@ export function createApp({
         if (e.teamId === PLATFORM_AUDIT || teams.get(e.teamId)) await members.log(e);
       },
     });
-  workerSvc.onRemove = (rec) => userKeys.purgeWorker(rec.id);
+  const workerOps =
+    ops ??
+    new WorkerOps({
+      dataDir: config.dataDir,
+      workers: workerSvc,
+      userKeys,
+      fetch: cfFetch ?? ((i, init) => fetch(i, init)),
+      now,
+      probes,
+      notify: notices,
+      healthIntervalSec: config.workers.healthIntervalSec,
+      backend,
+      backendConfig: config.cloudflare,
+    });
+  void workerOps.health.ready().catch((e) => console.error("[health] load failed", e?.message));
+  expose?.({ agentKeys, notify: notices, userKeys, recipes, ops: workerOps });
+  workerSvc.onRemove = (rec) => {
+    void workerOps.health.purge(rec.id).catch(() => {});
+    return userKeys.purgeWorker(rec.id);
+  };
   const ukOps = userKeyOps({
     config,
     teams,
@@ -850,6 +874,7 @@ export function createApp({
     teamAuth,
     recipes,
     userKeyOps: ukOps,
+    ops: workerOps,
     leaveNote: async (team, input, who) => {
       const r = await leaveNote(
         { notes: agentNotes, notify: notices, limiter },
@@ -896,6 +921,7 @@ export function createApp({
       return !!m && m.teamId === teamId;
     },
   });
+  mountOpsRoutes(app, { teams, workers: workerSvc, ops: workerOps, limiter, teamAuth });
   mountAgentRoutes(app, agentDeps);
   mountAdminRecipeRoutes(app, recipeDeps);
   const noteDeps = { teams, notes: agentNotes, notify: notices, limiter, teamAuth };
@@ -1203,6 +1229,7 @@ export function createApp({
     userKeyOps: ukOps,
     mcpProbe: probes,
     repoChecker: repos,
+    ops: workerOps,
     notes: agentNotes,
     previewImage: async (meta, teamId) => {
       const cover = await coverOf(meta);

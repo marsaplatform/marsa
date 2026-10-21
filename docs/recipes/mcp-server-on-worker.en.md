@@ -107,6 +107,7 @@ curl -s -X PUT "$MARSA_URL/api/teams/$MARSA_TEAM/workers/$WORKER_NAME" \
 { "code": $(jq -Rs . < dist/worker.js),
   "note": "v1.2.0: add get_item",
   "vars": { "DATA_URL": "https://example.org/data.json" },
+  "requiredEnv": ["DATA_URL", "UPSTREAM_TOKEN"],
   "secrets": { "UPSTREAM_TOKEN": "…from your secret store…" },
   "meta": { "kind": "mcp", "language": "typescript", "framework": "hono", "toolsCount": 2, "spaceSlug": "<space id>" },
   "repo": { "url": "https://github.com/<org>/<repo>", "branch": "main", "commitSha": "<git rev-parse HEAD>" } }
@@ -115,6 +116,8 @@ JSON
 
 - **`meta`** (optional) tells the dashboard what this Worker is. Without it, Spaces guesses from the code and probes `/mcp` read-only (`initialize` + `tools/list`, cached, never `tools/call`). `kind` is `mcp`, `web` (site/API) or `other`. `spaceSlug` links the Worker to its project page on Spaces.
 - **`repo`** (optional) shows the Repo column. Spaces checks GitHub read-only and caches the result: public, private or not found, and synced or behind the branch.
+- **`requiredEnv`** (optional, 0.15.2) lists the env names the code needs. The Worker page's **Variables & secrets** tab flags any that are missing (plus names it sees as `env.X` in the code). Set or rotate one secret later without redeploying: `PUT /api/teams/<team>/workers/<name>/secrets/<NAME>` with `{"value":"…"}` (write-only; never returned), `DELETE` to remove it, or the MCP tool `set_worker_secret`. An agent key needs `workers:secrets` (or `workers:deploy`).
+- After deploying, check `GET …/workers/<name>/health`, `…/usage?range=24h` and `…/logs` (or the MCP tool `worker_status`). If something stays broken, leave a note.
 - To change `meta`, `repo` or the linked Space later without redeploying, use `POST /api/teams/<team>/workers/<name>/links`, the MCP tool `set_worker_links`, or the Worker's **Settings** tab.
 
 With MCP (an agent connected to a Space's MCP): `deploy_worker` takes the same `code`, `vars`, `secrets`, `meta`, `repo`, `compatibilityFlags` and `bindings`.

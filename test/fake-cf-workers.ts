@@ -32,6 +32,24 @@ export class FakeCfWorkers {
   tokenStatus = "active";
   failPutScript = false;
   accountOwned = false;
+  /** 0.15.2: capabilities the fake token lacks (answers 403): analytics, observability, tail, kv, r2. */
+  denied = new Set<string>();
+  /** Hostnames that answer 500 (health "down"). */
+  failing = new Set<string>();
+  /** Per-script Workers Logs flag (script-settings PATCH). */
+  observability = new Map<string, boolean>();
+  /** Every GraphQL / telemetry body seen (to check nothing writes). */
+  queries: { kind: string; body: unknown }[] = [];
+  /** Rows the fake GraphQL returns (script, hour ISO, status, requests, errors, cpu µs). */
+  analyticsRows: {
+    script: string;
+    hour: string;
+    status: string;
+    requests: number;
+    errors: number;
+    cpu: number;
+  }[] = [];
+  logEvents: unknown[] = [];
   private n = 0;
 
   constructor() {
@@ -114,11 +132,75 @@ export class FakeCfWorkers {
     if (path === "/accounts") return this.ok([{ id: CF_ACCOUNT, name: "Test" }]);
     const acc = `/accounts/${CF_ACCOUNT}/workers`;
     if (path === `${acc}/subdomain`) return this.ok({ subdomain: "marsa-test" });
+    const deny = (k: string) => this.bad(403, `Authentication error (${k})`, 10000);
+    if (path === "/graphql") {
+      const b = await json();
+      this.queries.push({ kind: "graphql", body: b });
+      if (this.denied.has("analytics"))
+        return new Response(
+          JSON.stringify({
+            data: null,
+            errors: [{ message: "not authorized for that account", extensions: { code: "authz" } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      if (/^\s*mutation/.test(b.query)) return this.bad(400, "no mutations");
+      const scripts: string[] | undefined = b.variables?.scripts;
+      const daily = /\bdate\b/.test(b.query) && !/datetimeHour/.test(b.query);
+      const rows = this.analyticsRows
+        .filter((r) => !scripts || scripts.includes(r.script))
+        .map((r) => ({
+          sum: { requests: r.requests, errors: r.errors },
+          quantiles: { cpuTimeP50: r.cpu },
+          dimensions: daily
+            ? { scriptName: r.script, date: r.hour.slice(0, 10), status: r.status }
+            : { scriptName: r.script, datetimeHour: r.hour, status: r.status },
+        }));
+      return new Response(
+        JSON.stringify({
+          data: { viewer: { accounts: [{ workersInvocationsAdaptive: rows }] } },
+          errors: null,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (path === `${acc}/observability/telemetry/query`) {
+      this.queries.push({ kind: "telemetry", body: await json() });
+      if (this.denied.has("observability")) return deny("observability");
+      return this.ok({ events: { events: this.logEvents, count: this.logEvents.length } });
+    }
+    if (path === `/accounts/${CF_ACCOUNT}/storage/kv/namespaces`)
+      return this.denied.has("kv") ? deny("kv") : this.ok([]);
+    if (path === `/accounts/${CF_ACCOUNT}/r2/buckets`)
+      return this.denied.has("r2") ? deny("r2") : this.ok({ buckets: [] });
+    if (path === `/zones/${CF_ZONE}` && method === "GET")
+      return this.ok({ id: CF_ZONE, name: ZONE_NAME });
+    if (path === `${acc}/scripts` && method === "GET")
+      return this.ok([...this.scripts.keys()].map((id) => ({ id })));
+    m = path.match(new RegExp(`^${acc}/scripts/([^/]+)/tails$`));
+    if (m && method === "GET") return this.denied.has("tail") ? deny("tail") : this.ok([]);
+    m = path.match(new RegExp(`^${acc}/scripts/([^/]+)/script-settings$`));
+    if (m && method === "PATCH") {
+      if (!this.scripts.has(m[1] as string)) return this.bad(404, "script not found", 10007);
+      const b = await json();
+      this.observability.set(m[1] as string, !!b.observability?.enabled);
+      return this.ok({ observability: b.observability });
+    }
     m = path.match(new RegExp(`^${acc}/scripts/([^/]+)/settings$`));
     if (m) {
-      return this.scripts.has(m[1] as string)
-        ? this.ok({})
-        : this.bad(404, "workers.api.error.script_not_found", 10007);
+      const sc = this.scripts.get(m[1] as string);
+      if (!sc) return this.bad(404, "workers.api.error.script_not_found", 10007);
+      return this.ok({
+        bindings: [
+          ...Object.entries(sc.vars).map(([name, text]) => ({ name, type: "plain_text", text })),
+          ...[...sc.secrets.keys()].map((name) => ({ name, type: "secret_text" })),
+          ...Object.entries(sc.services ?? {}).map(([name, service]) => ({
+            name,
+            type: "service",
+            service,
+          })),
+        ],
+      });
     }
     m = path.match(new RegExp(`^${acc}/scripts/([^/]+)/secrets(?:/([^/]+))?$`));
     if (m) {
@@ -133,6 +215,8 @@ export class FakeCfWorkers {
         s.secrets.delete(decodeURIComponent(m[2] ?? ""));
         return this.ok(null);
       }
+      if (method === "GET")
+        return this.ok([...s.secrets.keys()].map((name) => ({ name, type: "secret_text" })));
     }
     m = path.match(new RegExp(`^${acc}/scripts/([^/]+)/subdomain$`));
     if (m) {
@@ -223,6 +307,7 @@ export class FakeCfWorkers {
     const dns = [...this.dns.values()].find((r) => r.name === url.host);
     if (!route || !dns || !this.scripts.has(route.script))
       return new Response("no route", { status: 522 });
+    if (this.failing.has(url.host)) return new Response("boom", { status: 500 });
     return new Response(`hello from ${route.script}`, { status: 200 });
   }
 }

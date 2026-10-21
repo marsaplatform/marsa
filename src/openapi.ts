@@ -50,7 +50,7 @@ export function openapi(config: Config) {
     openapi: "3.1.0",
     info: {
       title: `${APP_NAME} API`,
-      version: "0.15.1",
+      version: "0.15.2",
       description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site. Teams can also sign in in a browser at /login (team key) to manage their sites; the admin signs in at /admin/login. Those browser routes use session cookies and are not part of this API. Each site also has an MCP server (Streamable HTTP, JSON-RPC) at /mcp/s/{siteId} with per-site bearer tokens; see /docs/mcp.`,
       license: { name: "MIT", identifier: "MIT" },
     },
@@ -351,6 +351,140 @@ export function openapi(config: Config) {
             "200": { description: "Saved" },
             "400": { description: "Invalid meta, repo, or a space of another team" },
           },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/env": {
+        get: {
+          summary: "A Worker's vars & secrets: names, types, status (never values)",
+          operationId: "getWorkerEnv",
+          description:
+            'Live bindings from Cloudflare merged with Spaces\' record: name, kind (var/secret/system/binding/missing), Cloudflare type, status (set/empty/missing), last updated and by whom. "missing" lists names declared in requiredEnv or used as env.X in the code that are not set. No value is ever returned. Scope workers:read.',
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "OK" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/secrets/{secret}": {
+        put: {
+          summary: "Set or rotate one secret (write-only, no redeploy)",
+          operationId: "setWorkerSecret",
+          description:
+            'JSON {"value": "…"} (≤5 KB). The value goes to Cloudflare and is never returned or shown. Names: letters, digits, _; MARSA_* is reserved. Recorded in the activity log (name only). Scope workers:secrets or workers:deploy. 60 changes/hour per team. MCP: set_worker_secret.',
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+            { name: "secret", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "OK" } },
+        },
+        delete: {
+          summary: "Delete one secret",
+          operationId: "deleteWorkerSecret",
+          description:
+            "Removes the secret from the Worker (no redeploy). Scope workers:secrets or workers:deploy.",
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+            { name: "secret", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "OK" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/vars/{var}": {
+        put: {
+          summary: "Set one plain var (redeploys the newest stored code)",
+          operationId: "setWorkerVar",
+          description: 'JSON {"value": "…"}. Creates a new version. Scope workers:deploy.',
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+            { name: "var", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "OK" } },
+        },
+        delete: {
+          summary: "Delete one plain var (redeploys)",
+          operationId: "deleteWorkerVar",
+          description: "Scope workers:deploy.",
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+            { name: "var", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "OK" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/health": {
+        get: {
+          summary: "Uptime, latency and incidents from Spaces' health checks",
+          operationId: "getWorkerHealth",
+          description:
+            "Checks run every few minutes (GET of the URL, or MCP initialize for MCP servers without their own auth). Two failures in a row = down; one notification on down and one on recovery.",
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "OK" } },
+        },
+        post: {
+          summary: "Turn health checks on/off, or check now",
+          operationId: "editWorkerHealth",
+          description:
+            'JSON {"enabled"?: boolean, "check"?: true}. Scope workers:deploy. Manual checks: 12/hour.',
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "OK" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/logs": {
+        get: {
+          summary: "Recent errors (24h): analytics error counts + Workers Logs lines when on",
+          operationId: "getWorkerLogs",
+          description:
+            "Messages are scrubbed of secret-like strings and URLs lose their query string. ?refresh=1 skips the 5-minute cache.",
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "OK" } },
+        },
+        post: {
+          summary: "Turn Workers Logs (Cloudflare observability) on/off",
+          operationId: "editWorkerLogs",
+          description:
+            'JSON {"enabled": boolean}. Changes script settings only (no new code). Scope workers:deploy.',
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "OK" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/usage": {
+        get: {
+          summary: "Requests, errors and CPU (24h/7d/30d) and requests per end-user key",
+          operationId: "getWorkerUsage",
+          description:
+            "?range=24h|7d|30d. From Cloudflare GraphQL analytics (cached 5 min) and Spaces' own rate-limit counters.",
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "OK" } },
         },
       },
       "/api/teams/{team}/notes": {

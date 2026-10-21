@@ -33,6 +33,8 @@ const body = {
   note,
   // Declared so the Spaces Workers table shows the right type, stack and tool count.
   meta: { kind: "mcp", language: "typescript", framework: "hono", toolsCount: TOOL_NAMES.length },
+  // Env names the code reads; missing ones are flagged on the Worker page (0.15.2).
+  requiredEnv: [] as string[],
   // Lets Spaces show the repo and whether the deployed commit is the branch's latest.
   ...(repoUrl.startsWith("https://") ? { repo: { url: repoUrl, branch, commitSha } } : {}),
   // Optional: calling other Workers of the same team (see the recipe).

@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.15.2] - 2026-10-21
+
+### Added
+- **Variables & secrets tab** on the Worker page (team + admin, AR/EN): every plain var, secret,
+  Spaces-managed secret and binding by name, kind, Cloudflare type, status (set / empty / missing), last
+  updated and by whom, read live from the script's bindings with the platform token (Spaces' record as
+  fallback). Values are never shown or returned (secrets are write-only; plain var values are no longer
+  displayed anywhere in the dashboard). Set/rotate/delete one secret without a redeploy
+  (`PUT|DELETE /api/teams/<team>/workers/<name>/secrets/<NAME>`, admin `…/api/admin/workers/<id>/secrets/<NAME>`,
+  MCP `set_worker_secret`, and the tab's write-only form), set/delete one plain var
+  (`PUT|DELETE …/vars/<NAME>`, redeploys), all recorded in the activity log by name. New agent-key scope
+  `workers:secrets`. Missing names are flagged from the declared `requiredEnv` (deploy, `…/links`,
+  `deploy_worker`, `set_worker_links`) and from `env.X` usage in the stored code.
+- **Health monitoring**: every Spaces Worker is checked every 5 minutes (configurable 60-3600 s in admin
+  Settings or `WORKER_HEALTH_INTERVAL_SEC`): a GET of its URL, or MCP `initialize` for MCP servers without
+  their own auth. 7 days of checks + 30 days of daily totals; uptime 24h/7d/30d, latency chart and
+  incidents on a new **Health** tab; Health column + filter in the Workers tables; down after two failed
+  checks, one bell notification + webhook on down and one on recovery; per-Worker on/off and "check now".
+- **Logs tab**: errors of the last 24h — hourly error counts by status from Cloudflare analytics, plus
+  Workers Logs lines when turned on for the Worker (script settings only, no new code). Filters by level,
+  source and kind; secret-like strings redacted and query strings dropped. Missing token permissions are
+  named on the tab.
+- **Usage tab**: requests, errors and median CPU for 24h / 7d / 30d (Cloudflare GraphQL
+  `workersInvocationsAdaptive`, cached 5 min) as an inline SVG chart, plus requests per end-user key (Spaces'
+  rate-limit counters, now kept 31 days); 24h sparklines in the Workers tables (background snapshot).
+- **Token permissions checklist** in admin Settings: green / red / grey lights for each permission the
+  Workers token needs (scripts, script settings & secrets, Account Analytics, Workers Observability, zone,
+  routes, DNS, workers.dev, optional tail/KV/R2) and for the data/files backend (KV token, R2 keys), each
+  verified by one harmless read (no writes), with what it unlocks, a progress count and a Recheck button
+  (cached 5 min). Token values are never displayed. API: `GET /api/admin/workers/permissions`,
+  `GET /api/admin/backend/permissions`.
+- MCP tools `worker_env` (names only) and `worker_status` (health, usage, recent errors).
+
 ## [0.15.1] - 2026-10-21
 
 ### Added

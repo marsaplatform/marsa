@@ -115,6 +115,26 @@ Without `meta`, the dashboard guesses from the code and, for MCP servers, probes
 
 Start from the starter template: `GET /api/recipes/mcp-server-on-worker/starter.zip`. If something fails, leave a note: `POST /api/teams/<team>/notes` (see the *Agent notes* recipe).
 
+## Variables & secrets, health, logs and usage (0.15.2)
+
+- **Variables & secrets** tab: names, kinds, Cloudflare types and status (set / empty / missing) for every
+  var, secret and binding, read live from Cloudflare. Values are never shown or returned. Set or rotate one
+  secret with `PUT /api/teams/<team>/workers/<name>/secrets/<NAME>` `{"value":"…"}` (write-only, no
+  redeploy; agent keys need `workers:secrets` or `workers:deploy`), remove it with `DELETE`. Plain vars:
+  `PUT|DELETE …/vars/<NAME>` (redeploys the newest stored code). Declare what the code needs with
+  `"requiredEnv": ["API_KEY", …]` on deploy; missing names (declared, or seen as `env.X` in the code) are
+  flagged. `GET …/env` returns the same view.
+- **Health**: Spaces checks every Worker every 5 minutes (GET of the URL, or MCP `initialize` for MCP
+  servers without their own auth). Two failures in a row = down: one notification (bell + webhooks) when it
+  goes down and one when it recovers. `GET|POST …/health` (`{"enabled": false}` turns it off,
+  `{"check": true}` checks now). The admin sets the interval in Settings.
+- **Logs**: `GET …/logs` — error counts by hour and status from Cloudflare analytics, plus Workers Logs
+  lines when `POST …/logs {"enabled": true}` turned them on. Secret-like strings are redacted.
+- **Usage**: `GET …/usage?range=24h|7d|30d` — requests, errors, median CPU and requests per end-user key.
+- The Cloudflare token needs **Account · Account Analytics: Read** for usage/error counts and
+  **Account · Workers Observability: Read** for log lines; the admin Settings page checks every permission
+  with read-only probes and shows green/red/grey lights.
+
 ## MCP tools
 
 When Workers are on for the team, a space's MCP server (see [MCP per space](mcp.md)) also offers `list_workers`, `list_worker_versions` and `get_worker_version` (read-only tokens) and `deploy_worker`, `redeploy_worker`, `rollback_worker` and `delete_worker` (read-write tokens), with the same rules as the API.

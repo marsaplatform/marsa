@@ -12,6 +12,7 @@ import { sweepExpired } from "./sweep.js";
 import { TeamStore } from "./teams.js";
 import type { UserKeyStore } from "./user-keys.js";
 import { VisitCounter } from "./visits.js";
+import type { WorkerOps } from "./worker-ops.js";
 
 let config: ReturnType<typeof loadConfig>;
 try {
@@ -28,8 +29,12 @@ await teams.init();
 
 const backend = config.cloudflare ? new CloudflareBackend(config.cloudflare) : null;
 const visits = new VisitCounter(config.dataDir, config.visits);
-let svc: { agentKeys: AgentKeyStore; notify: NotificationCenter; userKeys?: UserKeyStore } | null =
-  null;
+let svc: {
+  agentKeys: AgentKeyStore;
+  notify: NotificationCenter;
+  userKeys?: UserKeyStore;
+  ops?: WorkerOps;
+} | null = null;
 const app = createApp({
   config,
   store,
@@ -50,6 +55,12 @@ const alerts = svc
   : null;
 const alertTimer = setInterval(() => void alerts?.tick(), 10 * 60_000);
 alertTimer.unref();
+// 0.15.2: Worker health checks; the monitor runs a round when its interval has passed.
+const healthTimer = setInterval(() => {
+  const ops = (svc as { ops?: WorkerOps } | null)?.ops;
+  void ops?.healthTick().catch((e) => console.error("[health] round failed", e?.message));
+}, 30_000);
+healthTimer.unref();
 const flushTimer = setInterval(() => void visits.flush(), config.visits.flushSeconds * 1000);
 flushTimer.unref();
 

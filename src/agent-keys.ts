@@ -18,6 +18,7 @@ export const AGENT_INVITE_PREFIX = "marsa_ainv_";
 export const SCOPES = [
   "workers:read",
   "workers:deploy",
+  "workers:secrets",
   "spaces:read",
   "spaces:write",
   "kv:read",

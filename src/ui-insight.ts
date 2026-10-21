@@ -14,7 +14,7 @@ import {
   localePath,
   pageHead,
 } from "./ui.js";
-import { DX, workerStatusBadge, workerStatusFilter } from "./ui-detail.js";
+import { DX, healthFilter, workerStatusBadge, workerStatusFilter } from "./ui-detail.js";
 import { badge, type DtAction, type DtRow, dataTable, relTime } from "./ui-table.js";
 import type { WorkerKind, WorkerLanguage } from "./worker-insight.js";
 
@@ -422,6 +422,7 @@ export function mcpServersHtml(lang: Lang, c: Config, o: McpServersOpts): string
         ? [{ key: "team", label: DX[lang].team, options: teamOpts as [string, string][] }]
         : []),
       workerStatusFilter(lang, list),
+      healthFilter(lang, list),
       {
         key: "keys",
         label: x.protected,
