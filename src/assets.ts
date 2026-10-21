@@ -1212,6 +1212,9 @@ for (const table of document.querySelectorAll("table[data-dt]")) {
     }
   };
   if (count) count.dataset.all = count.textContent;
+  // 0.16.0: ?health=down (or any filter key) preselects a filter, e.g. from the "Down now" card.
+  const qs = new URLSearchParams(location.search);
+  for (const s of sels) { const v = qs.get(s.dataset.dtF); if (v && [...s.options].some((o) => o.value === v)) s.value = v; }
   if (q) q.addEventListener("input", () => { page = 0; apply(); });
   for (const s of sels) s.addEventListener("change", () => { page = 0; apply(); });
   if (pager) {

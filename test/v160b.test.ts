@@ -322,3 +322,53 @@ describe("0.16.0 quieter env warnings", () => {
     expect(v.entries.map((e) => e.name)).not.toContain("SEED");
   });
 });
+
+describe("0.16.0 titles, MCP health column and the Down now card", () => {
+  it("formats every dashboard title and shows health on the MCP page", async () => {
+    const cf = new FakeCfWorkers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    t = await makeApp({ MARSA_SECRETS_KEY: "k".repeat(48) }, { cfFetch: cf.fetch });
+    await t.admin("PUT", "/workers/settings", { token: CF_TOKEN, zone: ZONE_NAME });
+    const team = await t.createTeam("Sanad", { backend: true });
+    await t.admin("PUT", `/teams/${team.team.id}/workers`, { enabled: true, slug: "sanad" });
+    const tk = { "x-team-key": team.key };
+    const mcp = `export default { async fetch(r, env) { if (new URL(r.url).pathname === "/mcp") return new Response("{}"); return new Response("ok"); } };`;
+    const dep = await t.api(
+      "PUT",
+      "/api/teams/sanad/workers/tools",
+      { code: mcp, meta: { kind: "mcp" } },
+      tk,
+    );
+    expect(dep.status).toBe(201);
+    const a = await t.adminBrowser();
+    const { b } = await t.signIn(team.key, "/ar");
+    const title = (html: string) => /<title>([^<]*)<\/title>/.exec(html)?.[1] ?? "";
+    for (const p of [
+      "/ar/admin",
+      "/ar/admin/mcp",
+      "/ar/admin/notes",
+      "/ar/admin/workers",
+      "/ar/admin/settings",
+      "/ar/admin/activity",
+      "/ar/admin/recipes",
+    ]) {
+      const html = await (await a.get(p)).text();
+      expect(title(html), p).toMatch(/ · الإدارة · /);
+    }
+    for (const p of ["/admin/mcp", "/admin/notes"]) {
+      const html = await (await a.get(p)).text();
+      expect(title(html), p).toMatch(/ · Admin · Marsa Spaces$/);
+    }
+    for (const p of ["/ar/team", "/ar/team/mcp", "/ar/team/notes", "/ar/team/workers"]) {
+      const res = await b.get(p);
+      if (res.status !== 200) continue;
+      expect(title(await res.text()), p).toMatch(/ · Sanad · /);
+    }
+    const page = await (await a.get("/admin/mcp")).text();
+    expect(page).toContain("Health");
+    expect(page).toMatch(/data-f-health=/);
+    const ov = await (await a.get("/admin")).text();
+    expect(ov).toContain("Down now");
+    expect(ov).toContain("All checked Workers are up");
+  });
+});

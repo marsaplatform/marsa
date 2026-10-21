@@ -1543,6 +1543,8 @@ export interface AdminStats {
   views7: number | null;
   workers: number;
   workersTeams: number;
+  /** 0.16.0: Workers whose health check says down right now (names). */
+  down?: string[];
   members: number;
 }
 
@@ -1681,6 +1683,20 @@ export function adminTeamsHtml(
     ${statCard("teams", d.stats.teams, esc(fmt(lang, o.teams.length)), esc(d.stats.teamsSub(st.members)))}
     ${statCard("sites", d.stats.spaces, esc(fmt(lang, st.sites)), esc(`${bytesLabel(lang, st.bytes)} · ${d.stats.guests(st.guests)} · ${d.stats.perm(st.permanent)}`), undefined, href("/admin/sites"))}
     ${statCard("workers", d.stats.workers, esc(fmt(lang, st.workers)), esc(d.stats.workersSub(st.workersTeams)), undefined, href("/admin/workers"))}
+    ${
+      st.down && st.workers
+        ? statCard(
+            "health",
+            d.stats.downNow,
+            esc(fmt(lang, st.down.length)),
+            st.down.length
+              ? `<bdi dir="ltr">${esc(st.down.slice(0, 3).join(", "))}${st.down.length > 3 ? " …" : ""}</bdi>`
+              : esc(d.stats.allUp),
+            undefined,
+            href(`/admin/workers${st.down.length ? "?health=down" : ""}`),
+          )
+        : ""
+    }
     ${st.views30 !== null ? statCard("views", d.stats.views30, esc(fmt(lang, st.views30)), esc(d.stats.views7(fmt(lang, st.views7 ?? 0)))) : ""}
   </div>`
     : "";
@@ -2700,6 +2716,8 @@ export const DS = {
       guests: (n: number) => `${n} guest`,
       perm: (n: number) => `${n} permanent`,
       workersSub: (n: number) => (n === 1 ? "1 team can deploy" : `${n} teams can deploy`),
+      downNow: "Down now",
+      allUp: "All checked Workers are up",
       views30: "Views, last 30 days",
     },
     quick: "Quick actions",
@@ -2820,6 +2838,8 @@ export const DS = {
       guests: (n: number) => `${n} زائر`,
       perm: (n: number) => `${n} دائم`,
       workersSub: (n: number) => (n === 1 ? "فريق واحد يستطيع النشر" : `${n} فرق تستطيع النشر`),
+      downNow: "متوقفة الآن",
+      allUp: "كل الوركرات المفحوصة تعمل",
       views30: "المشاهدات في آخر 30 يومًا",
     },
     quick: "إجراءات سريعة",
@@ -2999,6 +3019,19 @@ const ADMIN_NAV = [
 ] as const;
 
 /** The signed-in app shell: top bar, sidebar navigation (a drawer on phones), breadcrumbs. */
+/**
+ * 0.16.0: one title format for every dashboard page: "<page> · <team name> · Marsa Spaces"
+ * for teams and "<page> · Admin · Marsa Spaces" (AR "· الإدارة ·") for the admin.
+ */
+export function dashTitle(o: Pick<DashOpts, "lang" | "kind" | "title" | "ctx">): string {
+  const t = STRINGS[o.lang];
+  const tail = ` · ${t.product}`;
+  const area = o.kind === "admin" ? t.admin.eyebrow : (o.ctx.name ?? "");
+  if (!area || o.title.includes(` · ${area} · `) || o.title === `${area}${tail}`) return o.title;
+  const head = o.title.endsWith(tail) ? o.title.slice(0, -tail.length) : o.title;
+  return `${head} · ${area}${tail}`;
+}
+
 export function dashLayout(o: DashOpts): string {
   const t = STRINGS[o.lang];
   const d = DS[o.lang];
@@ -3048,7 +3081,7 @@ export function dashLayout(o: DashOpts): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(o.title)}</title>
+<title>${esc(dashTitle(o))}</title>
 <meta name="description" content="${esc(o.description)}">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#145a49">

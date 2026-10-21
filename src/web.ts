@@ -2294,6 +2294,14 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         views7: counting ? vrows.reduce((n, x) => n + (x.visits?.views7 ?? 0), 0) : null,
         workers: d.workers.list().length,
         workersTeams: teams.list().filter((x) => x.workers).length,
+        ...(d.ops
+          ? {
+              down: d.workers
+                .list()
+                .filter((r) => d.ops?.health.cell(r.id).state === "down")
+                .map((r) => r.name),
+            }
+          : {}),
         members: teams.list().reduce((n, x) => n + members.count(x.id), 0),
       };
       return page(
