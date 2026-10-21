@@ -125,7 +125,7 @@ Optional on deploy (`PUT`) or later with `POST /api/teams/<team>/workers/<name>/
   "spaceId": "<space id>" }
 ```
 
-Without `meta`, the dashboard guesses from the code and, for MCP servers, probes `/mcp` read-only (`initialize` + `tools/list`, cached for an hour, never `tools/call`). Repos are checked read-only on GitHub and cached for 15 minutes. If the server sets `GITHUB_TOKEN`, it can tell private repos from missing ones; the token is used only server-side. Every Worker declared or detected as MCP is listed on **MCP servers** in the dashboard.
+Without `meta`, the dashboard guesses from the code and, for MCP servers, probes `/mcp` read-only (`initialize` + `tools/list`, cached for an hour, never `tools/call`). Repos are checked read-only on GitHub and cached for 15 minutes. If the server sets `GITHUB_TOKEN`, it can tell private repos from missing ones; the token is used only server-side. Every Worker declared or detected as MCP is listed on **MCP servers** in the dashboard, with Health and Requests · 24h columns (0.16.0).
 
 Start from the starter template: `GET /api/recipes/mcp-server-on-worker/starter.zip`. If something fails, leave a note: `POST /api/teams/<team>/notes` (see the *Agent notes* recipe).
 

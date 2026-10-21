@@ -4,7 +4,7 @@ import { ASSET_VERSION } from "./assets.js";
 import { PLATFORM_URL } from "./brand.js";
 import type { Config, Operator } from "./config.js";
 import { hashIndex, initialOf } from "./cover.js";
-import type { DocPage } from "./docs.js";
+import { type DocPage, docsFor } from "./docs.js";
 import {
   actorText,
   bytesLabel,
@@ -1918,7 +1918,7 @@ export function adminSitesHtml(
 
 function docsNav(lang: Lang, docs: DocPage[], current?: string): string {
   const t = STRINGS[lang];
-  const list = [...docs].sort((a, b) => (a.lang === lang ? -1 : 0) - (b.lang === lang ? -1 : 0));
+  const list = docsFor(lang, docs);
   return `<nav class="docs-nav" aria-label="${esc(t.docs.title)}"><ul>${list
     .map((d) => {
       const url = d.lang === "ar" ? `/ar/docs/${d.slug}` : `/docs/${d.slug}`;
@@ -1933,7 +1933,7 @@ function docsNav(lang: Lang, docs: DocPage[], current?: string): string {
 
 export function docsIndexHtml(lang: Lang, c: Config, docs: DocPage[]): string {
   const t = STRINGS[lang];
-  const list = [...docs].sort((a, b) => (a.lang === lang ? -1 : 0) - (b.lang === lang ? -1 : 0));
+  const list = docsFor(lang, docs);
   const body = `<div class="wrap page-wide">${pageHead(t.footer.product, esc(t.docs.title), t.docs.sub)}
 <div class="card-grid docs-grid">${list
     .map((d) => {

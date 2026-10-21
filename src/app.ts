@@ -18,7 +18,7 @@ import { CloudflareWorkersApi, type FetchFn } from "./cf-workers.js";
 import { clientIp } from "./client-ip.js";
 import type { Config } from "./config.js";
 import { COVER_MAX_BYTES, type Cover, looksLike, pickCover } from "./cover.js";
-import { type DocPage, loadDocs } from "./docs.js";
+import { type DocPage, findDoc, loadDocs } from "./docs.js";
 import { UploadError } from "./errors.js";
 import type { Lang } from "./i18n.js";
 import {
@@ -1545,7 +1545,7 @@ export function createApp({
   for (const prefix of ["", "/ar"] as const) {
     const lang: Lang = prefix ? "ar" : "en";
     app.get(`${prefix}/docs/:slug`, (c) => {
-      const doc = docs.find((d) => d.slug === c.req.param("slug"));
+      const doc = findDoc(lang, c.req.param("slug"), docs);
       if (!doc) return appPage(c, notFoundHtml(lang, config), 404);
       return appPage(c, docPageHtml(lang, config, doc, docs));
     });

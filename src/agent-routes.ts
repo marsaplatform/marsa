@@ -64,7 +64,7 @@ export function inviteOnboarding(config: Config, team: Team, inv: AgentInvite, t
       rules: TOP_RULES,
       runAndObserve: [
         "requiredEnv on deploy → GET …/workers/<name>/env (MCP worker_env): `missing` = declared but not set; `unset` = read in code without a default (info only). Values are never returned.",
-        "Secrets: PUT …/workers/<name>/secrets/<NAME> {\"value\"} or set_worker_secret (write-only, no redeploy; scope workers:secrets).",
+        'Secrets: PUT …/workers/<name>/secrets/<NAME> {"value"} or set_worker_secret (write-only, no redeploy; scope workers:secrets).',
         "Health: GET …/workers/<name>/health. Web Workers need < 400 at the URL, MCP servers initialize or < 500; declare meta.healthPath / meta.healthExpect for your own check.",
         "Usage and errors: GET …/usage?range=24h|7d|30d, GET …/logs; MCP worker_status returns health + usage + recent errors in one call.",
         "Activity: GET /api/teams/<team>/activity (team key) lists every change; ask a human if you need it.",

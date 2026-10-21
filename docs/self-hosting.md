@@ -54,6 +54,7 @@ Every setting is an environment variable with a safe default. Copy
 | `MCP_REQUESTS_PER_MINUTE` | `60` | MCP requests per space token per minute (see [MCP](mcp.md)) |
 | `MCP_WRITES_PER_HOUR` | `60` | MCP write tool calls per token per hour |
 | `MCP_KV_WRITES_PER_DAY` | `500` | MCP `kv_put`/`kv_delete` calls per day, instance-wide (KV free plan: 1000/day) |
+| `DISPLAY_TZ` | `Asia/Dubai` | Time zone for times and charts in the dashboards (browsers then switch to the viewer's own zone) |
 | `FEATURED_SITES` | empty | Site ids for the home page's Featured card, comma-separated (first live one). Empty = newest listed page |
 
 Generate an admin token and a session secret with `openssl rand -hex 32`. Without `SESSION_SECRET`

@@ -118,3 +118,46 @@ describe("0.16.0 Arabic glossary", () => {
     expect(hits).toEqual([]);
   });
 });
+
+describe("0.16.0 Arabic docs", () => {
+  const SLUGS = [
+    "getting-started",
+    "workers",
+    "agent-keys",
+    "api",
+    "teams",
+    "use-cases",
+    "agents",
+    "self-hosting",
+    "managing",
+    "backend",
+    "mcp",
+  ];
+  it("serves every guide page in Arabic at /ar/docs/<slug>", async () => {
+    t = await makeApp();
+    const index = await (await t.app.request("/ar/docs")).text();
+    expect(index).not.toContain("(بالإنجليزية)");
+    expect(index).toContain('href="/ar/docs/glossary"');
+    for (const slug of SLUGS) {
+      expect(index).toContain(`href="/ar/docs/${slug}"`);
+      const res = await t.app.request(`/ar/docs/${slug}`);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html, slug).toMatch(/<article class="prose" lang="ar" dir="rtl">/);
+      expect(html, slug).not.toContain("(بالإنجليزية)");
+      // Links between guide pages stay in Arabic.
+      const article = html.slice(
+        html.indexOf('<article class="prose"'),
+        html.indexOf("</article>"),
+      );
+      expect(article, slug).not.toMatch(/href="\/docs\/(?!recipes)[a-z-]+/);
+      // English still served at /docs/<slug>.
+      const en = await (await t.app.request(`/docs/${slug}`)).text();
+      expect(en, slug).toMatch(/<article class="prose" lang="en" dir="ltr">/);
+    }
+    // One card per slug on the English index too (no duplicates).
+    const enIndex = await (await t.app.request("/docs")).text();
+    expect(enIndex.match(/href="\/docs\/workers"/g)?.length).toBe(1);
+    expect(enIndex).not.toContain('href="/ar/docs/workers"');
+  });
+});

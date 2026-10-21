@@ -92,7 +92,6 @@ A wrong token and a missing site both return `404` on purpose, so ids can't be p
 | `GET /api/admin/sites` | All sites with sizes and expiry (no tokens) |
 | `DELETE /api/admin/sites/:id` | Remove any site |
 | `POST /api/admin/sweep` | Delete expired sites now |
-
 | `GET /api/admin/teams` | Teams with live site counts (no keys) |
 | `POST /api/admin/teams` | Create a team `{"name", "backend"?, "directory"?}`; the response has its key, once |
 | `PATCH /api/admin/teams/:id` | Change `name`, `backend` or `directory` |
@@ -141,6 +140,8 @@ see [Teams](teams.md).
 | `BACKEND_NOT_ALLOWED` | 403 | The site isn't in a team with backend access |
 | `BACKEND_NOT_CONFIGURED` | 503 | Allowed, but the instance has no data/files backend configured |
 | `BACKEND_UNAVAILABLE` | 503 | The data/files store failed (e.g. its credentials were rejected); retry later (`Retry-After`) or tell the admin |
+| `INSUFFICIENT_SCOPE` | 403 | An agent key without the scope this call needs |
+| `TEAM_KEY_REQUIRED` | 403 | The call needs the team key itself (activity, export, webhook); agent keys can't use it |
 | `RATE_LIMITED` | 429 | Slow down; see the `Retry-After` header |
 
 ## Recipes and Worker API keys (0.14.0)

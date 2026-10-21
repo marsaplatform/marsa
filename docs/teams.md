@@ -119,6 +119,7 @@ After signing in, a team member lands on `/team` (or `/ar/team`):
 
 - **Status**: the team name, how many sites are live, whether *data and files* are on for the team (and
   whether the server has a backend configured), and whether the team is listed on the home page.
+- **Getting started** (0.16.0): a checklist of first steps (publish a space, invite a member, an agent key, a Worker) that hides itself once done or dismissed.
 - **Live sites**: title, link, expiry, size and home-page visibility, with **Manage** and **Delete**.
 - **Publish a new site**: drag and drop files, a folder or one `.zip`, or pick them, then choose when
   it expires (within the instance limits).
@@ -130,6 +131,7 @@ After signing in, a team member lands on `/team` (or `/ar/team`):
 - Every table row opens its detail page (click, or focus it and press Enter); actions are icon
   buttons plus a labelled ⋮ menu. Tables have search, filters, sort, pagination and a card view on
   phones.
+- **Global search** (0.16.0): press ⌘K (or Ctrl+K, or `/`) on any dashboard page to search spaces, Workers, MCP servers, notes and the docs.
 - **Snippets for agents**: a `curl` call and a prompt using `$MARSA_TEAM_KEY` (never the real key).
 
 Team sites are managed through the session: nobody on the team needs the per-site edit token.
@@ -159,7 +161,7 @@ Sign in at `/admin/login` with `ADMIN_TOKEN`. The sidebar has five pages:
    last 4 characters shown) and the server configuration.
 
 The team dashboard has the same layout: **Overview**, **Spaces**, **Workers**, **Members**,
-**Activity** and **Settings** (your password and sign-out-everywhere).
+**Activity** and **Settings** (your password, sign-out-everywhere and the team export).
 
 ## Uploading as a team
 
@@ -313,8 +315,8 @@ curl -s -X PATCH "$BASE/api/admin/teams/t_abc12345" -H "$AUTH" -H "Content-Type:
 # New key (old one stops working)
 curl -s -X POST "$BASE/api/admin/teams/t_abc12345/rotate" -H "$AUTH"
 
-# Delete the team (add ?sites=delete to also delete its sites)
-curl -s -X DELETE "$BASE/api/admin/teams/t_abc12345" -H "$AUTH"
+# Move the team to the trash for 7 days (type its name or id; add &sites=delete to also delete its sites)
+curl -s -X DELETE "$BASE/api/admin/teams/t_abc12345?confirm=t_abc12345" -H "$AUTH"
 ```
 
 Teams are stored in `DATA_DIR/teams.json` (written atomically, mode 600). Back it up with the
