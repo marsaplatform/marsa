@@ -98,7 +98,7 @@ export const DX = {
     runtimeHelp:
       "Cloudflare compatibility settings and service bindings to other Workers of this team. Saving redeploys the current code; the bound Workers are not changed.",
     compatDate: "Compatibility date",
-    compatDateDefault: (d: string) => `${d} (platform default)`,
+    platformDefault: "(platform default)",
     compatDateHelp: "Empty = the platform default.",
     compatFlags: "Compatibility flags",
     flagHelp: {
@@ -282,7 +282,7 @@ export const DX = {
     runtimeHelp:
       "إعدادات التوافق في كلاودفلير والربط المباشر (service bindings) مع وركرز أخرى من نفس الفريق. الحفظ يعيد نشر الكود الحالي، ولا يغيّر الوركرز المربوطة.",
     compatDate: "تاريخ التوافق",
-    compatDateDefault: (d: string) => `${d} (الافتراضي للمنصة)`,
+    platformDefault: "(الافتراضي للمنصة)",
     compatDateHelp: "فارغ = الافتراضي للمنصة.",
     compatFlags: "أعلام التوافق",
     flagHelp: {
@@ -803,7 +803,7 @@ function runtimeFacts(
   return [
     fact(
       x.compatDate,
-      `<code class="ltr">${esc(w.compatibilityDateSet ? w.compatibilityDate : x.compatDateDefault(w.compatibilityDate))}</code>`,
+      `<code class="ltr">${esc(w.compatibilityDate)}</code>${w.compatibilityDateSet ? "" : ` <span class="meta">${esc(x.platformDefault)}</span>`}`,
     ),
     fact(x.compatFlags, codeList(w.compatibilityFlags) || none),
     fact(
