@@ -12,6 +12,14 @@ import type { Actor } from "./members.js";
 import type { SecretBox } from "./secrets.js";
 import type { Team, TeamStore } from "./teams.js";
 import {
+  ConfigError,
+  readBindings,
+  readCompatDate,
+  readCompatFlags,
+  type ServiceBinding,
+  type WorkerRuntime,
+} from "./worker-config.js";
+import {
   cleanNote,
   sha256Hex,
   type VersionAction,
@@ -111,6 +119,11 @@ export interface WorkerRec {
   version?: number;
   /** Who disabled it (0.15.0): a team may only re-enable what it disabled itself. */
   disabledBy?: "admin" | "team";
+  /** 0.15.0: unset date = the platform default. */
+  compatibilityDate?: string;
+  compatibilityFlags?: string[];
+  /** Service bindings to Workers of the same team. */
+  bindings?: ServiceBinding[];
 }
 
 export interface WorkerView {
@@ -130,7 +143,16 @@ export interface WorkerView {
   lastError: string | null;
   /** Newest stored version, or null: no stored version yet (the next deploy is saved). */
   version: number | null;
+  /** The date this Worker runs with (its own or the platform default). */
+  compatibilityDate: string;
+  /** True when compatibilityDate is the team's choice, false for the platform default. */
+  compatibilityDateSet: boolean;
+  compatibilityFlags: string[];
+  bindings: ServiceBinding[];
 }
+
+/** Platform default compatibility date, set once by WorkerService (config). */
+let defaultCompatDate = "2025-09-01";
 
 export const workerView = (r: WorkerRec): WorkerView => ({
   id: r.id,
@@ -148,7 +170,21 @@ export const workerView = (r: WorkerRec): WorkerView => ({
   deployedBy: r.deployedBy,
   lastError: r.lastError ?? null,
   version: r.version ?? null,
+  compatibilityDate: r.compatibilityDate ?? defaultCompatDate,
+  compatibilityDateSet: !!r.compatibilityDate,
+  compatibilityFlags: [...(r.compatibilityFlags ?? [])],
+  bindings: (r.bindings ?? []).map((b) => ({ ...b })),
 });
+
+/** A stored version's runtime as deploy input (older versions: keep the current one). */
+const runtimeInput = (r: WorkerRuntime | undefined): Partial<DeployInput> =>
+  r
+    ? {
+        compatibilityDate: r.compatibilityDate ?? null,
+        compatibilityFlags: r.compatibilityFlags ?? [],
+        bindings: r.bindings ?? [],
+      }
+    : {};
 
 export class WorkerError extends Error {
   constructor(
@@ -167,6 +203,10 @@ export interface DeployInput {
   secrets?: unknown;
   /** Optional note stored with the version (200 chars). */
   note?: unknown;
+  /** 0.15.0, all optional; omitted = keep the current value on a redeploy. */
+  compatibilityDate?: unknown;
+  compatibilityFlags?: unknown;
+  bindings?: unknown;
 }
 
 export interface WorkerLimits {
@@ -211,6 +251,7 @@ export class WorkerService {
     this.workersFile = join(root, "workers.json");
     this.tmpDir = join(root, "tmp");
     this.versions = new WorkerVersionStore(dataDir);
+    defaultCompatDate = deps.limits.compatibilityDate;
   }
 
   ready(): Promise<void> {
@@ -573,6 +614,17 @@ export class WorkerService {
         throw new WorkerError(400, "INVALID_REQUEST", `${k} is both a var and a secret`);
     }
     const note = cleanNote(input.note);
+    let date: string | null | undefined;
+    let flags: string[] | undefined;
+    let wantBindings: ServiceBinding[] | undefined;
+    try {
+      date = readCompatDate(input.compatibilityDate, this.deps.now());
+      flags = readCompatFlags(input.compatibilityFlags);
+      wantBindings = readBindings(input.bindings);
+    } catch (err) {
+      if (err instanceof ConfigError) throw new WorkerError(400, "INVALID_REQUEST", err.message);
+      throw err;
+    }
     // Throws early (503) when the platform has no token.
     this.token();
 
@@ -590,6 +642,17 @@ export class WorkerService {
         throw new WorkerError(403, "PROTECTED", "this script name is not managed by Spaces");
       }
       const host = existing ? existing.host : this.hostFor(team, name);
+      const pickedDate = date === undefined ? existing?.compatibilityDate : (date ?? undefined);
+      const runtime: WorkerRuntime = {
+        ...(pickedDate ? { compatibilityDate: pickedDate } : {}),
+        compatibilityFlags: flags ?? existing?.compatibilityFlags ?? [],
+        bindings: wantBindings ?? existing?.bindings ?? [],
+      };
+      const services = this.resolveBindings(team, name, runtime.bindings ?? [], [
+        ...Object.keys(finalVars),
+        ...(existing?.secrets ?? []),
+        ...Object.keys(secrets),
+      ]);
       const at = this.iso();
       if (!existing) {
         try {
@@ -642,8 +705,10 @@ export class WorkerService {
       try {
         await this.deps.api.putScript(a, script, {
           code,
-          compatibilityDate: this.deps.limits.compatibilityDate,
+          compatibilityDate: runtime.compatibilityDate ?? this.deps.limits.compatibilityDate,
           vars: finalVars,
+          compatibilityFlags: runtime.compatibilityFlags,
+          services,
         });
         created.script = !existing;
         for (const [k, v] of Object.entries(secrets)) {
@@ -691,7 +756,11 @@ export class WorkerService {
         updatedAt: this.iso(),
         deployedAt: this.iso(),
         deployedBy: actor.label,
+        compatibilityFlags: runtime.compatibilityFlags ?? [],
+        bindings: runtime.bindings ?? [],
       };
+      if (runtime.compatibilityDate) done.compatibilityDate = runtime.compatibilityDate;
+      else delete done.compatibilityDate;
       delete done.lastError;
       const action: VersionAction = opts.action ?? "deploy";
       try {
@@ -706,6 +775,7 @@ export class WorkerService {
           vars: { ...finalVars },
           secretNames: [...done.secrets],
           code,
+          runtime,
         });
         done.version = v.n;
       } catch (err) {
@@ -732,6 +802,93 @@ export class WorkerService {
       });
       return workerView(done);
     });
+  }
+
+  /**
+   * Service bindings may only point at another Worker of the SAME team that Spaces
+   * manages: never another team's, never a protected or non-team script.
+   */
+  private resolveBindings(
+    team: Team,
+    self: string,
+    bindings: ServiceBinding[],
+    taken: string[],
+  ): { name: string; script: string }[] {
+    const used = new Set(taken);
+    return bindings.map((b) => {
+      if (used.has(b.name)) {
+        throw new WorkerError(
+          400,
+          "INVALID_REQUEST",
+          `bindings.${b.name}: already a var or secret`,
+        );
+      }
+      if (b.worker === self) {
+        throw new WorkerError(
+          400,
+          "INVALID_BINDING",
+          `bindings.${b.name}: a Worker cannot bind to itself`,
+        );
+      }
+      const target = this.find(team.id, b.worker);
+      if (
+        !target ||
+        target.teamId !== team.id ||
+        PROTECTED_SCRIPTS.has(target.script) ||
+        !target.script.startsWith("team-")
+      ) {
+        throw new WorkerError(
+          400,
+          "INVALID_BINDING",
+          `bindings.${b.name}: "${b.worker}" is not a Worker of this team`,
+        );
+      }
+      return { name: b.name, script: target.script };
+    });
+  }
+
+  /** Workers of the team that bind to this one. */
+  boundBy(rec: WorkerRec): WorkerRec[] {
+    return this.list(rec.teamId).filter(
+      (w) => w.id !== rec.id && (w.bindings ?? []).some((b) => b.worker === rec.name),
+    );
+  }
+
+  /**
+   * Change compatibility date/flags and service bindings (0.15.0) without sending code: the
+   * newest stored code and vars are deployed again with them (a new version). The Workers it
+   * binds to are not touched.
+   */
+  async editRuntime(
+    team: Team,
+    rec: WorkerRec,
+    change: { compatibilityDate?: unknown; compatibilityFlags?: unknown; bindings?: unknown },
+    actor: Actor,
+  ): Promise<WorkerView> {
+    const v = await this.versions.latest(rec.id);
+    if (!v) {
+      throw new WorkerError(
+        409,
+        "NO_STORED_VERSION",
+        "no stored version yet; deploy the code once and it will be saved",
+      );
+    }
+    return this.deploy(
+      team,
+      {
+        name: rec.name,
+        code: v.code,
+        vars: rec.vars,
+        ...("compatibilityDate" in change ? { compatibilityDate: change.compatibilityDate } : {}),
+        ...("compatibilityFlags" in change
+          ? { compatibilityFlags: change.compatibilityFlags }
+          : {}),
+        ...("bindings" in change ? { bindings: change.bindings } : {}),
+        note: "runtime settings changed",
+      },
+      actor,
+      { action: "redeploy" },
+    );
   }
 
   /** Stored versions of a Worker, newest first. */
@@ -801,7 +958,13 @@ export class WorkerService {
     }
     return this.deploy(
       team,
-      { name: rec.name, code: v.code, vars: v.vars, note: note ?? `redeploy of v${v.n}` },
+      {
+        name: rec.name,
+        code: v.code,
+        vars: v.vars,
+        ...runtimeInput(v.runtime),
+        note: note ?? `redeploy of v${v.n}`,
+      },
       actor,
       { action: "redeploy" },
     );
@@ -820,7 +983,13 @@ export class WorkerService {
       throw new WorkerError(404, "VERSION_NOT_FOUND", `no stored version ${n} for this Worker`);
     const worker = await this.deploy(
       team,
-      { name: rec.name, code: v.code, vars: v.vars, note: note ?? `rollback to v${v.n}` },
+      {
+        name: rec.name,
+        code: v.code,
+        vars: v.vars,
+        ...runtimeInput(v.runtime),
+        note: note ?? `rollback to v${v.n}`,
+      },
       actor,
       { action: "rollback", from: v.n },
     );
@@ -838,6 +1007,14 @@ export class WorkerService {
       if (!cur) return;
       if (PROTECTED_SCRIPTS.has(cur.script) || !cur.script.startsWith("team-")) {
         throw new WorkerError(403, "PROTECTED", "this script is not managed by Spaces");
+      }
+      const users = this.boundBy(cur);
+      if (users.length) {
+        throw new WorkerError(
+          409,
+          "WORKER_BOUND",
+          `${users.map((w) => w.name).join(", ")} binds to this Worker; remove the binding first`,
+        );
       }
       const a = this.access();
       try {

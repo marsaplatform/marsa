@@ -16,6 +16,9 @@ interface Script {
   secrets: Map<string, string>;
   workersDev: boolean;
   tags: string[];
+  compatibilityDate?: string;
+  compatibilityFlags?: string[];
+  services?: Record<string, string>;
 }
 
 export class FakeCfWorkers {
@@ -153,7 +156,14 @@ export class FakeCfWorkers {
         const code = modules[meta.main_module] ?? "";
         const prev = this.scripts.get(name);
         const vars: Record<string, string> = {};
-        for (const b of meta.bindings ?? []) if (b.type === "plain_text") vars[b.name] = b.text;
+        const services: Record<string, string> = {};
+        for (const b of meta.bindings ?? []) {
+          if (b.type === "plain_text") vars[b.name] = b.text;
+          else if (b.type === "service") {
+            if (!this.scripts.has(b.service)) return this.bad(400, "service not found", 10143);
+            services[b.name] = b.service;
+          } else return this.bad(400, `binding type ${b.type}`, 10021);
+        }
         this.scripts.set(name, {
           code,
           modules,
@@ -161,6 +171,9 @@ export class FakeCfWorkers {
           secrets: prev?.secrets ?? new Map(),
           workersDev: prev?.workersDev ?? false,
           tags: meta.tags ?? [],
+          compatibilityDate: meta.compatibility_date,
+          compatibilityFlags: meta.compatibility_flags ?? [],
+          services,
         });
         return this.ok({ id: name });
       }

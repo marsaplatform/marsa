@@ -6,6 +6,7 @@ import type { Actor, MemberStore } from "./members.js";
 import type { RateLimiter } from "./rate-limit.js";
 import { can, scopeError, type TeamAuth, type TeamCred } from "./team-auth.js";
 import type { Team, TeamStore } from "./teams.js";
+import { ALLOWED_COMPAT_FLAGS } from "./worker-config.js";
 import { versionMeta } from "./worker-versions.js";
 import {
   PLATFORM_AUDIT,
@@ -43,6 +44,7 @@ export function teamWorkersInfo(svc: WorkerService, team: Team) {
     configured: svc.configured,
     slug: team.slug ?? null,
     quota: svc.quotaOf(team),
+    allowedCompatibilityFlags: [...ALLOWED_COMPAT_FLAGS],
     workers: svc.list(team.id).map(workerView),
   };
 }
@@ -183,6 +185,9 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
       ...("vars" in body ? { vars: body.vars } : {}),
       ...("secrets" in body ? { secrets: body.secrets } : {}),
       ...("note" in body ? { note: body.note } : {}),
+      ...("compatibilityDate" in body ? { compatibilityDate: body.compatibilityDate } : {}),
+      ...("compatibilityFlags" in body ? { compatibilityFlags: body.compatibilityFlags } : {}),
+      ...("bindings" in body ? { bindings: body.bindings } : {}),
     };
   };
 
@@ -284,6 +289,30 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
     const v = await svc.getVersion(r.rec, Number(c.req.param("n")));
     if (!v) return err(c, 404, "VERSION_NOT_FOUND", "no such stored version");
     return codeDownload(c, r.rec.name, v.n, v.code);
+  });
+  // 0.15.0: compatibility date/flags and service bindings without sending code again.
+  app.post("/api/teams/:team/workers/:name/runtime", async (c) => {
+    const r = await recOf(c, "workers:deploy");
+    if (r instanceof Response) return r;
+    const limited = deployRate(c, r.cr.team);
+    if (limited) return limited;
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return err(
+        c,
+        400,
+        "INVALID_REQUEST",
+        'send JSON {"compatibilityDate"?, "compatibilityFlags"?, "bindings"?}',
+      );
+    }
+    const change: Record<string, unknown> = {};
+    for (const k of ["compatibilityDate", "compatibilityFlags", "bindings"])
+      if (k in body) change[k] = body[k];
+    try {
+      return c.json({ worker: await svc.editRuntime(r.cr.team, r.rec, change, r.cr.actor) });
+    } catch (e) {
+      return workerErr(c, e);
+    }
   });
   app.post("/api/teams/:team/workers/:name/redeploy", async (c) => {
     const r = await recOf(c, "workers:deploy");

@@ -25,6 +25,17 @@ All notable changes to this project are documented here. The format follows
   buttons plus a labelled ⋮ menu, more columns, sort, search, filters, pagination, empty states and a
   card view on phones.
 
+- **Worker-to-Worker calls.** Deploys accept `compatibilityDate` and allowlisted
+  `compatibilityFlags` (`global_fetch_strictly_public`, `nodejs_compat`, `nodejs_als`), plus
+  `bindings`: service bindings to Workers of the **same team** only
+  (`[{"name":"NEWS","worker":"news"}]` → `env.NEWS.fetch(…)`). Any other Worker, a script name,
+  extra fields or another binding type is refused (400). These settings are kept on redeploy,
+  stored in versions (a rollback restores them) and shown on the Worker page. To change them
+  without sending code, use `POST …/workers/<name>/runtime`, the MCP tool `set_worker_runtime` or
+  the Settings tab; the bound Worker is not touched. A Worker another one binds to cannot be
+  deleted (`409 WORKER_BOUND`). The MCP-on-Worker recipe (v2, AR/EN) explains how to call another
+  team Worker.
+
 ### Changed
 - `/team/workers/<name>/versions` and `/keys` redirect to the matching tab; `/team/spaces/<id>` and
   `/admin/spaces/<id>` redirect to the space detail page.

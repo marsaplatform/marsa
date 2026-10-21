@@ -34,7 +34,9 @@ import {
 } from "./ui.js";
 import { badge, type DtAction, type DtRow, dataTable, relTime, tabsNav } from "./ui-table.js";
 import type { UserKeyView } from "./user-keys.js";
+import { ALLOWED_COMPAT_FLAGS } from "./worker-config.js";
 import type { VersionMeta } from "./worker-versions.js";
+import type { WorkerView } from "./workers.js";
 
 /** Strings for the 0.15.0 detail pages. */
 export const DX = {
@@ -92,6 +94,23 @@ export const DX = {
       "NAME=value, one per line. Saving redeploys the current code with these variables (recorded as a new version).",
     saveEnv: "Save variables",
     secretsTitle: "Secrets",
+    runtimeTitle: "Runtime and bindings",
+    runtimeHelp:
+      "Cloudflare compatibility settings and service bindings to other Workers of this team. Saving redeploys the current code; the bound Workers are not changed.",
+    compatDate: "Compatibility date",
+    compatDateDefault: (d: string) => `${d} (platform default)`,
+    compatDateHelp: "Empty = the platform default.",
+    compatFlags: "Compatibility flags",
+    flagHelp: {
+      global_fetch_strictly_public:
+        "fetch() to a public hostname goes out through the internet, even on the same zone (call another team Worker by its URL).",
+      nodejs_compat: "Node.js APIs (node:buffer, node:crypto, …).",
+      nodejs_als: "AsyncLocalStorage only.",
+    } as Record<string, string>,
+    bindingsTitle: "Service bindings",
+    bindingsHelp: (names: string) =>
+      `One per line: NAME=worker. Only Workers of this team${names ? ` (${names})` : ""}. In code: env.NAME.fetch(request).`,
+    saveRuntime: "Save runtime settings",
     secretsHelp:
       "NAME=value to set or replace, NAME= (empty) to remove. Values are write-only and go straight to Cloudflare. Saving redeploys the current code.",
     saveSecrets: "Save secrets",
@@ -259,6 +278,23 @@ export const DX = {
     envHelp: "NAME=value في كل سطر. الحفظ يعيد نشر الكود الحالي بهذه المتغيرات (يُسجَّل كإصدار جديد).",
     saveEnv: "احفظ المتغيرات",
     secretsTitle: "الأسرار",
+    runtimeTitle: "بيئة التشغيل والربط",
+    runtimeHelp:
+      "إعدادات التوافق في كلاودفلير والربط المباشر (service bindings) مع وركرز أخرى من نفس الفريق. الحفظ يعيد نشر الكود الحالي، ولا يغيّر الوركرز المربوطة.",
+    compatDate: "تاريخ التوافق",
+    compatDateDefault: (d: string) => `${d} (الافتراضي للمنصة)`,
+    compatDateHelp: "فارغ = الافتراضي للمنصة.",
+    compatFlags: "أعلام التوافق",
+    flagHelp: {
+      global_fetch_strictly_public:
+        "fetch() لعنوان عام يخرج عبر الإنترنت حتى لو على نفس النطاق (لاستدعاء وركر آخر من الفريق برابطه).",
+      nodejs_compat: "واجهات Node.js ‏(node:buffer و node:crypto …).",
+      nodejs_als: "AsyncLocalStorage فقط.",
+    } as Record<string, string>,
+    bindingsTitle: "الربط بين الوركرز",
+    bindingsHelp: (names: string) =>
+      `سطر لكل ربط: NAME=worker. وركرز هذا الفريق فقط${names ? ` (${names})` : ""}. في الكود: env.NAME.fetch(request).`,
+    saveRuntime: "احفظ إعدادات التشغيل",
     secretsHelp:
       "NAME=value للإضافة أو الاستبدال، وNAME= فارغة للحذف. القيم للكتابة فقط وتذهب مباشرة إلى كلاودفلير. الحفظ يعيد نشر الكود الحالي.",
     saveSecrets: "احفظ الأسرار",
@@ -421,6 +457,11 @@ function detailBody(head: string, flash: string, tabs: string, body: string): st
 
 export const WORKER_TABS = ["overview", "versions", "keys", "settings", "activity"] as const;
 
+type RuntimeView = Pick<
+  WorkerView,
+  "compatibilityDate" | "compatibilityDateSet" | "compatibilityFlags" | "bindings"
+>;
+
 export interface WorkerDetailOpts {
   kind: "team" | "admin";
   tab: string;
@@ -430,7 +471,7 @@ export interface WorkerDetailOpts {
   ctx: DashCtx;
   csrf: string;
   flash?: Flash | null;
-  worker: WorkerRowView & { script: string; createdAt: string; updatedAt: string };
+  worker: WorkerRowView & { script: string; createdAt: string; updatedAt: string } & RuntimeView;
   disabledBy: "admin" | "team" | null;
   versions: VersionMeta[];
   health: { status: number | null; ms: number } | null;
@@ -442,6 +483,8 @@ export interface WorkerDetailOpts {
     helperUrl: string;
   };
   audit: AuditView[];
+  /** Names of the team's Workers (for the bindings help). */
+  teamWorkers?: string[];
   /** Owner/editor on the team side, or the admin. */
   canEdit: boolean;
 }
@@ -522,6 +565,7 @@ export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): st
       ${fact(x.requests, esc(reqs))}
       ${fact(x.varNames, codeList(Object.keys(w.vars)) || `<span class="meta">${esc(x.none)}</span>`)}
       ${fact(x.secretNames, codeList(w.secrets, true) || `<span class="meta">${esc(x.none)}</span>`)}
+      ${runtimeFacts(lang, w, fact)}
       ${fact(x.keys, o.keys.settings.required ? `${badge(K14[lang].on, "on")} ${esc(x.keysCount(activeKeys.length))}` : badge(K14[lang].off, "muted"))}
       ${fact(x.script, `<code class="ltr">${esc(w.script)}</code>`)}
       ${fact(x.created, timeTag(lang, w.createdAt))}
@@ -749,6 +793,28 @@ if (!gate.ok) return gate.response;</code></pre></section>`;
   return `${off}${table}${create}${helper}`;
 }
 
+function runtimeFacts(
+  lang: Lang,
+  w: RuntimeView,
+  fact: (label: string, html: string) => string,
+): string {
+  const x = DX[lang];
+  const none = `<span class="meta">${esc(x.none)}</span>`;
+  return [
+    fact(
+      x.compatDate,
+      `<code class="ltr">${esc(w.compatibilityDateSet ? w.compatibilityDate : x.compatDateDefault(w.compatibilityDate))}</code>`,
+    ),
+    fact(x.compatFlags, codeList(w.compatibilityFlags) || none),
+    fact(
+      x.bindingsTitle,
+      w.bindings.length
+        ? `<ul class="chips">${w.bindings.map((b) => `<li><code class="ltr">${esc(b.name)} → ${esc(b.worker)}</code></li>`).join("")}</ul>`
+        : none,
+    ),
+  ].join("");
+}
+
 function workerSettingsTab(
   lang: Lang,
   o: WorkerDetailOpts,
@@ -851,10 +917,29 @@ function workerSettingsTab(
       ${fact(`${k.perMinute} / ${k.perDay}`, esc(`${num(lang, st.perMinute)} / ${num(lang, st.perDay)}`))}
       ${fact(x.envTitle, codeList(Object.keys(w.vars)) || `<span class="meta">${esc(x.none)}</span>`)}
       ${fact(x.secretsTitle, codeList(w.secrets, true) || `<span class="meta">${esc(x.none)}</span>`)}
+      ${runtimeFacts(lang, w, fact)}
     </dl>`;
     return `<p class="notice">${esc(x.adminReadOnly)}</p>${ro}${danger}`;
   }
-  return `<div class="settings-grid">${keysForm}${envForm}${secretsPanel}</div>${danger}`;
+  const flagSet = new Set(w.compatibilityFlags);
+  const flagBoxes = ALLOWED_COMPAT_FLAGS.map(
+    (f) =>
+      `<label class="check"><input type="checkbox" name="compatibilityFlags" value="${f}"${flagSet.has(f) ? " checked" : ""}${canChange ? "" : " disabled"}><span><code class="ltr">${f}</code><small class="meta">${esc(x.flagHelp[f] ?? "")}</small></span></label>`,
+  ).join("");
+  const others = (o.teamWorkers ?? []).filter((n) => n !== w.name).join(", ");
+  const runtimeForm = `<form method="post" action="${href(`${teamBase}/runtime`)}" class="panel stack-form">
+    ${csrfField(o.csrf)}${backField(self)}
+    <h2 class="h3">${esc(x.runtimeTitle)}</h2>
+    <p class="meta">${esc(x.runtimeHelp)}</p>
+    <label class="field">${esc(x.compatDate)} <input type="date" name="compatibilityDate" dir="ltr" value="${w.compatibilityDateSet ? esc(w.compatibilityDate) : ""}" placeholder="${esc(w.compatibilityDate)}"${canChange ? "" : " disabled"}><small class="meta">${esc(x.compatDateHelp)}</small></label>
+    <fieldset class="expiry-set"><legend>${esc(x.compatFlags)}</legend>${flagBoxes}</fieldset>
+    <label for="wd-bindings">${esc(x.bindingsTitle)}</label>
+    <textarea id="wd-bindings" name="bindings" rows="3" dir="ltr" spellcheck="false" class="code-input" placeholder="NEWS=news"${canChange ? "" : " disabled"}>${esc(w.bindings.map((b) => `${b.name}=${b.worker}`).join("\n"))}</textarea>
+    <p class="meta">${esc(x.bindingsHelp(others))}</p>
+    <input type="hidden" name="runtime" value="1">
+    ${canChange ? `<button class="button small" type="submit" data-busy>${esc(x.saveRuntime)}</button>` : editable ? `<p class="meta">${esc(x.needVersion)}</p>` : ""}
+  </form>`;
+  return `<div class="settings-grid">${keysForm}${envForm}${secretsPanel}${runtimeForm}</div>${danger}`;
 }
 
 // ---- rows shared by the list pages and the detail tabs --------------------------------------

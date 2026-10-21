@@ -1,7 +1,7 @@
 ---
 title: خادم MCP على وركر في مساحات
 summary: انشر خادم MCP عن بُعد (Streamable HTTP على ‎/mcp) كوركر للفريق، مع الأسرار والتخزين المؤقت وفحص حيّ.
-version: 1
+version: 2
 updated: 2026-10-21
 tags: mcp, workers
 order: 1
@@ -106,6 +106,26 @@ export default {
 };
 ```
 
+## استدعاء وركر آخر من فريقكم (0.15.0)
+
+الوركر على `marsaplatform.com` لا يستطيع ببساطة أن يعمل `fetch("https://<team>-news.marsaplatform.com")`. السبب أن العنوان على نفس نطاق كلاودفلير، فيذهب الطلب افتراضيًا إلى الخادم الأصلي للنطاق بدل الوركر الآخر. استعملوا إحدى طريقتين:
+
+1. **الربط المباشر (service binding)، وهو الأفضل**: استدعاء مباشر داخل كلاودفلير، بلا رحلة عبر الإنترنت. الربط مسموح فقط مع وركرز **فريقكم**، ويرفض Spaces أي وركر أو سكربت آخر.
+   ```json
+   PUT /api/teams/<team>/workers/morassel
+   { "code": "…", "bindings": [{ "name": "NEWS", "worker": "news" }] }
+   ```
+   ```js
+   const res = await env.NEWS.fetch(new Request("https://news/latest?limit=5"));
+   ```
+   اسم المضيف في الرابط مُهمَل، والمسار والاستعلام يصلان كما هما.
+2. **الرابط العام**: فعّلوا العَلَم `global_fetch_strictly_public`. عندها يخرج `fetch()` عبر الإنترنت مثل أي عميل خارجي، فيمر بمفاتيح API وحدود الوركر الآخر.
+   ```json
+   { "code": "…", "compatibilityFlags": ["global_fetch_strictly_public"] }
+   ```
+
+لتغيير هذه الإعدادات فقط بدون إرسال الكود، استعملوا `POST /api/teams/<team>/workers/<name>/runtime` مع `{"compatibilityFlags": […], "bindings": […]}`. أو استعملوا أداة MCP ‏`set_worker_runtime`، أو تبويب **الإعدادات** في صفحة الوركر. يعيد Spaces نشر آخر كود محفوظ كإصدار جديد، ولا يغيّر الوركر المربوط. الأعلام المسموحة: `global_fetch_strictly_public` و`nodejs_compat` و`nodejs_als`. ويمكن ضبط `compatibilityDate` بصيغة YYYY-MM-DD. لا يمكن حذف وركر ما دام وركر آخر مربوطًا به (`409 WORKER_BOUND`).
+
 ## قائمة التحقق قبل النشر
 
 - [ ] وحدة واحدة فيها `export default { fetch }` (كائن)، وحجمها تحت حد الفريق.
@@ -127,6 +147,7 @@ export default {
 
 ## أخطاء شائعة
 
+- **`fetch()` لوركر آخر من الفريق يرجّع نتيجة خاطئة أو 5xx**: على نفس النطاق يذهب الطلب العادي إلى الخادم الأصلي. استعملوا الربط المباشر أو `global_fetch_strictly_public` (انظروا أعلاه) بدل الالتفاف عبر VPN.
 - **`NOT_A_MODULE`**: الكود بصيغة service worker (‏`addEventListener`) أو فقد الناتج `export default`.
 - **تصدير class افتراضي** لا يستقبل متغيرات أكبر من ٥ ك.ب؛ استعملوا كائنًا.
 - **متغير كبير جدًا** (واجهته أخبار سند مع حد ٥ ك.ب القديم): الحد الآن ٣٢ ك.ب. البيانات الأكبر مكانها KV/ملفات الموقع أو رابط خارجي.

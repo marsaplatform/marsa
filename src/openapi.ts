@@ -264,7 +264,7 @@ export function openapi(config: Config) {
           summary: "Create or redeploy a Worker",
           operationId: "putWorker",
           description:
-            'JSON {"code","vars"?,"secrets"?} or the raw script as application/javascript. Omitted vars are kept; secrets are write-only (null removes one).',
+            'JSON {"code","vars"?,"secrets"?,"compatibilityDate"?,"compatibilityFlags"?,"bindings"?} or the raw script as application/javascript. Omitted vars and runtime settings are kept; secrets are write-only (null removes one). compatibilityFlags is allowlisted (global_fetch_strictly_public, nodejs_compat, nodejs_als). bindings are service bindings to Workers of the same team only: [{"name":"NEWS","worker":"news"}]; 409 WORKER_BOUND when deleting a Worker another one binds to.',
           security: [{ teamKey: [] }],
           parameters: [
             { name: "team", in: "path", required: true, schema: { type: "string" } },
@@ -317,6 +317,23 @@ export function openapi(config: Config) {
             { name: "n", in: "path", required: true, schema: { type: "integer" } },
           ],
           responses: { "200": { description: "The script (text/javascript)" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/runtime": {
+        post: {
+          summary: "Set compatibility date/flags and same-team service bindings",
+          operationId: "setWorkerRuntime",
+          description:
+            'JSON {"compatibilityDate"?: "YYYY-MM-DD"|null, "compatibilityFlags"?: [..], "bindings"?: [{"name","worker"}]}. Redeploys the newest stored code with them (a new version); the bound Workers are not changed. 409 NO_STORED_VERSION when nothing is stored yet.',
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: {
+            "200": { description: "Redeployed" },
+            "400": { description: "Invalid flag, date or binding" },
+          },
         },
       },
       "/api/teams/{team}/workers/{name}/redeploy": {

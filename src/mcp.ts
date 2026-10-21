@@ -18,6 +18,7 @@ import type { TeamStore } from "./teams.js";
 import { bearer, hashToken, safeEqual } from "./tokens.js";
 import type { UserKeyOps } from "./user-key-routes.js";
 import { UserKeyError } from "./user-keys.js";
+import { ALLOWED_COMPAT_FLAGS } from "./worker-config.js";
 import { versionMeta } from "./worker-versions.js";
 import { WorkerError, type WorkerService, workerView } from "./workers.js";
 
@@ -28,6 +29,36 @@ import { WorkerError, type WorkerService, workerView } from "./workers.js";
  * read-only ("ro") or read-write ("rw"). Only the SHA-256 of a token is stored,
  * in the site's meta.json, so tokens die with the site.
  */
+
+/** Optional runtime settings shared by deploy_worker and set_worker_runtime (0.15.0). */
+const RUNTIME_PROPS = {
+  compatibilityDate: {
+    type: ["string", "null"],
+    description: "YYYY-MM-DD (null = the platform default). Omit to keep the current one.",
+  },
+  compatibilityFlags: {
+    type: "array",
+    items: { type: "string", enum: [...ALLOWED_COMPAT_FLAGS] },
+    description:
+      "Allowlisted Cloudflare flags, e.g. global_fetch_strictly_public (fetch() to a public hostname on the same zone goes out through the internet, not to the origin) or nodejs_compat. [] clears them; omit to keep.",
+  },
+  bindings: {
+    type: "array",
+    items: {
+      type: "object",
+      properties: { name: { type: "string" }, worker: { type: "string" } },
+      required: ["name", "worker"],
+      additionalProperties: false,
+    },
+    description:
+      'Service bindings to other Workers of THIS team: [{"name":"NEWS","worker":"news"}] gives env.NEWS.fetch(…). [] clears them; omit to keep.',
+  },
+};
+const runtimeArgs = (a: Record<string, unknown>) => ({
+  ...("compatibilityDate" in a ? { compatibilityDate: a.compatibilityDate } : {}),
+  ...("compatibilityFlags" in a ? { compatibilityFlags: a.compatibilityFlags } : {}),
+  ...("bindings" in a ? { bindings: a.bindings } : {}),
+});
 
 export type McpScope = "ro" | "rw";
 export interface McpToken {
@@ -431,6 +462,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
           code: { type: "string", description: "The Worker's JavaScript ES module" },
           vars: { type: "object", additionalProperties: { type: "string" } },
           secrets: { type: "object", additionalProperties: { type: ["string", "null"] } },
+          ...RUNTIME_PROPS,
         },
         ["name", "code"],
       ),
@@ -448,6 +480,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
               code: a.code,
               ...("vars" in a ? { vars: a.vars } : {}),
               ...("secrets" in a ? { secrets: a.secrets } : {}),
+              ...runtimeArgs(a),
             },
             { kind: "mcp", label: token.name },
           );
@@ -520,6 +553,33 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
         const v = await w.getVersion(rec, Number(a.version));
         if (!v) return fail("no such stored version");
         return ok({ version: { ...versionMeta(v), vars: v.vars, code: v.code } });
+      },
+    },
+    {
+      name: "set_worker_runtime",
+      title: "Set a Worker's compatibility flags and bindings",
+      description:
+        "Change a Worker's compatibility date, compatibility flags (allowlisted) and service bindings to other Workers of the same team, without sending its code: the newest stored code is deployed again (a new version). The bound Workers are not changed.",
+      inputSchema: obj({ name: { type: "string" }, ...RUNTIME_PROPS }, ["name"]),
+      annotations: { destructiveHint: false },
+      write: true,
+      needsWorkers: true,
+      run: async (a, { meta, token }) => {
+        const team = teams.get(meta.teamId);
+        const w = d.workers as WorkerService;
+        const rec = team ? w.find(team.id, str(a, "name")) : null;
+        if (!team || !rec) return fail("no such Worker");
+        try {
+          return ok({
+            worker: await w.editRuntime(team, rec, runtimeArgs(a), {
+              kind: "mcp",
+              label: token.name,
+            }),
+          });
+        } catch (err) {
+          if (err instanceof WorkerError) return fail(`${err.code}: ${err.message}`);
+          throw err;
+        }
       },
     },
     {

@@ -581,6 +581,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           helperUrl: keys.helperUrl,
         },
         audit,
+        teamWorkers: d.workers.list(rec.teamId).map((w) => w.name),
       };
     };
 
@@ -1341,6 +1342,28 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       const secrets: Record<string, string | null> = {};
       for (const [k, v] of Object.entries(raw)) secrets[k] = v === "" ? null : v;
       const w = await d.workers.editEnv(team, rec, { secrets }, actor);
+      return done(c, s, back, {
+        kind: "ok",
+        text: v14.redeployed,
+        ...(w.url ? { link: w.url } : {}),
+      });
+    });
+    workerEdit("runtime", async (c, { s, team, form, actor, rec, back }) => {
+      const lines = envLines(field(form, "bindings"));
+      if (typeof lines === "string") return done(c, s, back, { kind: "err", text: t.badRequest });
+      const w = await d.workers.editRuntime(
+        team,
+        rec,
+        {
+          compatibilityDate: field(form, "compatibilityDate").trim() || null,
+          compatibilityFlags: form.getAll("compatibilityFlags").map(String),
+          bindings: Object.entries(lines).map(([name, worker]) => ({
+            name,
+            worker: worker.trim(),
+          })),
+        },
+        actor,
+      );
       return done(c, s, back, {
         kind: "ok",
         text: v14.redeployed,
