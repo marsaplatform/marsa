@@ -7,7 +7,10 @@ import {
   CfError,
   type CloudflareWorkersApi,
   type FetchFn,
+  STORE_BINDING,
 } from "./cf-workers.js";
+import { CronError, readCrons } from "./worker-cron.js";
+import { CodeError, checkWorkerCode } from "./worker-validate.js";
 import type { Actor } from "./members.js";
 import { RepoError, type RepoLink, readRepo } from "./repo-status.js";
 import type { SecretBox } from "./secrets.js";
@@ -91,7 +94,22 @@ export interface CfSettings {
   updatedAt: string;
   verifiedAt?: string;
   status?: string;
+  /** 0.17.0: the Browser Integrity Check exception for team Worker hosts (config rule). */
+  bic?: BicState;
 }
+
+/** 0.17.0: state of the Spaces-managed configuration rule (never other rules). */
+export interface BicState {
+  enabled: boolean;
+  rulesetId?: string;
+  ruleId?: string;
+  hosts?: number;
+  at?: string;
+  lastError?: string;
+}
+/** The description that marks the one rule Spaces manages in the zone. */
+export const BIC_RULE_REF = "marsa_spaces_bic_team_workers";
+export const BIC_RULE_DESC = "Marsa Spaces: Browser Integrity Check off for team Worker hosts";
 
 export interface SettingsView {
   configured: boolean;
@@ -144,6 +162,9 @@ export interface WorkerRec {
   requiredEnv?: string[];
   /** Workers Logs (Cloudflare observability) turned on through Spaces. */
   logs?: boolean;
+  /** 0.17.0: cron triggers (UTC) and the private KV namespace bound as env.STORE. */
+  crons?: string[];
+  kvNamespaceId?: string;
 }
 
 export interface WorkerView {
@@ -174,6 +195,9 @@ export interface WorkerView {
   spaceId: string | null;
   requiredEnv: string[];
   logs: boolean;
+  /** 0.17.0 */
+  crons: string[];
+  storage: "kv" | null;
 }
 
 /** Platform default compatibility date, set once by WorkerService (config). */
@@ -202,6 +226,8 @@ export const workerView = (r: WorkerRec): WorkerView => ({
   meta: { ...(r.meta ?? {}) },
   requiredEnv: [...(r.requiredEnv ?? [])],
   logs: !!r.logs,
+  crons: [...(r.crons ?? [])],
+  storage: r.kvNamespaceId ? "kv" : null,
   repo: r.repo ? { ...r.repo } : null,
   spaceId: r.spaceId ?? null,
 });
@@ -296,12 +322,29 @@ export interface DeployInput {
   repo?: unknown;
   /** 0.15.2: env names the code needs; missing ones are flagged on the Worker page. */
   requiredEnv?: unknown;
+  /** 0.17.0: cron triggers (undefined = keep, [] = remove) and private KV ("kv" | null). */
+  crons?: unknown;
+  storage?: unknown;
+}
+
+/** 0.17.0: hooks a caller (the jobs runner) can use to follow a deploy. */
+export interface DeployHooks {
+  /** Validation passed; the deploy is queued behind the team's other operations. */
+  accepted?: () => void;
+  /** The team's queue reached this deploy (Cloudflare calls start). */
+  started?: () => void;
 }
 
 export interface WorkerLimits {
   defaultMax: number;
   defaultMaxKb: number;
   compatibilityDate: string;
+  /** 0.17.0 (defaults: 10, 2, 5, 3, 100). */
+  cronMinMinutes?: number;
+  cronsPerTeam?: number;
+  cronAccountMax?: number;
+  kvPerTeam?: number;
+  kvAccountMax?: number;
 }
 
 type AuditFn = (e: {
@@ -319,7 +362,10 @@ export class WorkerService {
   private recs = new Map<string, WorkerRec>();
   private loading: Promise<void> | null = null;
   private writeQ: Promise<void> = Promise.resolve();
-  private opQ: Promise<unknown> = Promise.resolve();
+  /** 0.17.0: one queue per team (key "_platform" for settings): teams no longer wait on each other. */
+  private opQ = new Map<string, Promise<unknown>>();
+  /** 0.17.0: account-wide cron count (cached; Cloudflare caps cron triggers per account). */
+  private cronCount: { at: number; n: number } | null = null;
   readonly versions: WorkerVersionStore;
 
   constructor(
@@ -387,10 +433,19 @@ export class WorkerService {
     );
   }
 
-  /** One Cloudflare-changing operation at a time (keeps quotas and name checks race-free). */
-  private serial<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.opQ.then(fn, fn);
-    this.opQ = run.catch(() => undefined);
+  /**
+   * One Cloudflare-changing operation at a time PER TEAM (keeps the team's quotas and name
+   * checks race-free). 0.17.0: was one queue for the whole platform, so one slow deploy
+   * made every other team wait.
+   */
+  private serial<T>(fn: () => Promise<T>, key = PLATFORM_AUDIT): Promise<T> {
+    const prev = this.opQ.get(key) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.catch(() => undefined);
+    this.opQ.set(key, tail);
+    void tail.then(() => {
+      if (this.opQ.get(key) === tail) this.opQ.delete(key);
+    });
     return run;
   }
 
@@ -614,10 +669,22 @@ export class WorkerService {
   private cfFail(err: unknown, what: string): WorkerError {
     if (err instanceof WorkerError) return err;
     if (err instanceof CfError) {
+      // 0.17.0: Cloudflare refused the script itself (10021: script validation, e.g.
+      // "No such module", a syntax or startup error). That is the caller's code: 400.
+      if (err.codes.includes(10021) || (err.status === 400 && /uncaught|no such module/i.test(err.message))) {
+        return new WorkerError(400, "VALIDATION_FAILED", `Cloudflare rejected the script: ${err.message}`);
+      }
       return new WorkerError(502, "CLOUDFLARE_ERROR", `${what}: ${err.message}`);
     }
-    console.error(`[workers] ${what}:`, (err as Error)?.name ?? "error");
-    return new WorkerError(502, "CLOUDFLARE_ERROR", what);
+    const detail = String((err as Error)?.message ?? "")
+      .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]")
+      .slice(0, 200);
+    console.error(`[workers] ${what}:`, (err as Error)?.name ?? "error", detail);
+    return new WorkerError(
+      502,
+      "CLOUDFLARE_ERROR",
+      `${what}${detail ? ` (${(err as Error)?.name ?? "error"}: ${detail})` : ""}`,
+    );
   }
 
   // ---- deploy -------------------------------------------------------------------------------
@@ -660,7 +727,7 @@ export class WorkerService {
     team: Team,
     input: DeployInput,
     actor: Actor,
-    opts: { action?: VersionAction; from?: number } = {},
+    opts: { action?: VersionAction; from?: number; hooks?: DeployHooks } = {},
   ): Promise<WorkerView> {
     if (!this.enabledFor(team)) {
       throw new WorkerError(
@@ -689,12 +756,13 @@ export class WorkerService {
         `the script is limited to ${q.kb} KB for this team`,
       );
     }
-    if (!/export\s+default\b|export\s*\{[^}]*\bas\s+default\b[^}]*\}/.test(code)) {
-      throw new WorkerError(
-        400,
-        "NOT_A_MODULE",
-        'code must be an ES module with "export default { fetch(request, env) { … } }"',
-      );
+    // 0.17.0: parse the module before anything reaches Cloudflare (syntax, missing
+    // imports, default export in any form) — a clear 400 instead of a failed deploy.
+    try {
+      await checkWorkerCode(code);
+    } catch (err) {
+      if (err instanceof CodeError) throw new WorkerError(400, err.code, err.message);
+      throw err;
     }
     const vars = this.readMap(input.vars, "vars", false) as Record<string, string>;
     const secrets = this.readMap(input.secrets, "secrets", true);
@@ -726,10 +794,99 @@ export class WorkerService {
         throw new WorkerError(400, "INVALID_REQUEST", err.message);
       throw err;
     }
+    let crons: string[] | undefined;
+    try {
+      crons = readCrons(input.crons, this.limit("cronMinMinutes"));
+    } catch (err) {
+      if (err instanceof CronError) throw new WorkerError(400, "INVALID_CRON", `crons: ${err.message}`);
+      throw err;
+    }
+    if (input.storage !== undefined && input.storage !== null && input.storage !== "kv") {
+      throw new WorkerError(400, "INVALID_REQUEST", 'storage: "kv" (a private KV namespace as env.STORE) or null');
+    }
+    const storage = input.storage as "kv" | null | undefined;
     // Throws early (503) when the platform has no token.
     this.token();
+    opts.hooks?.accepted?.();
 
     return this.serial(async () => {
+      opts.hooks?.started?.();
+      try {
+        return await this.deployLocked(team, name, code, bytes, q, {
+          vars,
+          secrets,
+          note,
+          date,
+          flags,
+          wantBindings,
+          meta,
+          repo,
+          requiredEnv,
+          crons,
+          storage,
+          varsGiven: input.vars !== undefined,
+        }, actor, opts);
+      } catch (err) {
+        const e = err instanceof WorkerError ? err : this.cfFail(err, "deploy failed");
+        await this.deps
+          .audit({
+            teamId: team.id,
+            actor,
+            action: "worker-deploy-fail",
+            detail: `${name}: ${e.code}: ${e.message}`.slice(0, 240),
+          })
+          .catch(() => {});
+        throw e;
+      }
+    }, team.id);
+  }
+
+  private limit(k: "cronMinMinutes" | "cronsPerTeam" | "cronAccountMax" | "kvPerTeam" | "kvAccountMax"): number {
+    const d = { cronMinMinutes: 10, cronsPerTeam: 2, cronAccountMax: 5, kvPerTeam: 3, kvAccountMax: 100 };
+    return this.deps.limits[k] ?? d[k];
+  }
+  cronQuotaOf(team: Team): number {
+    return team.maxCrons || this.limit("cronsPerTeam");
+  }
+  kvQuotaOf(team: Team): number {
+    return team.maxKvWorkers || this.limit("kvPerTeam");
+  }
+
+  /** Cron expressions on the whole account (all scripts, not only Spaces'); cached 5 min. */
+  private async accountCrons(a: CfAccess): Promise<number> {
+    if (this.cronCount && this.deps.now() - this.cronCount.at < 5 * 60_000) return this.cronCount.n;
+    let n = 0;
+    for (const sc of await this.deps.api.listScripts(a)) n += (await this.deps.api.getSchedules(a, sc)).length;
+    this.cronCount = { at: this.deps.now(), n };
+    return n;
+  }
+
+  /** The deploy itself, inside the team's queue. */
+  private async deployLocked(
+    team: Team,
+    name: string,
+    code: string,
+    bytes: number,
+    q: { workers: number; kb: number },
+    p: {
+      vars: Record<string, string>;
+      secrets: Record<string, string | null>;
+      note: string;
+      date: string | null | undefined;
+      flags: string[] | undefined;
+      wantBindings: ServiceBinding[] | undefined;
+      meta: WorkerMeta | null | undefined;
+      repo: RepoLink | null | undefined;
+      requiredEnv: string[] | null | undefined;
+      crons: string[] | undefined;
+      storage: "kv" | null | undefined;
+      varsGiven: boolean;
+    },
+    actor: Actor,
+    opts: { action?: VersionAction; from?: number },
+  ): Promise<WorkerView> {
+    const { vars, secrets, note, date, flags, wantBindings, meta, repo, requiredEnv } = p;
+    {
       const existing = this.find(team.id, name);
       if (!existing && this.list(team.id).length >= q.workers) {
         throw new WorkerError(409, "WORKER_QUOTA", `this team can have ${q.workers} Workers`);
@@ -737,7 +894,15 @@ export class WorkerService {
       const a = this.access();
       const script = existing?.script ?? this.scriptFor(team, name);
       // Omitted vars keep the current ones on a redeploy.
-      const finalVars = input.vars === undefined && existing ? existing.vars : vars;
+      const finalVars = !p.varsGiven && existing ? existing.vars : vars;
+      // 0.17.0: cron triggers and private KV (undefined = keep what the Worker has).
+      const wantCrons = p.crons ?? existing?.crons ?? [];
+      const cronsChanged =
+        p.crons !== undefined && JSON.stringify(wantCrons) !== JSON.stringify(existing?.crons ?? []);
+      const wantKv = p.storage === undefined ? !!existing?.kvNamespaceId : p.storage === "kv";
+      if (wantKv && (STORE_BINDING in finalVars || STORE_BINDING in secrets)) {
+        throw new WorkerError(400, "RESERVED_NAME", `${STORE_BINDING} is the private KV binding; rename the var or secret`);
+      }
       checkVarsFit(finalVars, code);
       if (PROTECTED_SCRIPTS.has(script) || !script.startsWith("team-")) {
         throw new WorkerError(403, "PROTECTED", "this script name is not managed by Spaces");
@@ -753,7 +918,42 @@ export class WorkerService {
         ...Object.keys(finalVars),
         ...(existing?.secrets ?? []),
         ...Object.keys(secrets),
+        ...(wantKv ? [STORE_BINDING] : []),
       ]);
+      if (cronsChanged && wantCrons.length) {
+        const others = this.list(team.id)
+          .filter((w) => w.name !== name)
+          .reduce((n, w) => n + (w.crons?.length ?? 0), 0);
+        const tq = this.cronQuotaOf(team);
+        if (others + wantCrons.length > tq) {
+          throw new WorkerError(
+            409,
+            "CRON_QUOTA",
+            `this team can have ${tq} cron trigger${tq === 1 ? "" : "s"} across its Workers (${others} in use)`,
+          );
+        }
+        const acct = await this.accountCrons(this.access()).catch(() => null);
+        const cap = this.limit("cronAccountMax");
+        if (acct !== null && acct - (existing?.crons?.length ?? 0) + wantCrons.length > cap) {
+          throw new WorkerError(
+            409,
+            "CRON_ACCOUNT_LIMIT",
+            `the Cloudflare account has ${acct} of ${cap} cron triggers in use; ask the admin`,
+          );
+        }
+      }
+      if (wantKv && !existing?.kvNamespaceId) {
+        const kq = this.kvQuotaOf(team);
+        const used = this.list(team.id).filter((w) => w.kvNamespaceId && w.name !== name).length;
+        if (used + 1 > kq) {
+          throw new WorkerError(409, "KV_QUOTA", `this team can have ${kq} Workers with private storage`);
+        }
+        const n = await this.deps.api.countKvNamespaces(this.access()).catch(() => null);
+        const cap = this.limit("kvAccountMax");
+        if (n !== null && n >= cap) {
+          throw new WorkerError(409, "KV_ACCOUNT_LIMIT", `the account has ${n} KV namespaces (limit ${cap}); ask the admin`);
+        }
+      }
       const at = this.iso();
       if (!existing) {
         try {
@@ -802,8 +1002,22 @@ export class WorkerService {
         this.recs.set(rec.id, rec);
         await this.saveRecs();
       }
-      const created = { script: false, dns: "", route: "" };
+      const created = { script: false, dns: "", route: "", kv: "" };
       try {
+        if (wantKv && !rec.kvNamespaceId) {
+          try {
+            rec.kvNamespaceId = await this.deps.api.createKvNamespace(a, `marsa-${script}`);
+          } catch (err) {
+            if (err instanceof CfError && (err.status === 401 || err.status === 403))
+              throw new WorkerError(
+                503,
+                "KV_NOT_PERMITTED",
+                "private storage needs the platform token permission Account · Workers KV Storage: Edit; ask the admin",
+              );
+            throw err;
+          }
+          created.kv = rec.kvNamespaceId;
+        }
         await this.deps.api.putScript(a, script, {
           code,
           compatibilityDate: runtime.compatibilityDate ?? this.deps.limits.compatibilityDate,
@@ -811,6 +1025,7 @@ export class WorkerService {
           compatibilityFlags: runtime.compatibilityFlags,
           services,
           ...(rec.logs ? { observability: true } : {}),
+          ...(wantKv && rec.kvNamespaceId ? { kvNamespaceId: rec.kvNamespaceId } : {}),
         });
         created.script = !existing;
         for (const [k, v] of Object.entries(secrets)) {
@@ -830,8 +1045,16 @@ export class WorkerService {
           const sub = await this.deps.api.enableWorkersDev(a, script);
           rec.url = `https://${script}.${sub}.workers.dev`;
         }
+        if (cronsChanged && rec.status !== "disabled") {
+          await this.deps.api.putSchedules(a, script, wantCrons);
+          this.cronCount = null;
+        }
       } catch (err) {
         const fail = this.cfFail(err, "deploy failed");
+        if (created.kv) {
+          await this.deps.api.deleteKvNamespace(a, created.kv).catch(() => {});
+          delete rec.kvNamespaceId;
+        }
         if (!existing) {
           // Undo whatever this attempt created; nothing else is touched.
           if (created.route) await this.deps.api.deleteRoute(a, created.route).catch(() => {});
@@ -894,6 +1117,20 @@ export class WorkerService {
       if (runtime.compatibilityDate) done.compatibilityDate = runtime.compatibilityDate;
       else delete done.compatibilityDate;
       delete done.lastError;
+      if (wantCrons.length) done.crons = wantCrons;
+      else delete done.crons;
+      let storageNote: string | null = null;
+      if (!wantKv && existing?.kvNamespaceId) {
+        // Storage turned off: the binding is gone with this deploy; drop the namespace (data).
+        try {
+          await this.deps.api.deleteKvNamespace(a, existing.kvNamespaceId);
+          storageNote = "worker-storage-off";
+        } catch (err) {
+          console.error("[workers] could not delete the KV namespace:", (err as Error)?.message);
+          storageNote = "worker-storage-off-orphan";
+        }
+        delete done.kvNamespaceId;
+      } else if (created.kv) storageNote = "worker-storage-on";
       const action: VersionAction = opts.action ?? "deploy";
       try {
         const v = await this.versions.add(done.id, {
@@ -932,8 +1169,17 @@ export class WorkerService {
               ? `${name} (v${done.version})`
               : name,
       });
+      if (storageNote) await this.deps.audit({ teamId: team.id, actor, action: storageNote, detail: name });
+      if (cronsChanged)
+        await this.deps.audit({
+          teamId: team.id,
+          actor,
+          action: "worker-crons",
+          detail: `${name}: ${wantCrons.join(" | ") || "none"}`,
+        });
+      if (!existing && done.host && this.settings?.bic?.enabled) void this.syncBic().catch(() => {});
       return workerView(done);
-    });
+    }
   }
 
   /**
@@ -994,8 +1240,15 @@ export class WorkerService {
   async editRuntime(
     team: Team,
     rec: WorkerRec,
-    change: { compatibilityDate?: unknown; compatibilityFlags?: unknown; bindings?: unknown },
+    change: {
+      compatibilityDate?: unknown;
+      compatibilityFlags?: unknown;
+      bindings?: unknown;
+      crons?: unknown;
+      storage?: unknown;
+    },
     actor: Actor,
+    hooks?: DeployHooks,
   ): Promise<WorkerView> {
     const v = await this.versions.latest(rec.id);
     if (!v) {
@@ -1016,11 +1269,155 @@ export class WorkerService {
           ? { compatibilityFlags: change.compatibilityFlags }
           : {}),
         ...("bindings" in change ? { bindings: change.bindings } : {}),
+        ...("crons" in change ? { crons: change.crons } : {}),
+        ...("storage" in change ? { storage: change.storage } : {}),
         note: "runtime settings changed",
       },
       actor,
-      { action: "redeploy" },
+      { action: "redeploy", ...(hooks ? { hooks } : {}) },
     );
+  }
+
+  /** 0.17.0: GET …/runtime — the runtime settings of one Worker (no code, no values). */
+  runtimeView(rec: WorkerRec) {
+    const v = workerView(rec);
+    return {
+      worker: v.name,
+      compatibilityDate: v.compatibilityDate,
+      compatibilityDateSet: v.compatibilityDateSet,
+      compatibilityFlags: v.compatibilityFlags,
+      bindings: v.bindings,
+      crons: v.crons,
+      storage: v.storage
+        ? { type: "kv", binding: STORE_BINDING, private: true as const }
+        : null,
+      logs: v.logs,
+      varNames: Object.keys(v.vars).sort(),
+      secretNames: v.secrets,
+    };
+  }
+
+  /**
+   * 0.17.0: right after a deploy, GET the Worker's health path (meta.healthPath, else "/")
+   * a few times while the new route settles. 2xx-4xx = reachable; 5xx or no answer = not ok.
+   */
+  async healthAfterDeploy(
+    rec: WorkerView,
+    tries = 3,
+    gapMs = 1500,
+  ): Promise<{ path: string; status: number | null; ms: number; ok: boolean } | null> {
+    if (!rec.url || !this.deps.probe || rec.status === "disabled") return null;
+    const path = (rec.meta as { healthPath?: string }).healthPath || "/";
+    let last = { status: null as number | null, ms: 0 };
+    for (let i = 0; i < tries; i++) {
+      const t0 = Date.now();
+      try {
+        const res = await this.deps.probe(`${rec.url}${path}`, {
+          method: "GET",
+          redirect: "manual",
+          headers: { "user-agent": "MarsaSpaces-deploy-check/0.17" },
+          signal: AbortSignal.timeout(5000),
+        });
+        await res.body?.cancel().catch(() => {});
+        last = { status: res.status, ms: Date.now() - t0 };
+        if (res.status < 500) break;
+      } catch {
+        last = { status: null, ms: Date.now() - t0 };
+      }
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, gapMs));
+    }
+    return { path, ...last, ok: last.status !== null && last.status < 500 };
+  }
+
+  // ---- 0.17.0: Browser Integrity Check exception for team Worker hosts ----------------------
+
+  bicView(): BicState & { managed: boolean; hosts: number } {
+    const b = this.settings?.bic ?? { enabled: false };
+    return { ...b, managed: !!b.ruleId, hosts: this.bicHosts().length };
+  }
+
+  private bicHosts(): string[] {
+    return [...new Set(this.list().filter((w) => w.host && w.status !== "disabled").map((w) => w.host as string))].sort();
+  }
+
+  /**
+   * Turn the exception on or off. Only ever creates, updates or deletes the ONE rule whose
+   * ref is BIC_RULE_REF; every other rule of the zone is left as it is. Needs the token
+   * permission Zone · Config Rules: Edit — without it Cloudflare answers 403 and nothing
+   * changes (reported as BIC_NOT_PERMITTED).
+   */
+  async setBic(enabled: boolean, actor: Actor): Promise<ReturnType<WorkerService["bicView"]>> {
+    this.token();
+    if (!this.settings?.zoneId) throw new WorkerError(409, "NO_ZONE", "the Workers token has no zone");
+    await this.serial(async () => {
+      const s = this.settings as CfSettings;
+      s.bic = { ...(s.bic ?? {}), enabled };
+      await this.saveSettingsFile();
+    });
+    await this.syncBic(actor);
+    return this.bicView();
+  }
+
+  /** Make the zone rule match the current team Worker hosts (or remove it when off/empty). */
+  async syncBic(actor?: Actor): Promise<void> {
+    return this.serial(async () => {
+      const s = this.settings;
+      if (!s?.zoneId || !s.bic) return;
+      const a = this.access();
+      const hosts = this.bicHosts();
+      const rule = {
+        ref: BIC_RULE_REF,
+        description: BIC_RULE_DESC,
+        expression: `http.host in {${hosts.map((h) => JSON.stringify(h)).join(" ")}}`,
+        action: "set_config",
+        action_parameters: { bic: false },
+        enabled: true,
+      } as unknown as Parameters<CloudflareWorkersApi["addConfigRule"]>[2];
+      const next: BicState = { ...s.bic, at: this.iso() };
+      try {
+        const ep = await this.deps.api.configRules(a);
+        const mine = ep?.rules.find((r) => r.ref === BIC_RULE_REF || r.description === BIC_RULE_DESC);
+        if (!s.bic.enabled || !hosts.length) {
+          if (ep && mine) await this.deps.api.deleteConfigRule(a, ep.id, mine.id);
+          delete next.ruleId;
+          delete next.rulesetId;
+        } else if (!ep) {
+          await this.deps.api.createConfigEntrypoint(a, rule);
+          const again = await this.deps.api.configRules(a);
+          const r = again?.rules.find((x) => x.ref === BIC_RULE_REF || x.description === BIC_RULE_DESC);
+          if (again && r) Object.assign(next, { rulesetId: again.id, ruleId: r.id });
+        } else if (mine) {
+          await this.deps.api.updateConfigRule(a, ep.id, mine.id, rule);
+          Object.assign(next, { rulesetId: ep.id, ruleId: mine.id });
+        } else {
+          await this.deps.api.addConfigRule(a, ep.id, rule);
+          const again = await this.deps.api.configRules(a);
+          const r = again?.rules.find((x) => x.ref === BIC_RULE_REF || x.description === BIC_RULE_DESC);
+          if (r) Object.assign(next, { rulesetId: ep.id, ruleId: r.id });
+        }
+        next.hosts = s.bic.enabled ? hosts.length : 0;
+        delete next.lastError;
+      } catch (err) {
+        const denied = err instanceof CfError && (err.status === 401 || err.status === 403);
+        next.lastError = denied
+          ? "Cloudflare refused: the token needs Zone · Config Rules: Edit"
+          : this.cfFail(err, "could not update the configuration rule").message;
+        s.bic = next;
+        await this.saveSettingsFile();
+        if (actor)
+          throw new WorkerError(denied ? 403 : 502, denied ? "BIC_NOT_PERMITTED" : "CLOUDFLARE_ERROR", next.lastError);
+        return;
+      }
+      s.bic = next;
+      await this.saveSettingsFile();
+      if (actor)
+        await this.deps.audit({
+          teamId: PLATFORM_AUDIT,
+          actor,
+          action: s.bic.enabled ? "bic-exception-on" : "bic-exception-off",
+          detail: `${hosts.length} host(s)`,
+        });
+    });
   }
 
   /** Change metadata only (no redeploy): declared meta, repo link, linked space. */
@@ -1062,7 +1459,7 @@ export class WorkerService {
         detail: cur.name,
       });
       return workerView(next);
-    });
+    }, rec.teamId);
   }
 
   /** Stored versions of a Worker, newest first. */
@@ -1169,7 +1566,7 @@ export class WorkerService {
         detail: `${cur.name}: ${n}`,
       });
       return { name: n, rotated };
-    });
+    }, rec.teamId);
   }
 
   /** 0.15.2: delete one secret from the Worker (no redeploy). */
@@ -1204,7 +1601,7 @@ export class WorkerService {
         detail: `${cur.name}: ${n}`,
       });
       return { name: n };
-    });
+    }, rec.teamId);
   }
 
   /** 0.15.2: set (value) or delete (null) one plain var; redeploys the newest stored code. */
@@ -1261,7 +1658,7 @@ export class WorkerService {
         detail: cur.name,
       });
       return workerView(next);
-    });
+    }, rec.teamId);
   }
 
   /**
@@ -1370,9 +1767,18 @@ export class WorkerService {
       try {
         if (cur.routeId) await this.deps.api.deleteRoute(a, cur.routeId);
         if (cur.dnsId) await this.deps.api.deleteDns(a, cur.dnsId);
+        // 0.17.0: cron triggers go first (explicitly), then the script.
+        if (cur.crons?.length) await this.deps.api.putSchedules(a, cur.script, []).catch(() => {});
         await this.deps.api.deleteScript(a, cur.script);
       } catch (err) {
         throw this.cfFail(err, "delete failed");
+      }
+      if (cur.crons?.length) this.cronCount = null;
+      // 0.17.0: the private KV namespace (and its data) is deleted with the Worker.
+      if (cur.kvNamespaceId) {
+        await this.deps.api.deleteKvNamespace(a, cur.kvNamespaceId).catch((err) => {
+          console.error("[workers] could not delete the KV namespace:", (err as Error)?.message);
+        });
       }
       this.recs.delete(cur.id);
       await this.saveRecs();
@@ -1384,7 +1790,8 @@ export class WorkerService {
         action: "worker-delete",
         detail: cur.name,
       });
-    });
+      if (cur.host && this.settings?.bic?.enabled) void this.syncBic().catch(() => {});
+    }, rec.teamId);
   }
 
   /** Admin: take a Worker offline (remove its route) without deleting it, or bring it back. */
@@ -1402,6 +1809,11 @@ export class WorkerService {
         if (!disabled && cur.host && a.zoneId && !cur.routeId) {
           next.routeId = await this.deps.api.createRoute(a, `${cur.host}/*`, cur.script);
         }
+        // 0.17.0: a disabled Worker's cron triggers are paused, and restored on enable.
+        if (cur.crons?.length) {
+          await this.deps.api.putSchedules(a, cur.script, disabled ? [] : cur.crons);
+          this.cronCount = null;
+        }
       } catch (err) {
         throw this.cfFail(err, disabled ? "disable failed" : "enable failed");
       }
@@ -1418,7 +1830,7 @@ export class WorkerService {
         detail: cur.name,
       });
       return workerView(next);
-    });
+    }, rec.teamId);
   }
 
   /** Remove every Worker of a team (Workers turned off, or the team deleted). */
