@@ -303,3 +303,22 @@ describe("0.16.0 headers", () => {
     expect(old.headers.get("cache-control")).toBe("public, max-age=300");
   });
 });
+
+describe("0.16.0 quieter env warnings", () => {
+  it("skips names with defaults and keeps code-only names as info", async () => {
+    const { scanEnvUsage, buildEnvView } = await import("../src/worker-env.js");
+    expect(
+      scanEnvUsage(
+        `const a = env.SEED ?? "x"; const b = env.URL || "y"; const c = env.KEY; const { MODE = "dev", HOST } = env; env["OPT"] ?? 1; env.KEY ?? 2;`,
+      ),
+    ).toEqual(["HOST", "KEY"]);
+    const v = buildEnvView(
+      { vars: {}, secrets: [], requiredEnv: ["NEED"] },
+      [],
+      "env.HOST; env.SEED ?? 1",
+    );
+    expect(v.missing).toEqual([{ name: "NEED", why: "declared" }]);
+    expect(v.unset).toEqual(["HOST"]);
+    expect(v.entries.map((e) => e.name)).not.toContain("SEED");
+  });
+});

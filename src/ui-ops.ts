@@ -29,8 +29,14 @@ export const OX = {
       system: "Spaces-managed",
       binding: "Binding",
       missing: "Missing",
+      unset: "Used in code",
     } as Record<string, string>,
-    st: { set: "Set", empty: "Empty", missing: "Missing" } as Record<string, string>,
+    st: { set: "Set", empty: "Empty", missing: "Missing", unset: "Not set" } as Record<
+      string,
+      string
+    >,
+    unsetNote: (n: number) =>
+      `${n} name${n === 1 ? "" : "s"} used in the code without a default and not set. Set ${n === 1 ? "it" : "them"} if needed, or add to requiredEnv to get a warning.`,
     srcLive: "Cloudflare (live)",
     srcSpaces: "Spaces record",
     envHelp:
@@ -182,8 +188,14 @@ export const OX = {
       system: "تديره Spaces",
       binding: "ربط",
       missing: "ناقص",
+      unset: "مستخدم في الكود",
     } as Record<string, string>,
-    st: { set: "مضبوط", empty: "فارغ", missing: "ناقص" } as Record<string, string>,
+    st: { set: "مضبوط", empty: "فارغ", missing: "ناقص", unset: "غير مضبوط" } as Record<
+      string,
+      string
+    >,
+    unsetNote: (n: number) =>
+      `${n} من الأسماء مستخدمة في الكود بلا قيمة افتراضية وغير مضبوطة. اضبطها إن احتجتها، أو أضفها إلى requiredEnv ليظهر تنبيه.`,
     srcLive: "Cloudflare (مباشر)",
     srcSpaces: "سجل Spaces",
     envHelp:
@@ -462,7 +474,7 @@ export function envTab(o: OpsTabCtx, v: EnvView): string {
         hidden: { name: e.name, op: "delete", back: o.self },
       });
     }
-    if (o.canEdit && (e.kind === "missing" || e.kind === "secret"))
+    if (o.canEdit && (e.kind === "missing" || e.kind === "unset" || e.kind === "secret"))
       actions.push({
         kind: "link",
         label: x.setIt,
@@ -516,6 +528,8 @@ export function envTab(o: OpsTabCtx, v: EnvView): string {
         )
         .join("")}</ul></div>`
     : "";
+  const unsetN = v.unset?.length ?? 0;
+  const info = unsetN ? `<p class="meta env-unset">${esc(x.unsetNote(unsetN))}</p>` : "";
   const live = v.liveError ? `<p class="notice">${esc(x.liveFail(v.liveError))}</p>` : "";
   const table = dataTable({
     lang,
@@ -568,7 +582,7 @@ export function envTab(o: OpsTabCtx, v: EnvView): string {
     .map((e) => `<option value="${esc(e.name)}">`)
     .join("")}</datalist></div>`
     : "";
-  return `<p class="meta">${esc(x.envHelp)}</p>${live}${missing}${table}<p class="meta">${esc(x.requiredEnvHint)}</p>${forms}`;
+  return `<p class="meta">${esc(x.envHelp)}</p>${live}${missing}${info}${table}<p class="meta">${esc(x.requiredEnvHint)}</p>${forms}`;
 }
 
 export function healthTab(o: OpsTabCtx, h: HealthView, active: boolean): string {
