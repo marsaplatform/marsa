@@ -21,8 +21,8 @@ import { gunzipSync, gzipSync } from "node:zlib";
 export const BACKUP_PREFIX = "_marsa-backups/";
 const MAGIC = Buffer.from("MSB1");
 const ARCHIVE_MAGIC = Buffer.from("MSBA1\n");
-/** Never in a backup: temp files, and local backups themselves. */
-const SKIP_DIRS = new Set(["tmp", "backups"]);
+/** Never in a backup: temp files, local backups themselves, and the volume's lost+found. */
+const SKIP_DIRS = new Set(["tmp", "backups", "lost+found"]);
 
 export interface BlobStore {
   readonly kind: "r2" | "dir";
@@ -125,11 +125,14 @@ export interface Manifest {
   bytes: number;
 }
 
-/** Every file under dir (skipping tmp/ and backups/), sorted. */
+/** Every file under dir (skipping tmp/, backups/ and lost+found/), sorted. */
 async function collect(root: string): Promise<{ rel: string; full: string; mode: number }[]> {
   const out: { rel: string; full: string; mode: number }[] = [];
   const walk = async (dir: string) => {
-    for (const n of (await readdir(dir)).sort()) {
+    // An unreadable folder (e.g. a root-owned one on the volume) is skipped, not fatal.
+    const names = await readdir(dir).catch(() => null);
+    if (!names) return;
+    for (const n of names.sort()) {
       const full = join(dir, n);
       const st = await stat(full).catch(() => null);
       if (!st) continue; // removed while we walked

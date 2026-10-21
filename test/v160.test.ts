@@ -250,6 +250,8 @@ describe("0.16.0 encrypted backups", () => {
     await writeFile(join(src, "sites", "abc", "files", "index.html"), "<h1>hi</h1>");
     await mkdir(join(src, "tmp"), { recursive: true });
     await writeFile(join(src, "tmp", "junk"), "skip me");
+    await mkdir(join(src, "lost+found"), { recursive: true });
+    await writeFile(join(src, "lost+found", "x"), "skip me too");
     const key = backupKey("x".repeat(40));
     const { archive, manifest } = await packDir(src, "test", Date.now());
     expect(manifest.files.map((f) => f.p)).toEqual(["sites/abc/files/index.html", "teams.json"]);
