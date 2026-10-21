@@ -159,6 +159,107 @@ Start from the starter template: `GET /api/recipes/mcp-server-on-worker/starter.
   query); the admin Settings page checks every permission
   with read-only probes and shows green/red/grey lights.
 
+## Deploy jobs, checks, crons and private storage (0.17.0)
+
+### Deploys answer in time: jobs and 202
+
+Every deploy (`PUT|POST …/workers[/<name>]`, `POST …/redeploy`, `POST …/rollback`, `POST …/runtime`) is a
+**job**. Each team has its own queue, so one team's slow deploy never delays another team.
+
+- **Default (unchanged for existing scripts):** the request waits for the deploy, up to 60 s, and answers
+  `200/201` as before, now with `health` and `job` added. Check the `X-Marsa-Job` header for the job id.
+- If the deploy is still running after the wait, the answer is **`202 Accepted`** with
+  `{"job": {"id", "status", "statusUrl", …}}`, a `Location` header and `Retry-After: 5`. Poll
+  `GET /api/teams/<team>/jobs/<id>` until `done` is `true`. `status` is one of `queued`, `running`,
+  `succeeded`, `failed`, `interrupted`. A finished job has `version` and `health`; a failed one has
+  `error: {status, code, message}`.
+- `?wait=0…90` sets the wait in seconds. `?async=1` or the header `Prefer: respond-async` answers `202`
+  right after the checks below.
+- `GET /api/teams/<team>/jobs?worker=<name>` lists recent jobs (kept 7 days). A job that was running when
+  the server restarted becomes `interrupted`: deploy again.
+- Every failure is written to the team's activity log as `worker-deploy-fail`
+  (`GET /api/teams/<team>/activity?action=worker-deploy-fail`), with the error code and message.
+
+```bash
+curl -s -X PUT "https://spaces.marsaplatform.com/api/teams/<team>/workers/news?async=1" \
+  -H "X-Team-Key: $MARSA_AGENT_KEY" -H "content-type: application/javascript" --data-binary @dist/worker.js
+# => 202 {"job":{"id":"job_…","status":"queued","statusUrl":"…/api/teams/<team>/jobs/job_…"}}
+curl -s "https://spaces.marsaplatform.com/api/teams/<team>/jobs/job_…" -H "X-Team-Key: $MARSA_AGENT_KEY"
+```
+
+### Code checks before upload
+
+Before anything is sent to Cloudflare, the code is parsed with esbuild:
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `SYNTAX_ERROR` | 400 | The code does not parse; the message has the line and column |
+| `MISSING_MODULE` | 400 | An `import` of a package (e.g. `hono`) that is not in the file. Bundle first: `esbuild src/index.ts --bundle --format=esm --outfile=dist/worker.js`. `cloudflare:*` and `node:*` imports are allowed |
+| `NOT_A_MODULE` | 400 | No default export |
+| `VALIDATION_FAILED` | 400 | Cloudflare refused the script (its error 10021, e.g. an exception at startup); the message says why |
+
+Every default export form works: `export default {…}`, `export default app`, `export { app as default }`,
+`export default class …`.
+
+After a successful deploy, Spaces requests the Worker once (`meta.healthPath`, or `/`) and returns
+`health: {path, status, ms, ok}` (`ok` = below 500). `?health=0` skips this request.
+
+### Cron triggers
+
+```json
+{ "code": "…", "crons": ["*/30 * * * *"] }
+```
+
+- Five-field cron expressions in UTC (`minute hour day month weekday`; names like `mon-fri` work), up to 3
+  per Worker. Runs must be at least **10 minutes** apart (`WORKER_CRON_MIN_MINUTES`).
+- The Worker needs a `scheduled` handler: `export default { fetch(…) {…}, async scheduled(controller, env, ctx) {…} }`.
+- Quotas: 2 cron triggers per team unless the admin sets `maxCrons`; `409 CRON_QUOTA` above it. Cloudflare's
+  Free plan allows 5 cron triggers per account, shared with other Workers: `409 CRON_ACCOUNT_LIMIT` when the
+  account is full.
+- Omit `crons` to keep them, `[]` or `null` to remove them. Disabling a Worker pauses its crons; deleting it
+  removes them. Also on `POST …/runtime` and the `deploy_worker` / `set_worker_runtime` MCP tools.
+
+### Private storage per Worker (KV)
+
+```json
+{ "code": "…", "storage": "kv" }
+```
+
+- `"storage": "kv"` creates a Cloudflare KV namespace only this Worker can use, bound as **`env.STORE`**:
+  `await env.STORE.put("key", "value")`, `await env.STORE.get("key")`, `env.STORE.list({prefix})`.
+- **Deleting the Worker deletes the namespace and all its data.** `"storage": null` removes it the same way.
+  Omit `storage` to keep it. Export your data first if you need it.
+- `STORE` is reserved: no var or secret may use that name while storage is on.
+- Quotas: 3 Workers with storage per team unless the admin sets `maxKvWorkers` (`409 KV_QUOTA`), and an
+  account cap (`409 KV_ACCOUNT_LIMIT`). If the platform token lacks *Workers KV Storage: Edit*, the deploy is
+  refused with `503 KV_NOT_PERMITTED` and nothing changes.
+- Cloudflare KV limits apply (Free plan: 1,000 writes and 100,000 reads per day per account, 25 MiB per value).
+  KV is eventually consistent: a write can take up to a minute to show everywhere.
+
+### Read the runtime settings
+
+`GET /api/teams/<team>/workers/<name>/runtime` (scope `workers:read`) returns
+`{runtime: {compatibilityDate, compatibilityFlags, bindings, crons, storage, logs, varNames, secretNames},
+allowedCompatibilityFlags, limits}`. `limits` has the var limits: up to 32 vars per Worker, 32 KB per
+value and 64 KB in total (raised from 5 KB in 0.14.0), plus your cron and storage quotas.
+
+### Clients that get Cloudflare error 1010 (Python `urllib`, some CLIs)
+
+The zone has Cloudflare's **Browser Integrity Check** on. It refuses requests whose `User-Agent` looks like
+a script (Python `urllib`'s default `Python-urllib/3.x`), with error **1010**, before the request reaches
+your Worker. Until the platform exception is on, send any normal User-Agent:
+
+```python
+import urllib.request
+req = urllib.request.Request(url, headers={"User-Agent": "my-agent/1.0 (+https://example.com)"})
+urllib.request.urlopen(req)
+```
+
+`requests`, `httpx`, `curl` and browsers are not affected. The admin can turn on an exception for team Worker
+hosts (`PUT /api/admin/workers/bic {"enabled": true}`): one Cloudflare Configuration Rule that turns the check off only for
+team Worker hostnames. It needs the token permission **Zone · Config Rules: Edit** (a light in Settings ›
+Cloudflare permissions); without it, nothing is changed.
+
 ## Run & observe
 
 Once a Worker is live, an agent (or you) can run it without a Cloudflare key:
@@ -204,7 +305,8 @@ Protect a public MCP server (or any Worker) with per-user keys managed in Spaces
 All with `Authorization: Bearer $ADMIN_TOKEN`:
 
 - `GET /api/admin/workers/settings`, `PUT /api/admin/workers/settings` (`{"token","accountId"?,"zone"?}`), `POST /api/admin/workers/settings/verify`, `DELETE /api/admin/workers/settings` (only when no team Workers exist).
-- `PUT /api/admin/teams/<id>/workers` (`{"enabled", "slug", "maxWorkers", "maxWorkerKb"}`); `enabled: false` deletes the team's Workers.
+- `PUT /api/admin/teams/<id>/workers` (`{"enabled", "slug", "maxWorkers", "maxWorkerKb", "maxCrons", "maxKvWorkers"}`); `enabled: false` deletes the team's Workers.
+- `GET|PUT /api/admin/workers/bic` (`{"enabled": true|false}`): the Browser Integrity Check exception for team Worker hosts (0.17.0).
 - `GET /api/admin/workers`, `POST /api/admin/workers/<id>/disable|enable`, `DELETE /api/admin/workers/<id>`.
 
 ## Server configuration
@@ -215,6 +317,12 @@ All with `Authorization: Bearer $ADMIN_TOKEN`:
 | `WORKERS_DEFAULT_MAX` | `3` | Workers per team unless the admin sets a quota |
 | `WORKER_MAX_KB` | `1024` | Script size per team unless the admin sets a quota |
 | `WORKERS_COMPAT_DATE` | `2025-09-01` | Cloudflare compatibility date for deployed scripts |
+| `WORKER_DEPLOY_WAIT_SEC` | `60` | How long a deploy request waits before answering `202` with a job (max 90) |
+| `WORKER_CRON_MIN_MINUTES` | `10` | Shortest allowed gap between cron runs |
+| `WORKER_CRONS_PER_TEAM` | `2` | Cron triggers per team unless the admin sets `maxCrons` |
+| `WORKER_CRON_ACCOUNT_MAX` | `5` | Cron triggers the Cloudflare account allows (Free 5, Paid 250) |
+| `WORKER_KV_PER_TEAM` | `3` | Workers with private storage per team unless the admin sets `maxKvWorkers` |
+| `WORKER_KV_ACCOUNT_MAX` | `100` | KV namespaces Spaces may keep on the account |
 | `VAR_VALUES_SUNSET` | `2026-10-28T12:00:00Z` | End of the period in which lists still return plain var values (see [Var values](#var-values)) |
 
-Not included yet: live log tailing (use the Cloudflare dashboard), bindings other than plain vars and secrets (KV, D1, R2, Durable Objects), and multi-file bundles (bundle first, e.g. with `esbuild --bundle --format=esm`).
+Not included yet: live log tailing (use the Cloudflare dashboard), bindings other than vars, secrets, same-team services and the private KV store (no D1, R2 or Durable Objects), and multi-file bundles (bundle first, e.g. with `esbuild --bundle --format=esm`).

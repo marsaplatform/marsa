@@ -7,11 +7,15 @@ import type { RateLimiter } from "./rate-limit.js";
 import { can, scopeError, type TeamAuth, type TeamCred } from "./team-auth.js";
 import type { Team, TeamStore } from "./teams.js";
 import { ALLOWED_COMPAT_FLAGS } from "./worker-config.js";
+import { MAX_CRONS_PER_WORKER } from "./worker-cron.js";
 import { type JobKind, type JobStore, jobView } from "./worker-jobs.js";
 import { versionMeta } from "./worker-versions.js";
 import {
   type DeployHooks,
   listedWorker,
+  MAX_VAR_BYTES,
+  MAX_VARS,
+  MAX_VARS_TOTAL,
   PLATFORM_AUDIT,
   type VarValuesPolicy,
   varValuesHeaders,
@@ -481,6 +485,15 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
     return c.json({
       runtime: svc.runtimeView(r.rec),
       allowedCompatibilityFlags: [...ALLOWED_COMPAT_FLAGS],
+      limits: {
+        vars: MAX_VARS,
+        varBytes: MAX_VAR_BYTES,
+        varsTotalBytes: MAX_VARS_TOTAL,
+        cronsPerWorker: MAX_CRONS_PER_WORKER,
+        cronMinMinutes: d.config.workers.cronMinMinutes,
+        crons: svc.cronQuotaOf(r.cr.team),
+        kvWorkers: svc.kvQuotaOf(r.cr.team),
+      },
     });
   });
   // 0.17.0: deploy jobs.

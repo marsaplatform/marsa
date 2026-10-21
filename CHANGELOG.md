@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.17.0] - 2026-10-21
+
+### Added
+- **Deploy jobs.** Every Worker deploy (create, redeploy, rollback, runtime change) is a job in a per-team
+  queue, so one team's slow deploy no longer holds up the others. Requests still wait and answer `200/201`
+  as before (up to 60 s, `WORKER_DEPLOY_WAIT_SEC`); a slower deploy answers `202` with
+  `{"job": {"id", "status", "statusUrl"}}`, `Location` and `Retry-After`. `?wait=0…90`, `?async=1` or
+  `Prefer: respond-async` choose the wait. New `GET /api/teams/<team>/jobs/<id>` and `GET …/jobs?worker=`.
+  Jobs are kept 7 days; a job cut off by a restart becomes `interrupted`. Every failed deploy is written to
+  the team's activity log (`worker-deploy-fail`, with the code and message).
+- **Pre-deploy checks with esbuild**: `400 SYNTAX_ERROR` (line and column), `MISSING_MODULE` (unbundled
+  imports; `cloudflare:*` and `node:*` are allowed), `NOT_A_MODULE`. Any default-export form is accepted.
+- **Post-deploy health probe**: deploy answers and jobs include `health: {path, status, ms, ok}` from one
+  request to `meta.healthPath` (or `/`). `?health=0` skips it. The MCP `deploy_worker` tool returns it too.
+- **Cron triggers**: `"crons": [...]` on deploy, `POST …/runtime` and the MCP tools. Five-field UTC
+  expressions, at most 3 per Worker, at least 10 minutes apart (`WORKER_CRON_MIN_MINUTES`); a per-team quota
+  (`WORKER_CRONS_PER_TEAM`, default 2, admin `maxCrons`) and a check against the Cloudflare account limit
+  (`WORKER_CRON_ACCOUNT_MAX`, default 5, counting every script's crons). Disabling a Worker pauses them;
+  deleting it removes them.
+- **Private per-Worker KV storage** (opt-in): `"storage": "kv"` creates a KV namespace bound as `env.STORE`,
+  used only by that Worker and deleted with it (or with `"storage": null`). Quotas per team
+  (`WORKER_KV_PER_TEAM`, default 3, admin `maxKvWorkers`) and per account (`WORKER_KV_ACCOUNT_MAX`). `STORE` is
+  a reserved env name while storage is on. A token without KV permission gets `503 KV_NOT_PERMITTED`.
+- `GET /api/teams/<team>/workers/<name>/runtime`: the runtime settings (date, flags, bindings, crons,
+  storage, var/secret names) plus the var limits and quotas.
+- **Browser Integrity Check exception (code path, off by default)**: `GET|PUT /api/admin/workers/bic`
+  manages one Cloudflare Configuration Rule (`bic: false`) for team Worker hostnames only, kept in sync as
+  Workers come and go. It turns on only when Cloudflare accepts it; without **Zone · Config Rules: Edit** it
+  answers `403 BIC_NOT_PERMITTED` and nothing changes. New optional light in the Cloudflare permission checklist.
+- **Admin notes to a team**: `POST /api/admin/teams/<id>/notes` and a **Post a note to a team** form on
+  Admin › Notes (EN/AR). No notification or webhook is sent.
+
+### Changed
+- Cloudflare's script validation error (10021) and "no such module"/"uncaught" upload errors are now
+  `400 VALIDATION_FAILED` with Cloudflare's message, instead of `502`. Other upstream failures carry a redacted
+  detail instead of an empty message.
+- Docs (EN/AR), the Worker recipe, `llms.txt` and `openapi.json` cover jobs, checks, crons, storage, the
+  runtime read, the var limits (32 vars, 32 KB each, 64 KB total) and the Python `urllib` User-Agent
+  workaround for Cloudflare error 1010.
+- Privacy policy: private Worker storage and deploy jobs.
+
 ## [0.16.1] - 2026-10-21
 
 ### Fixed
