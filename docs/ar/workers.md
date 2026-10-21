@@ -155,7 +155,8 @@ curl -s -X DELETE "https://marsa.example.com/api/teams/sanad/workers/hello" -H "
   عند تشغيلها بـ `POST …/logs {"enabled": true}`. السلاسل التي تشبه الأسرار تُحجب.
 - **الاستخدام**: `GET …/usage?range=24h|7d|30d` — الطلبات والأخطاء ومتوسط CPU والطلبات لكل مفتاح مستخدم نهائي.
 - يحتاج مفتاح Cloudflare صلاحية **Account · Account Analytics: Read** لأعداد الاستخدام والأخطاء و
-  **Account · Workers Observability: Read** لأسطر السجلات؛ تفحص صفحة إعدادات الإدارة كل صلاحية
+  **Account · Workers Observability: Edit (API: Write)** لأسطر السجلات (صلاحية *Read*
+  وحدها يرفضها استعلام السجلات بـ 403)؛ تفحص صفحة إعدادات الإدارة كل صلاحية
   بفحوص للقراءة فقط وتعرض أضواء خضراء/حمراء/رمادية.
 
 ## التشغيل والمراقبة

@@ -118,6 +118,7 @@ JSON
 - **`repo`** (اختياري): يظهر في عمود المستودع. تتحقق المساحات من GitHub قراءةً فقط وتخزّن النتيجة: عام أو خاص أو غير موجود، ومتزامن أو متأخر عن الفرع.
 - **`requiredEnv`** (اختياري، 0.15.2): أسماء متغيرات البيئة التي يحتاجها الكود. يُظهر تبويب **المتغيرات والأسرار** في صفحة الوركر أي اسم ناقص (وأيضًا الأسماء التي يراها في الكود بصيغة `env.X`). لإضافة سر أو تغييره لاحقًا دون إعادة نشر: `PUT /api/teams/<team>/workers/<name>/secrets/<NAME>` مع `{"value":"…"}` (كتابة فقط؛ لا تُرجع القيمة أبدًا)، و`DELETE` لحذفه، أو أداة MCP ‏`set_worker_secret`. يحتاج مفتاح الوكيل صلاحية `workers:secrets` (أو `workers:deploy`).
 - بعد النشر راجع `GET …/workers/<name>/health` و`…/usage?range=24h` و`…/logs` (أو أداة MCP ‏`worker_status`). وإذا بقي شيء معطّلًا فاترك ملاحظة.
+- أسطر السجل الكاملة في `…/logs` تحتاج تشغيل Workers Logs للوركر وأن يملك رمز Cloudflare لدى المشغّل صلاحية **Account · Workers Observability: Edit (API: Write)** (و*Read* وحدها تُرجع 403). وبدونها تبقى أعداد الأخطاء من التحليلات متاحة.
 - لتغيير `meta` أو `repo` أو المساحة المربوطة لاحقًا دون إعادة نشر: `POST /api/teams/<team>/workers/<name>/links`، أو أداة MCP ‏`set_worker_links`، أو تبويب **الإعدادات** في صفحة الوركر.
 
 عبر MCP (وكيل متصل بـ MCP إحدى المساحات): تقبل أداة `deploy_worker` الحقول نفسها: `code` و`vars` و`secrets` و`meta` و`repo` و`compatibilityFlags` و`bindings`.
