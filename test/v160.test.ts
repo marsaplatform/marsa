@@ -183,6 +183,7 @@ describe("0.16.0 team export, trash, restore and purge", () => {
     // Restore: everything works again.
     expect((await t.admin("POST", `/trash/${team.team.id}/restore`)).status).toBe(200);
     expect((await t.publish(team.key)).status).toBe(201);
+    expect(await readdir(join(t.dir, "trash"))).toEqual([]);
     const b = await t.adminBrowser();
     const actHtml = await (await b.get(`/admin/teams/${team.team.id}?tab=activity`)).text();
     expect(actHtml).toContain("Restored the team");

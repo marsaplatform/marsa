@@ -282,6 +282,9 @@ export class TeamLifecycle {
         failed.push(w.name);
       }
     }
+    // The team is live again (and can be exported any time): drop the deletion-time export.
+    if (tr.exportFile && /^[\w.-]+\.zip$/.test(tr.exportFile))
+      await rm(join(this.trashDir, tr.exportFile), { force: true }).catch(() => {});
     d.invalidateDirectory();
     await d.audit({ teamId: id, actor, action: "team-restore", detail: team.name });
     await d.audit({ teamId: PLATFORM_AUDIT, actor, action: "team-restore", detail: team.name });
