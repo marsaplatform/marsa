@@ -1,6 +1,6 @@
 import type { AgentKeyView } from "./agent-keys.js";
 import type { Config } from "./config.js";
-import { bytesLabel, type Lang, STRINGS } from "./i18n.js";
+import { actorText, bytesLabel, detailText, type Lang, STRINGS } from "./i18n.js";
 import type { MemberRole } from "./members.js";
 import {
   ADMIN_CTX,
@@ -256,7 +256,7 @@ export const DX = {
     activity: "النشاط",
     members: "الأعضاء",
     spaces: "المساحات",
-    workers: "الوركرز",
+    workers: "الوركرات",
     agents: "مفاتيح الوكلاء",
     files: "الملفات",
     data: "البيانات",
@@ -281,7 +281,7 @@ export const DX = {
     varNames: "المتغيرات",
     secretNames: "الأسرار",
     none: "لا شيء",
-    health: "فحص الحالة",
+    health: "فحص الصحة",
     healthOk: (code: number, ms: number) => `HTTP ${code} خلال ${ms} مللي ثانية`,
     healthFail: (ms: number) => `لا رد (${ms} مللي ثانية)`,
     healthOff: "لم يُفحص: الوركر غير نشط.",
@@ -303,7 +303,7 @@ export const DX = {
     secretsTitle: "الأسرار",
     runtimeTitle: "بيئة التشغيل والربط",
     runtimeHelp:
-      "إعدادات التوافق في كلاودفلير والربط المباشر (service bindings) مع وركرز أخرى من نفس الفريق. الحفظ يعيد نشر الكود الحالي، ولا يغيّر الوركرز المربوطة.",
+      "إعدادات التوافق في كلاودفلير والربط المباشر (service bindings) مع وركرات أخرى من نفس الفريق. الحفظ يعيد نشر الكود الحالي، ولا يغيّر الوركرات المربوطة.",
     compatDate: "تاريخ التوافق",
     platformDefault: "(الافتراضي للمنصة)",
     compatDateHelp: "فارغ = الافتراضي للمنصة.",
@@ -314,16 +314,16 @@ export const DX = {
       nodejs_compat: "واجهات Node.js ‏(node:buffer و node:crypto …).",
       nodejs_als: "AsyncLocalStorage فقط.",
     } as Record<string, string>,
-    bindingsTitle: "الربط بين الوركرز",
+    bindingsTitle: "الربط بين الوركرات",
     bindingsHelp: (names: string) =>
-      `سطر لكل ربط: NAME=worker. وركرز هذا الفريق فقط${names ? ` (${names})` : ""}. في الكود: env.NAME.fetch(request).`,
+      `سطر لكل ربط: NAME=worker. وركرات هذا الفريق فقط${names ? ` (${names})` : ""}. في الكود: env.NAME.fetch(request).`,
     saveRuntime: "احفظ إعدادات التشغيل",
     secretsHelp:
       "NAME=value للإضافة أو الاستبدال، وNAME= فارغة للحذف. القيم للكتابة فقط وتذهب مباشرة إلى كلاودفلير. الحفظ يعيد نشر الكود الحالي.",
     saveSecrets: "احفظ الأسرار",
     removeSecret: "احذف",
     removeSecretConfirm: (n: string) => `تحذف السر ${n}؟ يُعاد نشر الوركر بدونه.`,
-    needVersion: "انشر الكود مرة من صفحة الوركرز ليُحفظ، ثم يمكنك تعديله هنا.",
+    needVersion: "انشر الكود مرة من صفحة الوركرات ليُحفظ، ثم يمكنك تعديله هنا.",
     disable: "أوقف",
     enable: "شغّل",
     disableHelp: "يوقف الوركر (يتوقف عنوانه عن الرد) دون حذفه.",
@@ -350,7 +350,7 @@ export const DX = {
     backend: "البيانات والملفات",
     home: "في الصفحة الرئيسية",
     permanent: "روابط دائمة",
-    workersFeature: "الوركرز",
+    workersFeature: "الوركرات",
     quota: "الحصص",
     quotaSites: "أقصى عدد مساحات",
     quotaMb: "أقصى ميغابايت",
@@ -371,12 +371,12 @@ export const DX = {
     rotateHelp: "يتوقف المفتاح القديم فورًا، وتنتهي الجلسات والوكلاء الذين يستخدمونه.",
     rotateConfirm: "تصدر مفتاح فريق جديدًا؟ يتوقف الحالي فورًا.",
     deleteTeam: "احذف هذا الفريق",
-    workersOn: "الوركرز مفعّلة",
+    workersOn: "الوركرات مفعّلة",
     workersSlug: "الاسم المختصر",
-    maxWorkers: "أقصى عدد وركرز",
+    maxWorkers: "أقصى عدد وركرات",
     maxKb: "أقصى KB",
-    saveWorkers: "احفظ إعدادات الوركرز",
-    turnOffWorkers: "إيقاف الوركرز يحذف كل وركرز الفريق.",
+    saveWorkers: "احفظ إعدادات الوركرات",
+    turnOffWorkers: "إيقاف الوركرات يحذف كل وركرات الفريق.",
     keyName: "المفتاح",
     prefix: "البادئة",
     revokeKey: "ألغِ",
@@ -386,7 +386,7 @@ export const DX = {
     lastUsed: "آخر استخدام",
     noAgentKeys: "لا مفاتيح وكلاء.",
     noSpaces: "لا مساحات منشورة.",
-    noWorkers: "لا وركرز.",
+    noWorkers: "لا وركرات.",
     keyStates: { active: "فعّال", revoked: "ملغى", expired: "منتهٍ" } as Record<string, string>,
     previewAlt: (t: string) => `معاينة ${t}`,
     link: "الرابط",
@@ -427,7 +427,7 @@ const _arHasAll: typeof DX.en = DX.ar;
 void _arHasAll;
 
 const num = (lang: Lang, n: number) => n.toLocaleString(lang === "ar" ? "ar-EG" : "en-US");
-const actorName = (lang: Lang, who: string) => STRINGS[lang].members.actorLabels[who] ?? who;
+const actorName = (lang: Lang, who: string) => actorText(lang, who);
 const backField = (path: string) => `<input type="hidden" name="back" value="${esc(path)}">`;
 const codeList = (names: string[], lock = false) =>
   names.length
@@ -534,6 +534,8 @@ export interface WorkerDetailOpts {
     logs?: LogsResult;
     usage?: { range: UsageRange; series: UsageSeries; keys: KeyUsageRow[] };
     prefill?: string;
+    /** 0.16.0: declared health path / expected status (prefill). */
+    healthTarget?: { path: string; expect: string };
     /** Health summary for the overview. */
     healthCell?: { state: HealthView["state"]; d7: number | null };
   };
@@ -596,6 +598,7 @@ export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): st
     canEdit: o.canEdit,
     canVars: o.canEdit && !!w.version,
     ...(o.ops?.prefill ? { prefill: o.ops.prefill } : {}),
+    ...(o.ops?.healthTarget ? { healthTarget: o.ops.healthTarget } : {}),
   };
   if (tab === "env" && o.ops?.env) body = envTab(opsCtx, o.ops.env);
   else if (tab === "health" && o.ops?.health)
@@ -632,7 +635,7 @@ export function workerDetailHtml(lang: Lang, c: Config, o: WorkerDetailOpts): st
       `<div><dt>${esc(label)}</dt><dd>${html}</dd></div>`;
     body = `<dl class="facts-grid">
       ${fact(x.lastDeploy, w.deployedAt ? `${timeTag(lang, w.deployedAt)} <span class="meta">${esc(x.by)} <bdi>${esc(actorName(lang, w.deployedBy))}</bdi></span>` : "—")}
-      ${fact(x.version, latest ? `v${latest.n} · ${esc(V14[lang].actions[latest.action] ?? latest.action)}${latest.note ? ` <span class="meta"><bdi>${esc(latest.note)}</bdi></span>` : ""}` : `<span class="meta">${esc(x.noVersion)}</span>`)}
+      ${fact(x.version, latest ? `v${latest.n} · ${esc(V14[lang].actions[latest.action] ?? latest.action)}${latest.note ? ` <span class="meta"><bdi>${esc(detailText(lang, latest.note))}</bdi></span>` : ""}` : `<span class="meta">${esc(x.noVersion)}</span>`)}
       ${fact(x.size, esc(bytesLabel(lang, w.bytes)))}
       ${fact(x.sha, latest ? `<code class="ltr" title="${esc(latest.sha256)}">${esc(latest.sha256.slice(0, 16))}…</code>` : "—")}
       ${fact(x.health, `${health}${o.ops?.healthCell ? ` · ${healthCellHtml(lang, o.ops.healthCell)}` : ""}`)}
@@ -714,7 +717,7 @@ function workerVersionsTab(
         { html: relTime(vv.at, lang), v: vv.at },
         { html: `<bdi>${esc(actorName(lang, vv.by))}</bdi>`, v: vv.by.toLowerCase() },
         {
-          html: `${esc(v.actions[vv.action] ?? vv.action)}${vv.from ? ` <span class="meta">${esc(v.rolledFrom(vv.from))}</span>` : ""}${vv.note ? `<div class="meta"><bdi>${esc(vv.note)}</bdi></div>` : ""}`,
+          html: `${esc(v.actions[vv.action] ?? vv.action)}${vv.from ? ` <span class="meta">${esc(v.rolledFrom(vv.from))}</span>` : ""}${vv.note ? `<div class="meta"><bdi>${esc(detailText(lang, vv.note))}</bdi></div>` : ""}`,
         },
         { html: esc(bytesLabel(lang, vv.bytes)), v: vv.bytes, cls: "num" },
         {
@@ -862,7 +865,7 @@ function workerKeysTab(lang: Lang, o: WorkerDetailOpts, self: string, teamBase: 
       },
     ],
   });
-  const helper = `<section class="block panel" aria-labelledby="uk-helper"><h2 id="uk-helper" class="h3">${esc(k.helper)}</h2><p class="meta">${esc(k.helperText)} ${esc(k.cache(o.keys.settings.cacheSeconds))}</p><p>${esc(k.verify)}: <code class="ltr">${esc(o.keys.verifyUrl)}</code></p><pre class="ltr" dir="ltr"><code>curl -s ${esc(o.keys.helperUrl)} &gt; marsa-keys.js
+  const helper = `<section class="block panel" aria-labelledby="uk-helper"><h2 id="uk-helper" class="h3">${esc(k.helper)}</h2><p class="meta">${esc(k.helperText)} ${esc(k.cache(o.keys.settings.cacheSeconds))}</p><p>${esc(k.verify)}: <code class="ltr">${esc(o.keys.verifyUrl)}</code></p><pre tabindex="0" class="ltr" dir="ltr"><code>curl -s ${esc(o.keys.helperUrl)} &gt; marsa-keys.js
 const gate = await requireKey(request, env, { tool });
 if (!gate.ok) return gate.response;</code></pre></section>`;
   return `${off}${table}${create}${helper}`;
@@ -884,7 +887,7 @@ function insightFacts(
                 .map((n) => `<li><code class="ltr">${esc(n)}</code></li>`)
                 .join("")}</ul>`
             : ""
-        }${i.probeNote ? `<div class="meta">${esc(i.probeNote)}</div>` : ""}${i.probeAt ? `<div class="meta">${esc(ix.probeAt)} ${relTime(i.probeAt, lang)}</div>` : ""}`
+        }${i.probeNote ? `<div class="meta">${esc(ix.probeNotes[i.probeNote] ?? i.probeNote)}</div>` : ""}${i.probeAt ? `<div class="meta">${esc(ix.probeAt)} ${relTime(i.probeAt, lang)}</div>` : ""}`
       : `<span class="meta">—</span>`;
   return [
     fact(ix.type, kindBadge(lang, i)),
@@ -1936,7 +1939,7 @@ function siteFilesTab(lang: Lang, o: SiteDetailOpts): string {
     caption: x.files,
     headLabel: x.path,
     cols: [
-      { label: "Type", srOnly: true },
+      { label: IX[lang].type, srOnly: true },
       { label: x.size, sort: "num" },
     ],
     rows,
@@ -1973,7 +1976,7 @@ function siteDataTab(lang: Lang, o: SiteDetailOpts, self: string, teamBase: stri
         html:
           kk.full === undefined
             ? `<span class="meta">—</span>`
-            : `<details class="kv-value"><summary><code dir="ltr">${esc(kk.preview ?? "")}</code></summary><pre dir="ltr">${esc(kk.full)}</pre>${kk.truncated ? `<p class="meta">${esc(t.team.valueTruncated)}</p>` : ""}</details>`,
+            : `<details class="kv-value"><summary><code dir="ltr">${esc(kk.preview ?? "")}</code></summary><pre tabindex="0" dir="ltr">${esc(kk.full)}</pre>${kk.truncated ? `<p class="meta">${esc(t.team.valueTruncated)}</p>` : ""}</details>`,
         cls: "cell-value",
       },
       {

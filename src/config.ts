@@ -8,6 +8,8 @@ export interface Config {
   publicUrl: string;
   /** Who operates this instance, shown in the privacy policy. */
   operator: Operator;
+  /** 0.16.0: time zone for server-rendered times and charts (DISPLAY_TZ, default Asia/Dubai). */
+  displayTz: string;
   /** Directory where uploaded sites and their metadata are stored. */
   dataDir: string;
   /** Default link lifetime, in hours, when the uploader doesn't pick one. */
@@ -197,6 +199,7 @@ export function loadConfig(env: Env = process.env): Config {
     host: env.HOST?.trim() || "0.0.0.0",
     publicUrl: (env.PUBLIC_URL?.trim() || `http://localhost:${port}`).replace(/\/+$/, ""),
     operator: loadOperator(env),
+    displayTz: env.DISPLAY_TZ?.trim() || "Asia/Dubai",
     dataDir: env.DATA_DIR?.trim() || "./data",
     defaultTtlHours: int(env, "DEFAULT_TTL_HOURS", 24, 1),
     minTtlHours: int(env, "MIN_TTL_HOURS", 1, 1),

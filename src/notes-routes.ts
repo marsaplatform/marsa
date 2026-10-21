@@ -13,6 +13,7 @@ import {
   type NoteStore,
   readNote,
 } from "./agent-notes.js";
+import type { Actor } from "./members.js";
 import type { NotificationCenter } from "./notify.js";
 import type { RateLimiter } from "./rate-limit.js";
 import type { TeamAuth } from "./team-auth.js";
@@ -24,6 +25,8 @@ export interface NoteRouteDeps {
   notify: NotificationCenter;
   limiter: RateLimiter;
   teamAuth: TeamAuth;
+  /** 0.16.0: platform/team audit log writer (admin actions). */
+  audit?: (e: { teamId: string; actor: Actor; action: string; detail?: string }) => Promise<void>;
 }
 
 const err = (c: Context, status: number, code: string, message: string) =>
@@ -164,6 +167,12 @@ export function mountAdminNoteRoutes(app: Hono, d: NoteRouteDeps): void {
         { status: body.status, reply: body.reply },
         "admin",
       );
+      await d.audit?.({
+        teamId: n.teamId,
+        actor: { kind: "admin", label: "admin" },
+        action: "note-update",
+        detail: n.status,
+      });
       return c.json({ note: { ...noteView(n), teamId: n.teamId } });
     } catch (e) {
       if (e instanceof NoteError)

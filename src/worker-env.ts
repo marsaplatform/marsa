@@ -34,27 +34,40 @@ export function readRequiredEnv(raw: unknown): string[] | null | undefined {
 /** Names the code reads from env: env.X, env?.X, env["X"], and `const { X } = env`. */
 export function scanEnvUsage(code: string): string[] {
   const out = new Set<string>();
+  // 0.16.0: a name counts only if at least one use has no default (`env.X ?? …`,
+  // `env.X || …`, or `{ X = … } = env`), so optional settings stay quiet.
+  const bare = new Set<string>();
   const src = code.slice(0, 2_000_000);
-  for (const m of src.matchAll(/\benv\??\.([A-Z][A-Z0-9_]{1,63})\b/g)) out.add(m[1] as string);
-  for (const m of src.matchAll(/\benv\??\.?\[\s*["'`]([A-Z][A-Z0-9_]{1,63})["'`]\s*\]/g))
+  const hasDefault = (end: number) => /^\s*(\?\?|\|\|)/.test(src.slice(end, end + 8));
+  for (const m of src.matchAll(/\benv\??\.([A-Z][A-Z0-9_]{1,63})\b/g)) {
     out.add(m[1] as string);
-  for (const m of src.matchAll(/\{([^{}=]{1,400})\}\s*=\s*env\b/g)) {
+    if (!hasDefault((m.index ?? 0) + m[0].length)) bare.add(m[1] as string);
+  }
+  for (const m of src.matchAll(/\benv\??\.?\[\s*["'`]([A-Z][A-Z0-9_]{1,63})["'`]\s*\]/g)) {
+    out.add(m[1] as string);
+    if (!hasDefault((m.index ?? 0) + m[0].length)) bare.add(m[1] as string);
+  }
+  for (const m of src.matchAll(/\{([^{}]{1,400})\}\s*=\s*env\b/g)) {
     for (const part of (m[1] as string).split(",")) {
       const name = part.split(":")[0]?.split("=")[0]?.trim() ?? "";
-      if (/^[A-Z][A-Z0-9_]{1,63}$/.test(name)) out.add(name);
+      if (/^[A-Z][A-Z0-9_]{1,63}$/.test(name)) {
+        out.add(name);
+        if (!part.includes("=")) bare.add(name);
+      }
     }
   }
   for (const s of SYSTEM_SECRETS) out.delete(s);
-  return [...out].sort();
+  return [...out].filter((n) => bare.has(n)).sort();
 }
 
-export type EnvKind = "var" | "secret" | "system" | "binding" | "missing";
+/** 0.16.0: "unset" = used in the code but not set and not declared (info, not a warning). */
+export type EnvKind = "var" | "secret" | "system" | "binding" | "missing" | "unset";
 export interface EnvEntry {
   name: string;
   kind: EnvKind;
   /** Cloudflare binding type (plain_text, secret_text, service, …) or "—" when missing. */
   type: string;
-  status: "set" | "empty" | "missing";
+  status: "set" | "empty" | "missing" | "unset";
   /** Where the row comes from: the live Cloudflare script, or Spaces' own record. */
   source: "cloudflare" | "spaces";
   updatedAt: string | null;
@@ -67,7 +80,10 @@ export interface EnvEntry {
 
 export interface EnvView {
   entries: EnvEntry[];
+  /** Declared in requiredEnv but not set (shown as a warning). */
   missing: { name: string; why: "declared" | "code" }[];
+  /** 0.16.0: used in the code without a default, not declared, not set (info only). */
+  unset: string[];
   /** "cloudflare" when the live bindings were read, else "spaces" (record only). */
   source: "cloudflare" | "spaces";
   liveError: string | null;
@@ -166,6 +182,7 @@ export function buildEnvView(
   }
   const used = code ? scanEnvUsage(code) : [];
   const missing: EnvView["missing"] = [];
+  const unset: string[] = [];
   for (const [n, why] of [
     ...[...declared].map((n) => [n, "declared"] as const),
     ...used.filter((n) => !declared.has(n)).map((n) => [n, "code"] as const),
@@ -176,24 +193,34 @@ export function buildEnvView(
       if (e.status === "empty" && why === "declared") missing.push({ name: n, why });
       continue;
     }
-    missing.push({ name: n, why });
+    // 0.16.0: only declared names are "missing" (a warning); code-only names are info rows.
+    if (why === "declared") missing.push({ name: n, why });
+    else unset.push(n);
     entries.set(n, {
       name: n,
-      kind: "missing",
+      kind: why === "declared" ? "missing" : "unset",
       type: "—",
-      status: "missing",
+      status: why === "declared" ? "missing" : "unset",
       source: "spaces",
       updatedAt: null,
       updatedBy: null,
       expected: why,
     });
   }
-  const order: Record<EnvKind, number> = { missing: 0, secret: 1, var: 2, binding: 3, system: 4 };
+  const order: Record<EnvKind, number> = {
+    missing: 0,
+    secret: 1,
+    var: 2,
+    binding: 3,
+    unset: 4,
+    system: 5,
+  };
   return {
     entries: [...entries.values()].sort(
       (a, b) => order[a.kind] - order[b.kind] || a.name.localeCompare(b.name),
     ),
     missing,
+    unset,
     source: live ? "cloudflare" : "spaces",
     liveError,
     requiredEnv: [...declared].sort(),

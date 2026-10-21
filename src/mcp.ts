@@ -712,7 +712,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
       name: "worker_env",
       title: "A Worker's vars & secrets (names only)",
       description:
-        "Names, types and status (set/empty/missing) of a Worker's plain vars, secrets and bindings, read live from Cloudflare, plus names the code expects but are missing (declared requiredEnv + env.X usage). Never returns any value.",
+        "Names, types and status (set/empty/missing/unset) of a Worker's plain vars, secrets and bindings, read live from Cloudflare. `missing` lists declared requiredEnv names that are not set (fix these); `unset` lists names the code reads without a default (env.X without ?? or ||) that are not set (info only). Never returns any value.",
       inputSchema: obj({ name: { type: "string" } }, ["name"]),
       annotations: { readOnlyHint: true },
       needsWorkers: true,

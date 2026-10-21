@@ -138,6 +138,12 @@ export function mountAdminRecipeRoutes(app: Hono, d: RecipeRouteDeps): void {
     try {
       const body = ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
       const r = await d.recipes.save1(null, c.req.param("slug"), body, "admin");
+      await d.members.log({
+        teamId: "_platform",
+        actor: { kind: "admin", label: "admin" },
+        action: "recipe-save",
+        detail: `${r.slug} v${r.version}`,
+      });
       return c.json({ recipe: summaryOf(r, langQ(c)) });
     } catch (e) {
       return recipeErr(c, e);
@@ -147,6 +153,12 @@ export function mountAdminRecipeRoutes(app: Hono, d: RecipeRouteDeps): void {
     await d.recipes.ready();
     if (!(await d.recipes.remove(null, c.req.param("slug"))))
       return err(c, 404, "NOT_FOUND", "no such platform recipe");
+    await d.members.log({
+      teamId: "_platform",
+      actor: { kind: "admin", label: "admin" },
+      action: "recipe-delete",
+      detail: c.req.param("slug"),
+    });
     return c.body(null, 204);
   });
 }

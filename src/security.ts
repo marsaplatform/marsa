@@ -1,6 +1,13 @@
 /** Security headers shared by every response surface. */
-export function baseHeaders(h: Headers): void {
+/** 0.16.0: two years, subdomains, preload-ready. */
+export const HSTS = "max-age=63072000; includeSubDomains; preload";
+
+export function baseHeaders(h: Headers, https = false): void {
   h.set("X-Content-Type-Options", "nosniff");
+  // 0.16.0: one framing answer everywhere (CSP frame-ancestors 'none' agrees), and HSTS
+  // with preload when the public URL is https.
+  h.set("X-Frame-Options", "DENY");
+  if (https) h.set("Strict-Transport-Security", HSTS);
   // App pages opt into "same-origin" (so browsers send Origin on their own form
   // posts); everything else, including uploaded sites, sends no referrer.
   if (!h.has("Referrer-Policy")) h.set("Referrer-Policy", "no-referrer");

@@ -135,7 +135,8 @@ export async function makeApp(
     await b.post("/admin/login", { _csrf: csrf, token: ADMIN });
     return b;
   };
-  const cleanup = () => rm(dir, { recursive: true, force: true });
+  // Retries: a late async write (notification, audit) can land while the folder is removed (ENOTEMPTY).
+  const cleanup = () => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   return {
     app,
     api,

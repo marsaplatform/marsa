@@ -236,6 +236,10 @@ export class PermCache {
     const h = this.v.get(k);
     return h && this.now() - h.at < this.ttlMs ? h.r : null;
   }
+  /** 0.16.0: the last report of any age (Settings renders it while a refresh runs). */
+  last(k: string): PermReport | null {
+    return this.v.get(k)?.r ?? null;
+  }
   set(k: string, r: PermReport) {
     this.v.set(k, { at: this.now(), r });
   }

@@ -60,6 +60,8 @@ export interface Actor {
   /** Display label: member name, "team key", "admin", token name. */
   label: string;
   memberId?: string;
+  /** 0.16.0: structured agent-key actor (the label stays "agent key <name>" for old readers). */
+  agentKey?: string;
 }
 
 export interface AuditEntry {

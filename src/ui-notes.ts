@@ -56,19 +56,19 @@ export const NX = {
     category: "Category",
   },
   ar: {
-    title: "ملاحظات الإيجنتس",
+    title: "ملاحظات الوكلاء",
     subAdmin:
-      "ملاحظات يتركها الإيجنتس في أي مرحلة (النشر، البناء، التشغيل، الوصفات). الملاحظات العائقة تُنبّه الجرس. ردّوا أو أكّدوا الاستلام أو أغلقوها.",
-    subTeam: "ملاحظات تركها إيجنتس فريقكم لمسؤول المنصة، مع حالتها وردّ المسؤول.",
+      "ملاحظات يتركها الوكلاء في أي مرحلة (النشر، البناء، التشغيل، الوصفات). الملاحظات العائقة تُنبّه الجرس. ردّوا أو أكّدوا الاستلام أو أغلقوها.",
+    subTeam: "ملاحظات تركها وكلاء فريقكم لمسؤول المنصة، مع حالتها وردّ المسؤول.",
     time: "الوقت",
     team: "الفريق",
     target: "الهدف",
     stage: "المرحلة",
     severity: "الأهمية",
-    agent: "الإيجنت",
+    agent: "الوكيل",
     message: "الرسالة",
     status: "الحالة",
-    empty: "لا توجد ملاحظات بعد. يترك الإيجنت ملاحظة حين تواجهه مشكلة.",
+    empty: "لا توجد ملاحظات بعد. يترك الوكيل ملاحظة حين تواجهه مشكلة.",
     stages: { deploy: "النشر", build: "البناء", runtime: "التشغيل", recipe: "وصفة", other: "أخرى" },
     severities: { info: "معلومة", bug: "خلل", blocker: "عائق", suggestion: "اقتراح" },
     statuses: { open: "مفتوحة", ack: "تم الاستلام", resolved: "تم الحل" },
@@ -81,9 +81,9 @@ export const NX = {
     saveReply: "أرسل الرد",
     redacted: "حُذفت أسرار من النص",
     version: "الإصدار",
-    howTitle: "كيف يترك الإيجنت ملاحظة",
+    howTitle: "كيف يترك الوكيل ملاحظة",
     howBody:
-      "بمفتاح الفريق أو أي مفتاح إيجنت: POST /api/teams/<team>/notes. وعبر MCP: أداة leave_note. تُحذف المفاتيح وكلمات المرور تلقائيًا؛ ٣٠ ملاحظة في الساعة لكل مفتاح.",
+      "بمفتاح الفريق أو أي مفتاح وكيل: POST /api/teams/<team>/notes. وعبر MCP: أداة leave_note. تُحذف المفاتيح وكلمات المرور تلقائيًا؛ ٣٠ ملاحظة في الساعة لكل مفتاح.",
     saved: "تم تحديث الملاحظة.",
     category: "التصنيف",
   },
@@ -240,7 +240,7 @@ export function notesHtml(lang: Lang, c: Config, o: NotesPageOpts): string {
       },
     ],
   });
-  const how = `<details class="panel how-notes"><summary>${icon("info")} ${esc(x.howTitle)}</summary><p class="meta">${esc(x.howBody)}</p><pre class="code ltr" dir="ltr"><code>curl -X POST "${esc(c.publicUrl)}/api/teams/&lt;team&gt;/notes" \\
+  const how = `<details class="panel how-notes"><summary>${icon("info")} ${esc(x.howTitle)}</summary><p class="meta">${esc(x.howBody)}</p><pre tabindex="0" class="code ltr" dir="ltr"><code>curl -X POST "${esc(c.publicUrl)}/api/teams/&lt;team&gt;/notes" \\
   -H "X-Team-Key: $MARSA_AGENT_KEY" -H "content-type: application/json" \\
   -d '{"severity":"bug","stage":"deploy","category":"bindings","message":"…","target":{"type":"worker","id":"news"},"version":"4","agent":"my-agent"}'</code></pre><p><a class="text-link" href="${esc(href("/docs/recipes/agent-notes"))}">${esc(lang === "ar" ? "الدليل" : "Guide")}</a></p></details>`;
   const body = `<div class="page-wide">

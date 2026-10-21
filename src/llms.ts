@@ -36,7 +36,15 @@ If the operator gave you a team key, add the header X-Team-Key: <team key> to PO
 
 ## MCP per space
 
-Each site has a Streamable HTTP MCP server at ${base}/mcp/s/<siteId>. Auth: Authorization: Bearer marsa_mcp_... (a per-site token a team member creates on the site page; read-only or read-write). Tools: get_site_info, list_files, read_file, replace_site_files (rw), and with the backend kv_list, kv_get, kv_put, kv_delete, list_uploads, upload_file, delete_file.
+Each site has a Streamable HTTP MCP server at ${base}/mcp/s/<siteId>. Auth: Authorization: Bearer marsa_mcp_... (a per-site token a team member creates on the site page; read-only or read-write). Tools: get_site_info, list_files, read_file, replace_site_files (rw), and with the backend kv_list, kv_get, kv_put, kv_delete, list_uploads, upload_file, delete_file. For teams with Workers also list_workers, list_worker_versions, get_worker_version, worker_env, worker_status (ro) and deploy_worker, redeploy_worker, rollback_worker, delete_worker, set_worker_secret, set_worker_runtime, set_worker_links (rw).
+
+## Run & observe Workers (teams with Workers)
+
+- Declare what the code needs: "requiredEnv": ["API_KEY", …] on PUT ${base}/api/teams/<team>/workers/<name>. GET …/workers/<name>/env (MCP: worker_env) lists names, types and status: "missing" = declared but not set, "unset" = read in code without a default (info only). Values are never returned.
+- Secrets: PUT …/workers/<name>/secrets/<NAME> {"value": "…"} (write-only, no redeploy; agent keys need workers:secrets) or MCP set_worker_secret. Plain vars: PUT|DELETE …/vars/<NAME>.
+- Health: GET …/workers/<name>/health. Up = web Workers answer < 400 at the URL, MCP servers answer initialize (or < 500). Declare your own check with meta {"healthPath": "/health", "healthExpect": "2xx"}.
+- Usage and errors: GET …/usage?range=24h|7d|30d and GET …/logs. MCP worker_status returns health, usage and recent errors in one call.
+- Every change is in the team's activity log: GET ${base}/api/teams/<team>/activity (team key; ?format=csv|jsonl).
 
 ## Limits on this instance
 
@@ -74,6 +82,8 @@ JSON {"error": {"code", "message", "path"?}}. Codes: EMPTY_UPLOAD, INVALID_REQUE
 - [API reference](${base}/docs/api)
 - [Guide for AI agents](${base}/docs/agents)
 - [Agent recipes](${base}/docs/recipes): step-by-step playbooks (MCP server on a Worker with a downloadable TypeScript + Hono starter at ${base}/api/recipes/mcp-server-on-worker/starter.zip, security rules, KV/files, bilingual project pages, protecting an MCP with keys, a self-hosted Python MCP, agent notes). As markdown: ${base}/api/recipes/<slug>?format=md\n- Agent notes: hit a problem? POST ${base}/api/teams/<team>/notes (team or agent key) or the MCP tool leave_note; the admin replies
+- [Workers: deploy, run & observe](${base}/docs/workers)
+- [Agent keys and invites](${base}/docs/agent-keys)
 - [Data & files backend](${base}/docs/backend)
 - [Teams and the public directory](${base}/docs/teams)
 - [OpenAPI spec](${base}/openapi.json)

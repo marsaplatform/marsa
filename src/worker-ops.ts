@@ -59,6 +59,9 @@ export class WorkerOps {
       notify: d.notify ?? null,
       now: d.now,
       mcpTarget: (rec) => this.mcpTarget(rec),
+      kindOf: (rec) =>
+        rec.meta?.kind ??
+        detectFromCode(this.codeCache.get(`${rec.id}@${rec.version ?? 0}`) ?? null).kind,
       ...(d.healthIntervalSec ? { defaultIntervalSec: d.healthIntervalSec } : {}),
     });
     this.analytics = new WorkerAnalytics({
@@ -167,6 +170,44 @@ export class WorkerOps {
         };
       })
       .sort((a, b) => b.total - a.total);
+  }
+
+  private readonly refreshing = new Set<string>();
+
+  /**
+   * 0.16.0: the permission report without waiting on Cloudflare. A fresh cached report is
+   * returned as is; a stale or missing one is returned (or null) while a refresh runs in the
+   * background, so the Settings page never blocks on the probes (was 5.2 s cold).
+   */
+  permissionsNow(kind: "workers" | "backend"): PermReport | null {
+    const off =
+      kind === "workers"
+        ? !this.d.workers.configured
+        : !this.d.backendConfig || this.d.backend?.kind !== "cloudflare";
+    if (off)
+      return {
+        token: kind,
+        configured: false,
+        checks: [],
+        granted: 0,
+        required: 0,
+        at: new Date(this.d.now()).toISOString(),
+      };
+    const fresh = this.perms.get(kind);
+    if (fresh) return fresh;
+    void this.refreshPermissions(kind);
+    return this.perms.last(kind);
+  }
+
+  /** Run the probes once in the background (concurrent calls share one run). */
+  refreshPermissions(kind: "workers" | "backend"): Promise<void> {
+    if (this.refreshing.has(kind)) return Promise.resolve();
+    this.refreshing.add(kind);
+    const run = kind === "workers" ? this.workersPermissions(true) : this.backendPermissions(true);
+    return run
+      .then(() => undefined)
+      .catch(() => undefined)
+      .finally(() => this.refreshing.delete(kind));
   }
 
   /** Permission checklist for the Workers token (cached 5 min unless forced). */

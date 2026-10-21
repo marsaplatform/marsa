@@ -15,7 +15,10 @@ import {
   pageHead,
 } from "./ui.js";
 import { DX, healthFilter, workerStatusBadge, workerStatusFilter } from "./ui-detail.js";
+import { healthCellHtml, OX, sparkCellHtml } from "./ui-ops.js";
 import { badge, type DtAction, type DtRow, dataTable, relTime } from "./ui-table.js";
+import type { UsageSeries } from "./worker-analytics.js";
+import type { HealthView } from "./worker-health.js";
 import type { WorkerKind, WorkerLanguage } from "./worker-insight.js";
 
 /** What the Workers tables, the Worker page and the MCP servers page show per Worker (0.15.1). */
@@ -57,6 +60,11 @@ export const IX = {
     tools: "MCP tools",
     toolsUnknown: "—",
     ownAuth: "Own auth (401)",
+    probeNotes: {
+      protected: "Asks for its own key (401/403)",
+      timeout: "No answer (timeout)",
+      error: "Error",
+    } as Record<string, string>,
     endpoint: "MCP endpoint",
     protected: "Spaces keys",
     yes: "Yes",
@@ -109,7 +117,7 @@ export const IX = {
   },
   ar: {
     type: "النوع",
-    kinds: { mcp: "سيرفر MCP", web: "موقع / API", other: "أخرى" } as Record<string, string>,
+    kinds: { mcp: "خادم MCP", web: "موقع / API", other: "أخرى" } as Record<string, string>,
     declared: "مُعلَن",
     detected: "مُكتشَف",
     stack: "اللغة / التقنية",
@@ -122,6 +130,11 @@ export const IX = {
     tools: "أدوات MCP",
     toolsUnknown: "—",
     ownAuth: "مصادقة خاصة (401)",
+    probeNotes: {
+      protected: "يطلب مفتاحه الخاص (401/403)",
+      timeout: "لا رد (انتهت المهلة)",
+      error: "خطأ",
+    } as Record<string, string>,
     endpoint: "عنوان MCP",
     protected: "مفاتيح مساحات",
     yes: "نعم",
@@ -152,13 +165,13 @@ export const IX = {
     probeAt: "آخر فحص",
     userKeys: "مفاتيح المستخدمين",
     openWorker: "صفحة الوركر",
-    mcpTitle: "سيرفرات MCP",
+    mcpTitle: "خوادم MCP",
     mcpSub:
-      "كل وركر هو سيرفر MCP (مُعلَن عند النشر أو مُكتشَف في الكود)، مع عنوانه وأدواته وحماية المفاتيح والمستودع.",
-    mcpEmpty: "لا توجد سيرفرات MCP بعد. انشروا واحدًا من وصفة MCP على وركر.",
-    caption: "سيرفرات MCP",
+      "كل وركر هو خادم MCP (مُعلَن عند النشر أو مُكتشَف في الكود)، مع عنوانه وأدواته وحماية المفاتيح والمستودع.",
+    mcpEmpty: "لا توجد خوادم MCP بعد. انشروا واحدًا من وصفة MCP على وركر.",
+    caption: "خوادم MCP",
     linksTitle: "المستودع والمساحة والنوع",
-    linksHelp: "تظهر في الجداول وصفحة سيرفرات MCP. الحفظ لا يعيد النشر.",
+    linksHelp: "تظهر في الجداول وصفحة خوادم MCP. الحفظ لا يعيد النشر.",
     siteRepoHelp: "اختياري. مصدر هذه المساحة؛ يظهر في الجداول مع فحص قراءة فقط على GitHub.",
     repoUrl: "رابط المستودع",
     branch: "الفرع",
@@ -298,6 +311,9 @@ export interface McpServerRow {
   keysOn?: boolean;
   keysCount?: number;
   insight?: InsightRow;
+  /** 0.16.0: health and 24h requests, as on the Workers table. */
+  health?: { state: HealthView["state"]; d7: number | null };
+  spark?: UsageSeries | null;
 }
 
 export interface McpServersOpts {
@@ -315,6 +331,7 @@ export function mcpServersHtml(lang: Lang, c: Config, o: McpServersOpts): string
   const href = (p: string) => localePath(lang, p);
   const admin = o.kind === "admin";
   const list = o.rows.filter((r) => r.insight?.kind === "mcp");
+  const withOps = list.some((r) => r.health !== undefined);
   const detail = (r: McpServerRow) =>
     href(admin ? `/admin/teams/${r.team?.id ?? ""}/workers/${r.name}` : `/team/workers/${r.name}`);
   const rows: DtRow[] = list.map((r) => {
@@ -355,6 +372,19 @@ export function mcpServersHtml(lang: Lang, c: Config, o: McpServersOpts): string
           ]
         : []),
       { html: workerStatusBadge(lang, r.status), v: r.status },
+      ...(withOps
+        ? [
+            {
+              html: healthCellHtml(lang, r.health),
+              v: `${r.health?.state ?? ""}${r.health?.d7 ?? ""}`,
+            },
+            {
+              html: sparkCellHtml(lang, r.spark ?? undefined),
+              v: r.spark?.total.requests ?? -1,
+              cls: "num",
+            },
+          ]
+        : []),
       {
         html: i.space
           ? `<a class="text-link" href="${esc(href(i.space.href))}"><bdi>${esc(i.space.title)}</bdi></a>`
@@ -390,6 +420,7 @@ export function mcpServersHtml(lang: Lang, c: Config, o: McpServersOpts): string
         repo: repoValue(i),
         keys: r.keysOn ? "on" : "off",
         ...(r.team ? { team: r.team.id } : {}),
+        ...(r.health ? { health: r.health.state } : {}),
       },
     };
   });
@@ -406,6 +437,12 @@ export function mcpServersHtml(lang: Lang, c: Config, o: McpServersOpts): string
     cols: [
       ...(admin ? [{ label: DX[lang].team, sort: "text" as const }] : []),
       { label: DX[lang].status, sort: "text" },
+      ...(withOps
+        ? [
+            { label: OX[lang].health, sort: "text" as const },
+            { label: `${OX[lang].requests} · 24h`, sort: "num" as const },
+          ]
+        : []),
       { label: x.space, sort: "text" },
       { label: x.protected, sort: "num" },
       { label: x.tools, sort: "num" },

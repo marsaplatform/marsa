@@ -94,10 +94,9 @@ describe("0.15.2 env helpers", () => {
     expect(by.GONE?.status).toBe("missing");
     expect(by.MARSA_KEYS_URL?.kind).toBe("system");
     expect(by.NEWS?.kind).toBe("binding");
-    expect(v.missing).toEqual([
-      { name: "R", why: "declared" },
-      { name: "CODE_ONE", why: "code" },
-    ]);
+    expect(v.missing).toEqual([{ name: "R", why: "declared" }]);
+    expect(v.unset).toEqual(["CODE_ONE"]);
+    expect(by.CODE_ONE).toMatchObject({ kind: "unset", status: "unset", expected: "code" });
   });
 });
 
@@ -111,10 +110,8 @@ describe("0.15.2 variables & secrets", () => {
     expect(body).not.toContain(VAR_VALUE);
     const view = JSON.parse(body).env;
     expect(view.source).toBe("cloudflare");
-    expect(view.missing.map((m: { name: string }) => m.name)).toEqual([
-      "OPENAI_KEY",
-      "FROM_CODE_ONLY",
-    ]);
+    expect(view.missing.map((m: { name: string }) => m.name)).toEqual(["OPENAI_KEY"]);
+    expect(view.unset).toEqual(["FROM_CODE_ONLY"]);
     // Set, rotate, delete.
     const put = (name: string, value: unknown, h: Record<string, string> = tk) =>
       api("PUT", `/news/secrets/${name}`, { value }, h);
@@ -126,7 +123,8 @@ describe("0.15.2 variables & secrets", () => {
     expect((await (await put("OPENAI_KEY", "v2-secret-value")).json()).rotated).toBe(true);
     expect(cf.scripts.get("team-sanad-news")?.secrets.get("OPENAI_KEY")).toBe("v2-secret-value");
     const after = await (await api("GET", "/news/env")).json();
-    expect(after.env.missing.map((m: { name: string }) => m.name)).toEqual(["FROM_CODE_ONLY"]);
+    expect(after.env.missing).toEqual([]);
+    expect(after.env.unset).toEqual(["FROM_CODE_ONLY"]);
     expect(after.env.entries.find((e: { name: string }) => e.name === "OPENAI_KEY")).toMatchObject({
       kind: "secret",
       status: "set",

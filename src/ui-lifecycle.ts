@@ -113,7 +113,7 @@ const L = {
     history: "آخر التشغيلات",
     trash: "الفرق المحذوفة",
     trashSub:
-      "تبقى الفرق المحذوفة هنا 7 أيام. الاستعادة تعيد الفريق ومفاتيحه وأعضاءه ووركرزه. بعد المهلة يُحذف الفريق نهائيًا.",
+      "تبقى الفرق المحذوفة هنا 7 أيام. الاستعادة تعيد الفريق ومفاتيحه وأعضاءه ووركراته. بعد المهلة يُحذف الفريق نهائيًا.",
     trashEmpty: "لا فرق محذوفة.",
     purgeOn: (d: string) => `يُحذف نهائيًا ${d}`,
     deletedBy: "بواسطة",
@@ -133,14 +133,14 @@ const L = {
     lastEnded: "آخر مرة",
     exportTeam: "صدّر الفريق",
     exportHelp:
-      "ملف zip فيه الأعضاء (بدون كلمات المرور) والنشاط والمساحات وملفاتها وبياناتها والوركرز (الكود والإصدارات) ومفاتيح الوكلاء (بدون أسرار) والوصفات والملاحظات والإشعارات.",
+      "ملف zip فيه الأعضاء (بدون كلمات المرور) والنشاط والمساحات وملفاتها وبياناتها والوركرات (الكود والإصدارات) ومفاتيح الوكلاء (بدون أسرار) والوصفات والملاحظات والإشعارات.",
     deleteTeam: "احذف هذا الفريق",
     deleteHelp:
-      "ينتقل الفريق إلى الفرق المحذوفة 7 أيام: يُحفظ تصدير أولًا وتُوقف وركرزه وتتوقف مفاتيحه. يمكنك استعادته حتى ذلك الحين.",
+      "ينتقل الفريق إلى الفرق المحذوفة 7 أيام: يُحفظ تصدير أولًا وتُوقف وركراته وتتوقف مفاتيحه. يمكنك استعادته حتى ذلك الحين.",
     alsoSites: "احذف مساحاته أيضًا عند انتهاء المهلة",
     moved: (d: string) =>
       `نُقل الفريق إلى الفرق المحذوفة. يمكنك استعادته حتى ${d} (الإعدادات › الفرق المحذوفة).`,
-    restored: "استُعيد الفريق. عادت مفاتيحه وأعضاؤه ووركرزه للعمل.",
+    restored: "استُعيد الفريق. عادت مفاتيحه وأعضاؤه ووركراته للعمل.",
     purged: "حُذف الفريق نهائيًا.",
     mismatch: "الاسم المكتوب لا يطابق الفريق. لم يُحذف شيء.",
     backupOk: (n: string) => `تمت النسخة وتم التحقق منها (${n}).`,
@@ -190,7 +190,7 @@ export function backupsSection(lang: Lang, s: BackupStatus, csrf: string, back: 
     "docker compose stop marsa\nmv /var/lib/marsa-data/tmp/restore /var/lib/marsa-data.restored\nmv /var/lib/marsa-data /var/lib/marsa-data.old && mv /var/lib/marsa-data.restored /var/lib/marsa-data\ndocker compose start marsa",
   ];
   const where = !s.enabled
-    ? `${badge(x.off, "warn")}${s.reason ? ` <span class="meta">${esc(s.reason)}</span>` : ""}`
+    ? `${badge(x.off, "warn")}${s.reason ? ` <span class="meta">${esc(lang === "ar" ? (AR_BACKUP_REASONS[s.reason] ?? s.reason) : s.reason)}</span>` : ""}`
     : `${badge(s.offsite ? x.offsite : x.local, s.offsite ? "on" : "warn")} <code class="ltr">${esc((s.where ?? "").replace(/^(R2 bucket|directory) /, ""))}</code>`;
   return `<section class="card-block" id="backups" aria-labelledby="bk-title">
   <h2 id="bk-title" class="h3">${icon("download")} ${esc(x.backups)}</h2>
@@ -275,4 +275,21 @@ export function teamDeleteRows(
       <label class="check small"><input type="checkbox" name="sites" value="delete"><span>${esc(x.alsoSites)}</span></label>
       <button class="button small danger" type="submit">${icon("trash")}${esc(x.deleteTeam)}</button></form>`,
   )}`;
+}
+
+const AR_BACKUP_REASONS: Record<string, string> = {
+  "set BACKUP_KEY or MARSA_SECRETS_KEY (32+ characters)":
+    "اضبط BACKUP_KEY أو MARSA_SECRETS_KEY (٣٢ حرفًا أو أكثر)",
+  "no backup store: configure the R2 backend or BACKUP_DIR":
+    "لا يوجد مكان للنسخ الاحتياطية: اضبط تخزين R2 أو BACKUP_DIR",
+};
+
+/** Team Settings (owners): download everything the team has on Spaces. */
+export function teamExportSection(lang: Lang, action: string): string {
+  const x = L[lang];
+  return `<section class="card-block" aria-labelledby="tx-title">
+  <h2 id="tx-title" class="h3">${icon("download")} ${esc(x.exportTeam)}</h2>
+  <p class="meta">${esc(x.exportHelp)}</p>
+  <a class="button small ghost" href="${esc(action)}" download>${icon("download")}${esc(x.exportTeam)}</a>
+</section>`;
 }

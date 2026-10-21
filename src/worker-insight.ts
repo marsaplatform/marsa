@@ -3,6 +3,7 @@
  * from the deploy wins; otherwise heuristics on the stored code; for MCP servers a cached,
  * read-only live probe (initialize + tools/list) fills in the tool count.
  */
+import { readHealthExpect, readHealthPath } from "./worker-health.js";
 
 export type WorkerKind = "mcp" | "web" | "other";
 export const WORKER_KINDS: WorkerKind[] = ["mcp", "web", "other"];
@@ -17,6 +18,9 @@ export interface WorkerMeta {
   toolsCount?: number;
   /** Id of the team's space that documents this Worker. */
   spaceSlug?: string;
+  /** 0.16.0: health check path (plain GET) and expected statuses ("2xx", "200-399"). */
+  healthPath?: string;
+  healthExpect?: string;
 }
 
 export class MetaError extends Error {}
@@ -30,7 +34,16 @@ export function readMeta(raw: unknown): WorkerMeta | null | undefined {
   if (typeof raw !== "object" || Array.isArray(raw)) throw new MetaError("meta must be an object");
   const o = raw as Record<string, unknown>;
   const extra = Object.keys(o).find(
-    (k) => !["kind", "language", "framework", "toolsCount", "spaceSlug"].includes(k),
+    (k) =>
+      ![
+        "kind",
+        "language",
+        "framework",
+        "toolsCount",
+        "spaceSlug",
+        "healthPath",
+        "healthExpect",
+      ].includes(k),
   );
   if (extra) throw new MetaError(`meta.${extra.slice(0, 30)} is not supported`);
   const out: WorkerMeta = {};
@@ -65,6 +78,14 @@ export function readMeta(raw: unknown): WorkerMeta | null | undefined {
     if (typeof o.spaceSlug !== "string" || !/^[a-z0-9-]{1,64}$/i.test(o.spaceSlug))
       throw new MetaError("meta.spaceSlug: the id of one of your spaces");
     out.spaceSlug = o.spaceSlug;
+  }
+  try {
+    if (o.healthPath !== undefined && o.healthPath !== "")
+      out.healthPath = readHealthPath(o.healthPath);
+    if (o.healthExpect !== undefined && o.healthExpect !== "")
+      out.healthExpect = readHealthExpect(o.healthExpect);
+  } catch (e) {
+    throw new MetaError(`meta.${(e as Error).message}`);
   }
   return out;
 }

@@ -716,6 +716,7 @@ const en: Strings = {
       "worker-logs-off": "Turned Workers Logs off",
       "worker-health-on": "Turned health checks on",
       "worker-health-off": "Turned health checks off",
+      "worker-health-target": "Changed what the health check asks",
       "user-keys-settings": "Changed a Worker's API key settings",
       "recipe-save": "Saved a recipe",
       "recipe-delete": "Deleted a recipe",
@@ -735,9 +736,24 @@ const en: Strings = {
       "backup-fail": "Backup failed",
       "backup-restore-test": "Tested a backup restore",
       "sessions-end-all": "Signed out everywhere",
+      "team-create": "Created the team",
+      "team-update": "Changed team settings",
+      sweep: "Removed expired sites",
+      "health-interval": "Changed the health check interval",
+      "permissions-recheck": "Rechecked token permissions",
+      "note-update": "Updated a note",
+      "signout-all": "Signed out on all their devices",
     },
     actorKinds: { member: "member", key: "team key", admin: "admin", api: "API", mcp: "MCP" },
-    actorLabels: { "team key": "team key", "edit token": "edit token", admin: "admin" },
+    actorLabels: {
+      "team key": "team key",
+      "edit token": "edit token",
+      admin: "admin",
+      "health check": "health check",
+      "Marsa Spaces": "Marsa Spaces",
+      agentKey: "agent key",
+      mcpToken: "MCP token",
+    },
     count: (n) => `${n} member${n === 1 ? "" : "s"}`,
   },
   visits: {
@@ -1206,8 +1222,8 @@ const ar: Strings = {
       "worker-delete": "حذف وركر",
       "worker-disable": "أوقف وركر",
       "worker-enable": "أعاد تشغيل وركر",
-      "workers-on": "فعّل الوركرز",
-      "workers-off": "أوقف الوركرز",
+      "workers-on": "فعّل الوركرات",
+      "workers-off": "أوقف الوركرات",
       "cf-token-set": "حفظ مفتاح كلاودفلير",
       "cf-settings": "غيّر إعدادات كلاودفلير",
       "cf-token-clear": "حذف مفتاح كلاودفلير",
@@ -1224,6 +1240,7 @@ const ar: Strings = {
       "worker-logs-off": "أوقف سجلات الوركر",
       "worker-health-on": "شغّل فحص الصحة",
       "worker-health-off": "أوقف فحص الصحة",
+      "worker-health-target": "غيّر ما يطلبه فحص الصحة",
       "user-keys-settings": "غيّر إعدادات مفاتيح API لوركر",
       "recipe-save": "حفظ وصفة",
       "recipe-delete": "حذف وصفة",
@@ -1243,9 +1260,24 @@ const ar: Strings = {
       "backup-fail": "فشلت النسخة الاحتياطية",
       "backup-restore-test": "اختبر استعادة نسخة",
       "sessions-end-all": "أخرج الجميع من كل الأجهزة",
+      "team-create": "أنشأ الفريق",
+      "team-update": "غيّر إعدادات الفريق",
+      sweep: "حذف المواقع المنتهية",
+      "health-interval": "غيّر فترة فحص الصحة",
+      "permissions-recheck": "أعاد فحص صلاحيات المفتاح",
+      "note-update": "حدّث ملاحظة",
+      "signout-all": "خرج من كل أجهزته",
     },
     actorKinds: { member: "عضو", key: "مفتاح الفريق", admin: "المسؤول", api: "API", mcp: "MCP" },
-    actorLabels: { "team key": "مفتاح الفريق", "edit token": "مفتاح التعديل", admin: "المسؤول" },
+    actorLabels: {
+      "team key": "مفتاح الفريق",
+      "edit token": "مفتاح التعديل",
+      admin: "المسؤول",
+      "health check": "فحص الصحة",
+      "Marsa Spaces": "مرسى Spaces",
+      agentKey: "مفتاح الوكيل",
+      mcpToken: "رمز MCP",
+    },
     count: (n) => (n === 1 ? "عضو واحد" : `${n} أعضاء`),
   },
   visits: {
@@ -1439,3 +1471,68 @@ const ar: Strings = {
 };
 
 export const STRINGS: Record<Lang, Strings> = { en, ar };
+
+/**
+ * 0.16.0: an actor label in the page language. Known labels ("team key", "admin", …) are
+ * translated; structured ones ("agent key <name>", "MCP token <name>") keep the name and
+ * translate the prefix. Member names and anything else pass through.
+ */
+export function actorText(lang: Lang, label: string): string {
+  const L = STRINGS[lang].members.actorLabels;
+  const known = L[label];
+  if (known) return known;
+  const m = /^(agent key|MCP token) (.+)$/.exec(label);
+  if (m) return `${m[1] === "agent key" ? L.agentKey : L.mcpToken} ${m[2]}`;
+  return label;
+}
+
+const AR_DIGITS = "٠١٢٣٤٥٦٧٨٩";
+const arNum = (s: string) => s.replace(/\d/g, (d) => AR_DIGITS[Number(d)] ?? d);
+const AR_WORDS: Record<string, string> = {
+  required: "مطلوب",
+  off: "متوقف",
+  on: "مفعّل",
+  backend: "البيانات والملفات",
+  directory: "الظهور في الدليل",
+  permanent: "روابط دائمة",
+  maxSites: "حد المواقع",
+  maxMb: "حد المساحة (MB)",
+  name: "الاسم",
+  workers: "الوركرات",
+  "not set": "غير مضبوط",
+  default: "الافتراضي",
+};
+
+/**
+ * 0.16.0: activity details and version notes in the page language. Known templates
+ * ("redeploy of v3", "api: required, 60/min, 5000/day", "backend on, maxSites 10",
+ * "3 expired") are translated; names, ids and anything else pass through.
+ */
+export function detailText(lang: Lang, detail: string): string {
+  if (lang === "en") return detail;
+  let m = /^redeploy of v(\d+)$/.exec(detail);
+  if (m) return `إعادة نشر v${m[1]}`;
+  m = /^(.+): (required|off), (\d+)\/min, (\d+)\/day$/.exec(detail);
+  if (m)
+    return `${m[1]}: ${AR_WORDS[m[2] as string]}، ${arNum(m[3] as string)}/دقيقة، ${arNum(m[4] as string)}/يوم`;
+  m = /^(\d+) expired$/.exec(detail);
+  if (m) return `${arNum(m[1] as string)} منتهية`;
+  // "backend on, maxSites 10" / "workers 5/6, backend not set"
+  const parts = detail.split(", ");
+  if (
+    parts.every((p) =>
+      /^(backend|directory|permanent|maxSites|maxMb|workers) (on|off|not set|-|\d+(\/\d+)?)$/.test(
+        p,
+      ),
+    )
+  )
+    return parts
+      .map((p) => {
+        const i = p.indexOf(" ");
+        const k = p.slice(0, i);
+        const v = p.slice(i + 1);
+        return `${AR_WORDS[k] ?? k}: ${AR_WORDS[v] ?? arNum(v)}`;
+      })
+      .join("، ");
+  return detail;
+}

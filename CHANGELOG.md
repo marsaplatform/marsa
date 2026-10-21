@@ -44,6 +44,47 @@ All notable changes to this project are documented here. The format follows
   clearly marked placeholder until `OPERATOR_CLOUDFLARE_DPA` is set.
 - The admin teams table's Delete opens the team's Settings tab (typed confirmation) instead of deleting.
 
+### Added (0.16.0b: polish)
+- **Activity API and downloads**: `GET /api/teams/<team>/activity` (team key only; agent keys get
+  `403 TEAM_KEY_REQUIRED`) and `GET /api/admin/activity?team=<id|platform>` with `since`, `until`, `action`
+  (exact or `prefix-`), `site`, `limit` (≤ 5000) and `format=json|jsonl|csv` (CSV with BOM and
+  formula-safe cells). CSV/JSONL buttons on the team and admin Activity pages.
+- **Every admin change is logged**: team create/update, invite revoke, site delete and permanence, sweep,
+  recipes, notes, health interval, permission rechecks, webhooks, sign-out-everywhere and Worker health
+  targets. Actors such as "agent key X" / "MCP token X" and details ("redeploy of v4", "N expired") are
+  translated in Arabic.
+- **Team export for owners**: *Settings → Export team* and `GET /api/teams/<team>/export` (team key).
+- **Health rules per Worker**: web Workers are up below 400, MCP servers on `initialize` (2xx/401/403)
+  or a GET below 500, or your own `meta.healthPath` + `meta.healthExpect` (`2xx`, `200-299`, `200,404`,
+  `<400`), set on deploy, with `POST …/links`, `POST …/health` or in the Health tab. Workers that answered
+  4xx at `/` before keep the old "below 500" rule (marked) until a target is declared, so no false alarms.
+- **MCP servers page**: Health and Requests · 24h columns, filter by health; the admin overview's
+  **Down now** card links to `?health=down`.
+- **Global search (⌘K / Ctrl+K / `/`)** in the team and admin dashboards: pages, teams, spaces, Workers,
+  MCP servers, notes and the docs, keyboard-first (combobox + listbox), Arabic letter forms folded.
+- **Getting-started checklist** on the team overview (first space, a teammate, an agent key, a Worker);
+  ticks itself off and owners can hide it.
+- **Arabic docs**: all 11 guide pages translated (`/ar/docs/<slug>`), plus `/ar/docs/glossary`. The docs
+  index shows one entry per page; links inside Arabic pages stay in Arabic.
+- **OpenAPI for every route**: 51 missing operations added (admin API, webhooks, notifications, Worker
+  ops, activity, export); a test fails when a new `/api` route has no entry. llms.txt and the docs gain a
+  "Run & observe Workers" section (worker_env, secrets, health, usage, logs, activity).
+- `DISPLAY_TZ` (default `Asia/Dubai`): dashboard times and charts use it, and the browser switches them to
+  the viewer's own time zone. Charts get gridlines.
+
+### Changed (0.16.0b)
+- **Env warnings are quieter**: `missing` now lists only declared (`requiredEnv`) names that are not set.
+  Names the code reads without a default and nobody declared are `unset` (info only); names read with a
+  default (`env.X ?? …`, `env.X || …`, destructuring defaults) are ignored.
+- **Admin Settings loads fast**: the token permission checklists are cached and refreshed in the
+  background (warm-up 5 s after start, then every 4 minutes) instead of probing on every page view.
+- **Arabic**: one word per term (وكيل/وكلاء، خادم/خوادم MCP، وركر/وركرات، فحص الصحة), the remaining English
+  strings translated, page titles in one format ("page · team · مرسى Spaces").
+- **Accessibility**: labelled task-list checkboxes, focusable code blocks, one `<h1>` per page, visible labels
+  on the mobile quota and Workers forms (stacked under 600 px).
+- The app sends `X-Frame-Options: DENY` and `Strict-Transport-Security` with `preload` itself (a proxy in
+  front may still override them); versioned assets are cached as immutable for a year.
+
 ## [0.15.2] - 2026-10-21
 
 ### Added

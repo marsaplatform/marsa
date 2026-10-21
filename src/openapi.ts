@@ -1,5 +1,6 @@
 import { APP_NAME, APP_TAGLINE } from "./brand.js";
 import type { Config } from "./config.js";
+import { addMorePaths } from "./openapi-more.js";
 
 const json = (schema: object) => ({ "application/json": { schema } });
 const err = (description: string) => ({
@@ -1247,6 +1248,7 @@ export function openapi(config: Config) {
       },
     },
   };
+  addMorePaths(spec.paths as unknown as Record<string, Record<string, unknown>>);
   // Every backend route can also answer 403 when the site's team has no backend access.
   for (const [path, item] of Object.entries(spec.paths)) {
     if (!/\/(kv|files)/.test(path)) continue;

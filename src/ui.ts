@@ -4,8 +4,16 @@ import { ASSET_VERSION } from "./assets.js";
 import { PLATFORM_URL } from "./brand.js";
 import type { Config, Operator } from "./config.js";
 import { hashIndex, initialOf } from "./cover.js";
-import type { DocPage } from "./docs.js";
-import { bytesLabel, hoursLabel, type Lang, type LimitValues, STRINGS } from "./i18n.js";
+import { type DocPage, docsFor } from "./docs.js";
+import {
+  actorText,
+  bytesLabel,
+  detailText,
+  hoursLabel,
+  type Lang,
+  type LimitValues,
+  STRINGS,
+} from "./i18n.js";
 import type { MemberRole } from "./members.js";
 import { currentNavAccount } from "./nav-state.js";
 import { type Notice, noticeText, noticeTone, type WebhookView } from "./notify.js";
@@ -81,18 +89,52 @@ export interface Flash {
   link?: string;
 }
 
-/** A server-rendered UTC time; the page script swaps in the visitor's local time. */
+/**
+ * 0.16.0: times render in the instance's display time zone (DISPLAY_TZ, default
+ * Asia/Dubai) with the zone named; the page script then swaps in the visitor's own zone.
+ */
+let displayTz = "Asia/Dubai";
+export function setDisplayTimeZone(tz: string): void {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: tz });
+    displayTz = tz;
+  } catch {
+    // keep the default
+  }
+}
+export const displayTimeZone = () => displayTz;
+
+export type TimeFmt = "full" | "hour" | "day" | "hm";
+/** A time in the display zone: "full" date+time, "hour" (14 Oct 13:00), "day", "hm" (13:05). */
+export function fmtTime(lang: Lang, t: string | number, f: TimeFmt = "full"): string {
+  const opts: Intl.DateTimeFormatOptions =
+    f === "full"
+      ? { dateStyle: "medium", timeStyle: "short" }
+      : f === "hour"
+        ? { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }
+        : f === "day"
+          ? { day: "numeric", month: "short" }
+          : { hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
+  return new Intl.DateTimeFormat(lang === "ar" ? "ar-EG" : "en-GB", {
+    ...opts,
+    timeZone: displayTz,
+  }).format(new Date(t));
+}
+/** The display zone's short name at that moment ("GMT+4"). */
+export function tzName(lang: Lang, t: string | number): string {
+  const parts = new Intl.DateTimeFormat(lang === "ar" ? "ar-EG" : "en-GB", {
+    timeZone: displayTz,
+    timeZoneName: "shortOffset",
+  }).formatToParts(new Date(t));
+  return parts.find((p) => p.type === "timeZoneName")?.value ?? displayTz;
+}
+
 export function timeTag(lang: Lang, iso: string): string {
   if (isPermanentIso(iso)) {
     return `<span class="badge on perm">${esc(STRINGS[lang].team.permanent)}</span>`;
   }
   const d = new Date(iso);
-  const text = new Intl.DateTimeFormat(lang === "ar" ? "ar-EG" : "en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(d);
-  return `<time datetime="${esc(d.toISOString())}" data-local>${esc(text)} UTC</time>`;
+  return `<time datetime="${esc(d.toISOString())}" data-local>${esc(fmtTime(lang, d.getTime()))} ${esc(tzName(lang, d.getTime()))}</time>`;
 }
 
 export const ltr = (s: string) => `<span dir="ltr" class="ltr">${esc(s)}</span>`;
@@ -470,7 +512,7 @@ function uploader(lang: Lang, c: Config, headingLevel: "h1" | "h2"): string {
 }
 
 function agentSnippet(c: Config): string {
-  return `<pre class="code" dir="ltr"><code>(cd out &amp;&amp; zip -qr ../site.zip .)
+  return `<pre tabindex="0" class="code" dir="ltr"><code>(cd out &amp;&amp; zip -qr ../site.zip .)
 curl -s -X POST "${esc(c.publicUrl)}/api/sites?ttlHours=24" \\
   -H "Content-Type: application/zip" --data-binary @site.zip
 # =&gt; { "url": "${esc(c.publicUrl)}/s/k3v9x2mq7a/", "expiresAt": "…", "editToken": "…" }</code></pre>`;
@@ -599,7 +641,7 @@ ${uploader(lang, c, "h2")}
     <p>${esc(t.selfhost.sub)}</p>
     <div class="actions"><a class="button small ghost" href="/docs/self-hosting">${esc(t.selfhost.cta)}</a></div>
   </div>
-  <pre class="code" dir="ltr"><code>docker compose up -d --build
+  <pre tabindex="0" class="code" dir="ltr"><code>docker compose up -d --build
 # =&gt; http://localhost:8080</code></pre>
 </section>`;
   return layout({
@@ -797,7 +839,7 @@ export function auditTable(
           : withSite && e.site === null
             ? ""
             : "";
-      return `<tr><td data-label="${esc(t.members.when)}">${timeTag(lang, e.at)}</td>${td(t.members.who, `<bdi>${esc(e.kind === "member" ? e.who : (t.members.actorLabels[e.who] ?? e.who))}</bdi> <span class="badge muted">${esc(t.members.actorKinds[e.kind])}</span>`)}${td(t.members.what, `${esc(what)}${e.detail ? ` <span class="meta">${/^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(e.detail) ? timeTag(lang, e.detail) : `<bdi>${esc(e.detail)}</bdi>`}</span>` : ""}${site}`)}</tr>`;
+      return `<tr><td data-label="${esc(t.members.when)}">${timeTag(lang, e.at)}</td>${td(t.members.who, `<bdi>${esc(e.kind === "member" ? e.who : actorText(lang, e.who))}</bdi> <span class="badge muted">${esc(t.members.actorKinds[e.kind])}</span>`)}${td(t.members.what, `${esc(what)}${e.detail ? ` <span class="meta">${/^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(e.detail) ? timeTag(lang, e.detail) : `<bdi>${esc(detailText(lang, e.detail))}</bdi>`}</span>` : ""}${site}`)}</tr>`;
     })
     .join("");
   return `<div class="table-wrap"><table class="data stack audit-table" aria-labelledby="${labelId}"><thead><tr><th scope="col">${esc(t.members.when)}</th><th scope="col">${esc(t.members.who)}</th><th scope="col">${esc(t.members.what)}</th></tr></thead><tbody>${body}</tbody></table></div>`;
@@ -957,7 +999,7 @@ function recentTable(lang: Lang, sites: TeamSiteRow[]): string {
 
 const agentPublishSnippet = (
   c: Config,
-) => `<pre class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
+) => `<pre tabindex="0" class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
 (cd out &amp;&amp; zip -qr ../site.zip .)
 curl -s -X POST "${esc(c.publicUrl)}/api/sites?ttlHours=72" \\
   -H "X-Team-Key: $MARSA_TEAM_KEY" \\
@@ -972,6 +1014,8 @@ export interface TeamOverview {
   members: number;
   invites: number;
   workers: { enabled: boolean; count: number; max: number };
+  /** 0.16.0: getting-started steps; unset or empty = hidden (dismissed). */
+  checklist?: ChecklistStep[];
 }
 
 /** Team overview: stat cards, recent spaces, quick publish and recent activity. */
@@ -1025,6 +1069,7 @@ export function teamHtml(
   const body = `<div class="page-wide">
   ${teamHead(lang, o, d.overviewSub, "overview", actions)}
   ${flashBox(lang, o.flash)}
+  ${ov.checklist ? checklistHtml(lang, ov.checklist, { csrf: o.csrf, canDismiss: (o.me?.role ?? "owner") === "owner" }) : ""}
   ${cards}
   ${statusList(lang, o)}
   <div class="dash-cols">
@@ -1117,7 +1162,7 @@ export function teamActivityHtml(
     <label><span>${esc(d.search)}</span><input type="search" name="q" value="${esc(o.q)}" placeholder="${esc(d.searchPh)}"></label>
     <label><span>${esc(d.who)}</span><select name="kind"><option value="">${esc(d.everyone)}</option>${kinds.map((k) => `<option value="${k}"${o.kind === k ? " selected" : ""}>${esc(t.members.actorKinds[k])}</option>`).join("")}</select></label>
     <button class="button small" type="submit">${esc(d.filter)}</button>${o.q || o.kind ? `<a class="text-link" href="${href("/team/activity")}">${esc(d.reset)}</a>` : ""}
-  </form>`;
+  </form>${activityDownloads(lang, href("/team/activity/export"))}`;
   const body = `<div class="page-wide">
   ${teamHead(lang, o, d.activitySub, "activity")}
   ${flashBox(lang, o.flash)}
@@ -1317,7 +1362,7 @@ export function mcpSection(
     <h3>${esc(t.mcp.snippets)}</h3>
     <p class="meta">${esc(t.mcp.snippetNote)}</p>
     <div class="two-col mcp-snippets">
-      <div><p class="snippet-label">Cursor · <code>.cursor/mcp.json</code></p><pre class="code" dir="ltr"><code>{
+      <div><p class="snippet-label">Cursor · <code>.cursor/mcp.json</code></p><pre tabindex="0" class="code" dir="ltr"><code>{
   "mcpServers": {
     "${esc(server)}": {
       "url": "${ep}",
@@ -1325,13 +1370,13 @@ export function mcpSection(
     }
   }
 }</code></pre></div>
-      <div><p class="snippet-label">Claude Code</p><pre class="code" dir="ltr"><code>claude mcp add --transport http ${esc(server)} \\
+      <div><p class="snippet-label">Claude Code</p><pre tabindex="0" class="code" dir="ltr"><code>claude mcp add --transport http ${esc(server)} \\
   ${ep} \\
   --header "Authorization: Bearer marsa_mcp_…"</code></pre>
-      <p class="snippet-label">VS Code · <code>.vscode/mcp.json</code></p><pre class="code" dir="ltr"><code>{ "servers": { "${esc(server)}": {
+      <p class="snippet-label">VS Code · <code>.vscode/mcp.json</code></p><pre tabindex="0" class="code" dir="ltr"><code>{ "servers": { "${esc(server)}": {
   "type": "http", "url": "${ep}",
   "headers": { "Authorization": "Bearer marsa_mcp_…" } } } }</code></pre>
-      <p class="snippet-label">Claude Desktop · <code>claude_desktop_config.json</code> (mcp-remote)</p><pre class="code" dir="ltr"><code>{ "mcpServers": { "${esc(server)}": {
+      <p class="snippet-label">Claude Desktop · <code>claude_desktop_config.json</code> (mcp-remote)</p><pre tabindex="0" class="code" dir="ltr"><code>{ "mcpServers": { "${esc(server)}": {
   "command": "npx",
   "args": ["-y", "mcp-remote", "${ep}",
            "--header", "Authorization:\${AUTH_HEADER}"],
@@ -1535,6 +1580,8 @@ export interface AdminStats {
   views7: number | null;
   workers: number;
   workersTeams: number;
+  /** 0.16.0: Workers whose health check says down right now (names). */
+  down?: string[];
   members: number;
 }
 
@@ -1673,6 +1720,20 @@ export function adminTeamsHtml(
     ${statCard("teams", d.stats.teams, esc(fmt(lang, o.teams.length)), esc(d.stats.teamsSub(st.members)))}
     ${statCard("sites", d.stats.spaces, esc(fmt(lang, st.sites)), esc(`${bytesLabel(lang, st.bytes)} · ${d.stats.guests(st.guests)} · ${d.stats.perm(st.permanent)}`), undefined, href("/admin/sites"))}
     ${statCard("workers", d.stats.workers, esc(fmt(lang, st.workers)), esc(d.stats.workersSub(st.workersTeams)), undefined, href("/admin/workers"))}
+    ${
+      st.down && st.workers
+        ? statCard(
+            "health",
+            d.stats.downNow,
+            esc(fmt(lang, st.down.length)),
+            st.down.length
+              ? `<bdi dir="ltr">${esc(st.down.slice(0, 3).join(", "))}${st.down.length > 3 ? " …" : ""}</bdi>`
+              : esc(d.stats.allUp),
+            undefined,
+            href(`/admin/workers${st.down.length ? "?health=down" : ""}`),
+          )
+        : ""
+    }
     ${st.views30 !== null ? statCard("views", d.stats.views30, esc(fmt(lang, st.views30)), esc(d.stats.views7(fmt(lang, st.views7 ?? 0)))) : ""}
   </div>`
     : "";
@@ -1710,7 +1771,7 @@ export function adminTeamsHtml(
       <ul class="checks">${t.admin.how.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
       <div class="actions"><a class="text-link" href="/docs/teams">${esc(t.admin.docsLink)}</a></div>
     </div>
-    <pre class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
+    <pre tabindex="0" class="code" dir="ltr"><code># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
 curl -s -X POST "${esc(c.publicUrl)}/api/sites" \\
   -H "X-Team-Key: $MARSA_TEAM_KEY" \\
   -H "Content-Type: application/zip" --data-binary @site.zip
@@ -1860,7 +1921,7 @@ export function adminSitesHtml(
 
 function docsNav(lang: Lang, docs: DocPage[], current?: string): string {
   const t = STRINGS[lang];
-  const list = [...docs].sort((a, b) => (a.lang === lang ? -1 : 0) - (b.lang === lang ? -1 : 0));
+  const list = docsFor(lang, docs);
   return `<nav class="docs-nav" aria-label="${esc(t.docs.title)}"><ul>${list
     .map((d) => {
       const url = d.lang === "ar" ? `/ar/docs/${d.slug}` : `/docs/${d.slug}`;
@@ -1875,7 +1936,7 @@ function docsNav(lang: Lang, docs: DocPage[], current?: string): string {
 
 export function docsIndexHtml(lang: Lang, c: Config, docs: DocPage[]): string {
   const t = STRINGS[lang];
-  const list = [...docs].sort((a, b) => (a.lang === lang ? -1 : 0) - (b.lang === lang ? -1 : 0));
+  const list = docsFor(lang, docs);
   const body = `<div class="wrap page-wide">${pageHead(t.footer.product, esc(t.docs.title), t.docs.sub)}
 <div class="card-grid docs-grid">${list
     .map((d) => {
@@ -2040,12 +2101,12 @@ export const WS = {
     left: "Defaults: WORKERS_DEFAULT_MAX Workers and WORKER_MAX_KB KB per team.",
   },
   ar: {
-    nav: "الوركرز",
-    title: "الوركرز",
-    sub: "انشر وركرز صغيرة على كلاودفلير (واجهات API أو خوادم MCP) لفريقك. المساحات تنشرها نيابةً عنك، ولا تحتاج أبدًا مفتاح كلاودفلير.",
-    off: "الوركرز غير مفعّلة لهذا الفريق. اطلب من المسؤول تفعيلها.",
+    nav: "الوركرات",
+    title: "الوركرات",
+    sub: "انشر وركرات صغيرة على كلاودفلير (واجهات API أو خوادم MCP) لفريقك. المساحات تنشرها نيابةً عنك، ولا تحتاج أبدًا مفتاح كلاودفلير.",
+    off: "الوركرات غير مفعّلة لهذا الفريق. اطلب من المسؤول تفعيلها.",
     notConfigured: "لم يربط المسؤول حساب كلاودفلير بعد.",
-    none: "لا توجد وركرز بعد",
+    none: "لا توجد وركرات بعد",
     noneSub: "انشر واحدًا من النموذج بالأسفل أو من الـ API أو من MCP المساحة.",
     name: "الاسم",
     url: "العنوان",
@@ -2077,21 +2138,21 @@ export const WS = {
     deployed1: "تم النشر.",
     deleted: "تم حذف الوركر.",
     quota: (n: number, max: number, kb: number) =>
-      `${n} من ${max} وركرز · حتى ${kb} كيلوبايت للسكربت`,
-    agentsTitle: "للإيجنتس",
+      `${n} من ${max} وركرات · حتى ${kb} كيلوبايت للسكربت`,
+    agentsTitle: "للوكلاء",
     agentsSub:
-      "الإيجنت يستخدم مفتاح الفريق (أو رمز MCP للمساحة بصلاحية قراءة وكتابة: الأدوات list_workers وdeploy_worker وdelete_worker). لا يحتاج أبدًا مفتاح كلاودفلير.",
-    viewOnly: "المشاهد يرى الوركرز ولا يستطيع تعديلها.",
-    adminTitle: "الوركرز",
+      "الوكيل يستخدم مفتاح الفريق (أو رمز MCP للمساحة بصلاحية قراءة وكتابة: الأدوات list_workers وdeploy_worker وdelete_worker). لا يحتاج أبدًا مفتاح كلاودفلير.",
+    viewOnly: "المشاهد يرى الوركرات ولا يستطيع تعديلها.",
+    adminTitle: "الوركرات",
     adminSub: "مفتاح كلاودفلير واحد للمنصة كلها. الفرق تنشر عبر المساحات ولا تراه أبدًا.",
     settings: "ربط كلاودفلير",
     tokenSet: (l4: string) => `المفتاح محفوظ (…${l4})`,
     tokenUnset: "لا يوجد مفتاح",
     noKey:
-      "المتغير MARSA_SECRETS_KEY غير مضبوط على السيرفر، فلا يمكن حفظ المفتاح. أضفه لملف البيئة وأعد التشغيل.",
+      "المتغير MARSA_SECRETS_KEY غير مضبوط على الخادم، فلا يمكن حفظ المفتاح. أضفه لملف البيئة وأعد التشغيل.",
     token: "مفتاح API",
     tokenHelp:
-      "يحتاج صلاحيات: Workers Scripts: Edit على الحساب، وWorkers Routes: Edit وDNS: Edit على النطاق. للكتابة فقط: يُشفَّر على السيرفر ولا يظهر مرة أخرى.",
+      "يحتاج صلاحيات: Workers Scripts: Edit على الحساب، وWorkers Routes: Edit وDNS: Edit على النطاق. للكتابة فقط: يُشفَّر على الخادم ولا يظهر مرة أخرى.",
     account: "معرّف الحساب",
     accountHelp: "اختياري إذا كان المفتاح يرى حسابًا واحدًا أو النطاق.",
     zone: "النطاق (الدومين)",
@@ -2099,27 +2160,27 @@ export const WS = {
     save: "احفظ وتحقّق",
     verify: "تحقّق من المفتاح",
     clear: "احذف المفتاح",
-    confirmClear: "تحذف مفتاح كلاودفلير؟ (ممكن فقط إذا لم توجد وركرز للفرق.)",
+    confirmClear: "تحذف مفتاح كلاودفلير؟ (ممكن فقط إذا لم توجد وركرات للفرق.)",
     verified: "آخر تحقّق",
     saved: "تم الحفظ، وتحقّقت كلاودفلير من المفتاح.",
     verifiedFlash: (s: string) => `حالة المفتاح عند كلاودفلير: ${s}`,
     cleared: "تم حذف المفتاح.",
     teamsTitle: "الفرق",
-    enabled: "الوركرز",
+    enabled: "الوركرات",
     slug: "الاسم المختصر",
     slugHelp:
-      "من 2 إلى 20 حرفًا إنجليزيًا صغيرًا أو رقمًا؛ يُستخدم في أسماء السكربتات والعناوين. لا يتغير طالما للفريق وركرز.",
+      "من 2 إلى 20 حرفًا إنجليزيًا صغيرًا أو رقمًا؛ يُستخدم في أسماء السكربتات والعناوين. لا يتغير طالما للفريق وركرات.",
     maxWorkers: "أقصى عدد",
     maxKb: "أقصى حجم KB",
-    count: "الوركرز",
-    turnOffConfirm: "توقف الوركرز لهذا الفريق؟ سيتم حذف كل وركرز الفريق.",
-    allTitle: "كل وركرز الفرق",
+    count: "الوركرات",
+    turnOffConfirm: "توقف الوركرات لهذا الفريق؟ سيتم حذف كل وركرات الفريق.",
+    allTitle: "كل وركرات الفرق",
     team: "الفريق",
     disable: "أوقف",
     enable: "شغّل",
-    teamSaved: "تم حفظ إعدادات وركرز الفريق.",
+    teamSaved: "تم حفظ إعدادات وركرات الفريق.",
     platformLog: "سجل المنصة",
-    left: "الافتراضي: WORKERS_DEFAULT_MAX وركرز وWORKER_MAX_KB كيلوبايت لكل فريق.",
+    left: "الافتراضي: WORKERS_DEFAULT_MAX وركرات وWORKER_MAX_KB كيلوبايت لكل فريق.",
   },
 } as const;
 
@@ -2237,7 +2298,7 @@ export function teamWorkersHtml(
       <p class="meta">${esc(d.mcpTip)}</p>
       <div class="actions"><button type="button" class="button small ghost js-only" data-copy="#agent-snippet" data-copied="${esc(t.common.copied)}">${icon("copy")}${esc(d.copy)}</button><a class="text-link" href="${href("/docs/workers")}">${esc(t.admin.docsLink)}</a></div>
     </div>
-    <pre class="code" dir="ltr"><code id="agent-snippet"># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
+    <pre tabindex="0" class="code" dir="ltr"><code id="agent-snippet"># MARSA_TEAM_KEY=marsa_team_…   (keep it secret)
 curl -s -X PUT "${esc(c.publicUrl)}/api/teams/${esc(teamRef)}/workers/hello" \\
   -H "X-Team-Key: $MARSA_TEAM_KEY" \\
   -H "Content-Type: application/javascript" --data-binary @worker.js
@@ -2340,9 +2401,9 @@ export function adminWorkersHtml(lang: Lang, c: Config, o: AdminWorkersOpts): st
               href(`/admin/workers/teams/${x.id}`),
               o.csrf,
               `<label class="check small"><input type="checkbox" name="enabled" value="1"${x.workers ? " checked" : ""}> ${esc(w.enabled)}</label>
-          <label class="quota-field"><span class="sr-only">${esc(`${w.slug} · ${x.name}`)}</span><input name="slug" type="text" dir="ltr" maxlength="20" placeholder="${esc(w.slug)}" value="${esc(x.slug ?? "")}"${x.count ? " readonly" : ""}></label>
-          <label class="quota-field"><span class="sr-only">${esc(`${w.maxWorkers} · ${x.name}`)}</span><input name="maxWorkers" type="number" min="0" max="100" placeholder="${x.quota.workers}" value="${x.maxWorkers ?? ""}"></label>
-          <label class="quota-field"><span class="sr-only">${esc(`${w.maxKb} · ${x.name}`)}</span><input name="maxWorkerKb" type="number" min="0" max="10240" placeholder="${x.quota.kb}" value="${x.maxWorkerKb ?? ""}"></label>
+          <label class="quota-field"><span class="ql">${esc(w.slug)}</span><span class="sr-only"> · ${esc(x.name)}</span><input name="slug" type="text" dir="ltr" maxlength="20" placeholder="${esc(w.slug)}" value="${esc(x.slug ?? "")}"${x.count ? " readonly" : ""}></label>
+          <label class="quota-field"><span class="ql">${esc(w.maxWorkers)}</span><span class="sr-only"> · ${esc(x.name)}</span><input name="maxWorkers" type="number" min="0" max="100" placeholder="${x.quota.workers}" value="${x.maxWorkers ?? ""}"></label>
+          <label class="quota-field"><span class="ql">${esc(w.maxKb)}</span><span class="sr-only"> · ${esc(x.name)}</span><input name="maxWorkerKb" type="number" min="0" max="10240" placeholder="${x.quota.kb}" value="${x.maxWorkerKb ?? ""}"></label>
           <button type="submit" class="button small ghost">${esc(t.common.save)}</button>`,
               {
                 cls: "inline-form quota-form",
@@ -2542,6 +2603,16 @@ export function adminSettingsHtml(lang: Lang, c: Config, o: AdminSettingsOpts): 
   });
 }
 
+/** 0.16.0: download the whole log (CSV for spreadsheets, JSONL for scripts). */
+function activityDownloads(lang: Lang, base: string): string {
+  const sep = base.includes("?") ? "&" : "?";
+  const l =
+    lang === "ar"
+      ? { dl: "تنزيل السجل", csv: "CSV", jsonl: "JSONL" }
+      : { dl: "Download the log", csv: "CSV", jsonl: "JSONL" };
+  return `<p class="meta activity-dl">${icon("download")} ${esc(l.dl)}: <a class="text-link" href="${esc(`${base}${sep}format=csv`)}" download>${l.csv}</a> · <a class="text-link" href="${esc(`${base}${sep}format=jsonl`)}" download>${l.jsonl}</a></p>`;
+}
+
 export function adminActivityHtml(
   lang: Lang,
   c: Config,
@@ -2566,7 +2637,7 @@ export function adminActivityHtml(
     <label><span>${esc(d.pickTeam)}</span><select name="team">${opt("", d.allTeams, o.team)}${opt("platform", d.platform, o.team)}${o.teams.map((x) => opt(x.id, x.name, o.team)).join("")}</select></label>
     <label><span>${esc(d.who)}</span><select name="kind">${opt("", d.everyone, o.kind)}${kinds.map((k) => opt(k, t.members.actorKinds[k], o.kind)).join("")}</select></label>
     <button class="button small" type="submit">${esc(d.filter)}</button>${o.q || o.kind || o.team ? `<a class="text-link" href="${href("/admin/activity")}">${esc(d.reset)}</a>` : ""}
-  </form>`;
+  </form>${activityDownloads(lang, href(`/admin/activity/export${o.team ? `?team=${encodeURIComponent(o.team)}` : ""}`))}`;
   const table = dataTable({
     lang,
     id: "activity-table",
@@ -2582,7 +2653,7 @@ export function adminActivityHtml(
       const what =
         t.members.actions[e.action] ??
         (e.action.startsWith("mcp:") ? `MCP · ${e.action.slice(4)}` : e.action);
-      const who = e.kind === "member" ? e.who : (t.members.actorLabels[e.who] ?? e.who);
+      const who = e.kind === "member" ? e.who : actorText(lang, e.who);
       const target = e.site
         ? href(`/admin/sites/${e.site.id}`)
         : e.team
@@ -2605,7 +2676,7 @@ export function adminActivityHtml(
             v: who.toLowerCase(),
           },
           {
-            html: `${esc(what)}${e.detail ? ` <span class="meta"><bdi>${esc(e.detail)}</bdi></span>` : ""}${e.site ? ` · <a class="text-link" href="${href(`/admin/sites/${e.site.id}`)}"><bdi>${esc(e.site.title)}</bdi></a>` : ""}`,
+            html: `${esc(what)}${e.detail ? ` <span class="meta"><bdi>${esc(detailText(lang, e.detail))}</bdi></span>` : ""}${e.site ? ` · <a class="text-link" href="${href(`/admin/sites/${e.site.id}`)}"><bdi>${esc(e.site.title)}</bdi></a>` : ""}`,
           },
         ],
         filters: { kind: e.kind },
@@ -2682,6 +2753,8 @@ export const DS = {
       guests: (n: number) => `${n} guest`,
       perm: (n: number) => `${n} permanent`,
       workersSub: (n: number) => (n === 1 ? "1 team can deploy" : `${n} teams can deploy`),
+      downNow: "Down now",
+      allUp: "All checked Workers are up",
       views30: "Views, last 30 days",
     },
     quick: "Quick actions",
@@ -2775,9 +2848,9 @@ export const DS = {
     nav: {
       overview: "نظرة عامة",
       sites: "المساحات",
-      workers: "الوركرز",
-      mcp: "سيرفرات MCP",
-      notes: "ملاحظات الإيجنتس",
+      workers: "الوركرات",
+      mcp: "خوادم MCP",
+      notes: "ملاحظات الوكلاء",
       members: "الأعضاء",
       agents: "مفاتيح الوكلاء",
       recipes: "الوصفات",
@@ -2786,7 +2859,7 @@ export const DS = {
       settings: "الإعدادات",
     } as Record<string, string>,
     overview: "نظرة عامة",
-    overviewSub: "فريقك في لمحة: المساحات والزيارات والأعضاء والوركرز.",
+    overviewSub: "فريقك في لمحة: المساحات والزيارات والأعضاء والوركرات.",
     stats: {
       spaces: "المساحات الحية",
       storage: "التخزين",
@@ -2794,7 +2867,7 @@ export const DS = {
       views7: (n: string) => `${n} في آخر 7 أيام`,
       members: "الأعضاء",
       invites: (n: number) => (n === 1 ? "دعوة واحدة معلّقة" : `${n} دعوات معلّقة`),
-      workers: "الوركرز",
+      workers: "الوركرات",
       workersOff: "غير مفعّلة لهذا الفريق",
       of: (a: string, b: string) => `${a} من ${b}`,
       teams: "الفرق",
@@ -2802,6 +2875,8 @@ export const DS = {
       guests: (n: number) => `${n} زائر`,
       perm: (n: number) => `${n} دائم`,
       workersSub: (n: number) => (n === 1 ? "فريق واحد يستطيع النشر" : `${n} فرق تستطيع النشر`),
+      downNow: "متوقفة الآن",
+      allUp: "كل الوركرات المفحوصة تعمل",
       views30: "المشاهدات في آخر 30 يومًا",
     },
     quick: "إجراءات سريعة",
@@ -2832,26 +2907,26 @@ export const DS = {
     teamInfo: "الفريق",
     name: "الاسم",
     id: "معرّف الفريق",
-    slug: "الاسم المختصر للوركرز",
+    slug: "الاسم المختصر للوركرات",
     features: "المزايا",
     quotas: "الحصص والاستخدام",
     api: "الوصول عبر الـ API",
     apiNote: (p: string) =>
-      `الإيجنتس تستخدم مفتاح الفريق (يبدأ بـ ${p}…). ظهر المفتاح مرة واحدة عند إصداره، والمسؤول وحده يستطيع إصدار مفتاح جديد، وعندها يتوقف القديم فورًا.`,
+      `الوكلاء تستخدم مفتاح الفريق (يبدأ بـ ${p}…). ظهر المفتاح مرة واحدة عند إصداره، والمسؤول وحده يستطيع إصدار مفتاح جديد، وعندها يتوقف القديم فورًا.`,
     on: "مفعّل",
     off: "متوقف",
     adminOverviewSub:
-      "المنصة كلها: الفرق والمساحات والوركرز والزيارات. أدِر الفرق من الجدول بالأسفل.",
+      "المنصة كلها: الفرق والمساحات والوركرات والزيارات. أدِر الفرق من الجدول بالأسفل.",
     newTeam: "فريق جديد",
     more: "المزيد",
     dangerZone: "منطقة الخطر",
     rotateWarn:
-      "إصدار مفتاح جديد: يظهر مرة واحدة فقط، ويتوقف المفتاح القديم فورًا، فتفشل الإيجنتس والسكربتات التي تستخدمه حتى تحصل على الجديد.",
+      "إصدار مفتاح جديد: يظهر مرة واحدة فقط، ويتوقف المفتاح القديم فورًا، فتفشل الوكلاء والسكربتات التي تستخدمه حتى تحصل على الجديد.",
     rotateConfirm:
-      "تصدر مفتاحًا جديدًا للفريق؟ سيتوقف المفتاح الحالي الآن، وستفشل الإيجنتس والسكربتات التي تستخدمه حتى تعطيها المفتاح الجديد.",
-    workersCol: "الوركرز",
+      "تصدر مفتاحًا جديدًا للفريق؟ سيتوقف المفتاح الحالي الآن، وستفشل الوكلاء والسكربتات التي تستخدمه حتى تعطيها المفتاح الجديد.",
+    workersCol: "الوركرات",
     manage: "إدارة",
-    adminSettingsSub: "ربط كلاودفلير لوركرز الفرق، وإعدادات هذا الخادم.",
+    adminSettingsSub: "ربط كلاودفلير لوركرات الفرق، وإعدادات هذا الخادم.",
     server: "الخادم",
     version: "الإصدار",
     publicUrl: "العنوان العام",
@@ -2879,7 +2954,7 @@ export const DS = {
     newWorker: "وركر جديد",
     lastDeploy: "آخر نشر",
     by: "بواسطة",
-    agentSnippet: "كيف تستخدمه الإيجنتس",
+    agentSnippet: "كيف تستخدمه الوكلاء",
     agentSnippetSub: (slug: string) =>
       `جاهز للنسخ: الاسم المختصر للفريق (${slug}) مكتوب بالفعل. ضع مفتاح الفريق في MARSA_TEAM_KEY، ولا تضعه أبدًا في صفحة أو مستودع.`,
     mcpTip:
@@ -2926,6 +3001,7 @@ const ICONS: Record<string, string> = {
   rotate: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5"/>',
   health: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
   notes: '<path d="M5 4h14v12l-4 4H5zM15 20v-4h4M8 9h8M8 13h5"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
@@ -2955,7 +3031,7 @@ export interface DashOpts {
   crumbs?: { label: string; href?: string }[];
 }
 
-const TEAM_NAV = [
+export const TEAM_NAV = [
   ["overview", "/team"],
   ["sites", "/team/sites"],
   ["workers", "/team/workers"],
@@ -2968,7 +3044,7 @@ const TEAM_NAV = [
   ["activity", "/team/activity"],
   ["settings", "/team/settings"],
 ] as const;
-const ADMIN_NAV = [
+export const ADMIN_NAV = [
   ["overview", "/admin"],
   ["sites", "/admin/sites"],
   ["workers", "/admin/workers"],
@@ -2980,7 +3056,132 @@ const ADMIN_NAV = [
   ["settings", "/admin/settings"],
 ] as const;
 
+/** 0.16.0: global search (⌘K) and the getting-started checklist. */
+export const K16 = {
+  en: {
+    search: "Search",
+    searchLabel: "Search the dashboard",
+    searchPh: "Spaces, Workers, MCP servers, notes, docs…",
+    searchNone: "No results",
+    searchHint: "↑ ↓ to move · Enter to open · Esc to close",
+    searchFail: "Search failed. Try again.",
+    checklist: "Getting started",
+    checklistSub: (done: number, all: number) => `${done} of ${all} done`,
+    dismiss: "Hide",
+    dismissLabel: "Hide the getting-started checklist",
+    stepSpace: "Publish your first space",
+    stepSpaceHelp: "Drop a folder or a .zip below, or let an agent publish it.",
+    stepMember: "Invite a teammate",
+    stepMemberHelp: "Each person gets their own sign-in and role.",
+    stepAgent: "Create an agent key",
+    stepAgentHelp: "Give each agent a scoped, expiring key instead of the team key.",
+    stepWorker: "Deploy a Worker",
+    stepWorkerHelp: "APIs, webhooks and MCP servers, without a Cloudflare key.",
+    stepDocs: "Read the guide for agents",
+    stepDocsHelp: "A prompt and snippets so an agent can publish and return a link.",
+    done: "Done",
+    todo: "To do",
+  },
+  ar: {
+    search: "بحث",
+    searchLabel: "البحث في اللوحة",
+    searchPh: "المساحات والوركرات وخوادم MCP والملاحظات والتوثيق…",
+    searchNone: "لا نتائج",
+    searchHint: "↑ ↓ للتنقل · Enter للفتح · Esc للإغلاق",
+    searchFail: "تعذّر البحث. حاول مرة أخرى.",
+    checklist: "خطوات البدء",
+    checklistSub: (done: number, all: number) =>
+      `${done.toLocaleString("ar-EG")} من ${all.toLocaleString("ar-EG")} مكتملة`,
+    dismiss: "إخفاء",
+    dismissLabel: "إخفاء قائمة خطوات البدء",
+    stepSpace: "انشر أول مساحة",
+    stepSpaceHelp: "أفلت مجلدًا أو ملف zip أدناه، أو دع وكيلًا ينشرها.",
+    stepMember: "ادعُ زميلًا",
+    stepMemberHelp: "لكل شخص دخوله ودوره الخاص.",
+    stepAgent: "أنشئ مفتاح وكيل",
+    stepAgentHelp: "أعطِ كل وكيل مفتاحًا محدد الصلاحيات ينتهي، بدل مفتاح الفريق.",
+    stepWorker: "انشر وركر",
+    stepWorkerHelp: "واجهات API وWebhooks وخوادم MCP، بلا مفتاح Cloudflare.",
+    stepDocs: "اقرأ دليل الوكلاء",
+    stepDocsHelp: "تعليمات ومقتطفات ليتمكن الوكيل من النشر وإعادة رابط.",
+    done: "مكتملة",
+    todo: "لم تكتمل",
+  },
+};
+
+export interface ChecklistStep {
+  key: "space" | "member" | "agent" | "worker" | "docs";
+  done: boolean;
+  href: string;
+}
+
+/** The team overview's getting-started card (0.16.0). Hidden when every step is done. */
+export function checklistHtml(
+  lang: Lang,
+  steps: ChecklistStep[],
+  o: { csrf: string; canDismiss: boolean },
+): string {
+  const k = K16[lang];
+  const doneN = steps.filter((x) => x.done).length;
+  if (!steps.length || doneN === steps.length) return "";
+  const label = (key: ChecklistStep["key"]) =>
+    ({
+      space: [k.stepSpace, k.stepSpaceHelp],
+      member: [k.stepMember, k.stepMemberHelp],
+      agent: [k.stepAgent, k.stepAgentHelp],
+      worker: [k.stepWorker, k.stepWorkerHelp],
+      docs: [k.stepDocs, k.stepDocsHelp],
+    })[key];
+  const items = steps
+    .map((x) => {
+      const [title, help] = label(x.key);
+      return `<li class="check-step${x.done ? " is-done" : ""}"><span class="check-mark" aria-hidden="true">${x.done ? "✓" : ""}</span><div><a href="${esc(localePath(lang, x.href))}">${esc(title ?? "")}</a><span class="sr-only"> (${esc(x.done ? k.done : k.todo)})</span><span class="meta">${esc(help ?? "")}</span></div></li>`;
+    })
+    .join("");
+  const hide = o.canDismiss
+    ? postForm(
+        localePath(lang, "/team/checklist/hide"),
+        o.csrf,
+        `<button class="button ghost small" type="submit" aria-label="${esc(k.dismissLabel)}">${esc(k.dismiss)}</button>`,
+      )
+    : "";
+  const pct = Math.round((doneN / steps.length) * 100);
+  return `<section class="card checklist" aria-labelledby="checklist-h">
+  <div class="checklist-head"><div><h2 id="checklist-h" class="h3">${esc(k.checklist)}</h2><p class="meta">${esc(k.checklistSub(doneN, steps.length))}</p></div>${hide}</div>
+  <progress class="checklist-bar" max="100" value="${pct}" aria-label="${esc(k.checklistSub(doneN, steps.length))}">${pct}%</progress>
+  <ol class="check-steps">${items}</ol>
+</section>`;
+}
+
+/** The ⌘K button for the top bar and its dialog (filled by app.js from /team|admin/search). */
+function searchUi(lang: Lang, kind: "team" | "admin"): { button: string; dialog: string } {
+  const k = K16[lang];
+  const url = localePath(lang, kind === "team" ? "/team/search" : "/admin/search");
+  return {
+    button: `<button type="button" class="search-open js-only" data-search-open aria-haspopup="dialog" aria-controls="search-dialog">${icon("search")}<span class="search-open-text">${esc(k.search)}</span><kbd data-search-kbd>Ctrl K</kbd></button>`,
+    dialog: `<dialog class="search-dialog" id="search-dialog" aria-label="${esc(k.searchLabel)}" data-url="${esc(url)}" data-none="${esc(k.searchNone)}" data-fail="${esc(k.searchFail)}">
+  <div class="search-box">${icon("search")}<label class="sr-only" for="search-q">${esc(k.searchLabel)}</label><input id="search-q" type="search" role="combobox" aria-expanded="false" aria-controls="search-results" aria-autocomplete="list" autocomplete="off" spellcheck="false" maxlength="100" placeholder="${esc(k.searchPh)}"><kbd>Esc</kbd></div>
+  <ul id="search-results" class="search-results" role="listbox" aria-label="${esc(k.searchLabel)}"></ul>
+  <p class="search-status meta" role="status" aria-live="polite"></p>
+  <p class="search-hint meta">${esc(k.searchHint)}</p>
+</dialog>`,
+  };
+}
+
 /** The signed-in app shell: top bar, sidebar navigation (a drawer on phones), breadcrumbs. */
+/**
+ * 0.16.0: one title format for every dashboard page: "<page> · <team name> · Marsa Spaces"
+ * for teams and "<page> · Admin · Marsa Spaces" (AR "· الإدارة ·") for the admin.
+ */
+export function dashTitle(o: Pick<DashOpts, "lang" | "kind" | "title" | "ctx">): string {
+  const t = STRINGS[o.lang];
+  const tail = ` · ${t.product}`;
+  const area = o.kind === "admin" ? t.admin.eyebrow : (o.ctx.name ?? "");
+  if (!area || o.title.includes(` · ${area} · `) || o.title === `${area}${tail}`) return o.title;
+  const head = o.title.endsWith(tail) ? o.title.slice(0, -tail.length) : o.title;
+  return `${head} · ${area}${tail}`;
+}
+
 export function dashLayout(o: DashOpts): string {
   const t = STRINGS[o.lang];
   const d = DS[o.lang];
@@ -3024,13 +3225,14 @@ export function dashLayout(o: DashOpts): string {
         : `<li><a href="${esc(c.href ?? "#")}"><bdi>${esc(c.label)}</bdi></a></li>`,
     )
     .join("")}</ol></nav>`;
+  const su = searchUi(o.lang, o.kind);
   const ctx = `<div class="side-ctx"><span class="side-avatar" aria-hidden="true">${esc(initialOf(o.ctx.name ?? "M"))}</span><div><strong>${o.ctx.name ? `<bdi>${esc(o.ctx.name)}</bdi>` : esc(area)}</strong>${o.ctx.sub ? `<span class="meta">${esc(o.ctx.sub)}</span>` : ""}</div></div>`;
   return `<!doctype html>
 <html lang="${o.lang}" dir="${t.dir}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(o.title)}</title>
+<title>${esc(dashTitle(o))}</title>
 <meta name="description" content="${esc(o.description)}">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#145a49">
@@ -3046,6 +3248,7 @@ export function dashLayout(o: DashOpts): string {
   <a class="wordmark" href="${href("/")}" aria-label="${esc(`${t.product}: ${t.nav.home}`)}">${brandMark(o.lang)}</a>
   <span class="dash-area">${esc(area)}</span>
   <div class="dash-top-tools">
+    ${su.button}
     <!--marsa:bell:${o.kind}:${o.lang}-->
     <a class="locale-link" href="${localePath(other, o.path)}" hreflang="${other}" lang="${other}">${esc(t.switchLabel)}</a>
   </div>
@@ -3067,6 +3270,7 @@ export function dashLayout(o: DashOpts): string {
   </main>
 </div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+${su.dialog}
 <dialog class="confirm-dialog" id="confirm-dialog" aria-labelledby="confirm-text">
   <form method="dialog">
     <p id="confirm-text"></p>
@@ -3110,12 +3314,12 @@ export function activityFeed(lang: Lang, rows: AuditView[], withSite = true): st
       const what =
         t.members.actions[e.action] ??
         (e.action.startsWith("mcp:") ? `MCP · ${e.action.slice(4)}` : e.action);
-      const who = e.kind === "member" ? e.who : (t.members.actorLabels[e.who] ?? e.who);
+      const who = e.kind === "member" ? e.who : actorText(lang, e.who);
       const site =
         withSite && e.site
           ? ` · <a class="text-link" href="${localePath(lang, `/team/sites/${e.site.id}`)}"><bdi>${esc(e.site.title)}</bdi></a>`
           : "";
-      return `<li><span class="feed-dot k-${esc(e.kind)}" aria-hidden="true"></span><div><p><strong><bdi>${esc(who)}</bdi></strong> ${esc(what)}${e.detail && !/^\d{4}-\d\d-\d\dT/.test(e.detail) ? ` <span class="meta"><bdi>${esc(e.detail)}</bdi></span>` : ""}${site}</p>${timeTag(lang, e.at)}</div></li>`;
+      return `<li><span class="feed-dot k-${esc(e.kind)}" aria-hidden="true"></span><div><p><strong><bdi>${esc(who)}</bdi></strong> ${esc(what)}${e.detail && !/^\d{4}-\d\d-\d\dT/.test(e.detail) ? ` <span class="meta"><bdi>${esc(detailText(lang, e.detail))}</bdi></span>` : ""}${site}</p>${timeTag(lang, e.at)}</div></li>`;
     })
     .join("")}</ol>`;
 }
@@ -3301,9 +3505,9 @@ export const V14 = {
     viaInvite: "عبر دعوة",
     ownersOnly: "إدارة مفاتيح الوكلاء لمالكي الفريق فقط.",
     scopeHelp: {
-      "workers:read": "عرض الوركرز وإصداراتها وكودها",
-      "workers:deploy": "نشر الوركرز وإعادة نشرها والرجوع بها وحذفها",
-      "workers:secrets": "إضافة أسرار الوركرز وتغييرها وحذفها (كتابة فقط)",
+      "workers:read": "عرض الوركرات وإصداراتها وكودها",
+      "workers:deploy": "نشر الوركرات وإعادة نشرها والرجوع بها وحذفها",
+      "workers:secrets": "إضافة أسرار الوركرات وتغييرها وحذفها (كتابة فقط)",
       "spaces:read": "عرض مساحات الفريق وقراءتها",
       "spaces:write": "نشر المساحات واستبدالها وتمديدها وحذفها",
       "kv:read": "قراءة قيم KV والملفات المرفوعة",
@@ -3777,19 +3981,19 @@ function privacyText(
         ],
       ],
       [
-        "وركرز الفرق",
+        "وركرات الفرق",
         [
           "كل نشر يُحفظ كإصدار على هذا الخادم: الكود والمتغيرات العادية وأسماء الأسرار ومن نشره ومتى وحجمه وبصمته SHA-256 وملاحظة اختيارية. تُحفظ آخر 10 إصدارات لكل وركر وتُحذف معه.",
           "لا تحفظ Spaces قيم الأسرار أبدًا: تذهب مباشرة إلى Cloudflare ونحفظ أسماءها فقط.",
           "فحوص الصحة: إذا أبقاها الفريق مفعّلة، تطلب مساحات عنوان كل وركر (أو ترسل طلب MCP initialize) كل بضع دقائق وتحفظ الوقت والنتيجة ورمز الحالة وزمن الاستجابة. تُحفظ الفحوص المفردة 7 أيام والمجاميع اليومية 31 يومًا، وتُحذف مع الوركر.",
-          "السجلات والإحصاءات: لصفحات الوركرز تقرأ مساحات من Cloudflare عدد الطلبات والأخطاء ووقت المعالج وآخر سطور السجل. تبقى في الذاكرة فقط لبضع دقائق، ويُحجب قبل العرض كل ما يشبه مفتاحًا أو كلمة مرور.",
+          "السجلات والإحصاءات: لصفحات الوركرات تقرأ مساحات من Cloudflare عدد الطلبات والأخطاء ووقت المعالج وآخر سطور السجل. تبقى في الذاكرة فقط لبضع دقائق، ويُحجب قبل العرض كل ما يشبه مفتاحًا أو كلمة مرور.",
           "فحص المستودعات: إذا ربط فريق وركر أو مساحة بمستودع GitHub، تسأل مساحات الـ API العامة لـ GitHub إن كان المستودع عامًا وإن كان الـ commit المنشور هو الأحدث. يصل إلى GitHub اسم المستودع وعنوان IP للخادم، وتُحفظ الإجابات مؤقتًا في الذاكرة.",
         ],
       ],
       [
         "الأغراض والأسس القانونية",
         [
-          "تشغيل الخدمة التي تستخدمها أنت أو فريقك (الحسابات وتسجيل الدخول ونشر المواقع والوركرز والمفاتيح والبيانات والملفات والإشعارات والـ Webhooks): تنفيذ عقد أو خطوات تسبقه (المادة 6(1)(ب) من GDPR).",
+          "تشغيل الخدمة التي تستخدمها أنت أو فريقك (الحسابات وتسجيل الدخول ونشر المواقع والوركرات والمفاتيح والبيانات والملفات والإشعارات والـ Webhooks): تنفيذ عقد أو خطوات تسبقه (المادة 6(1)(ب) من GDPR).",
           "الأمان ومنع إساءة الاستخدام (حدود المعدل وسجل النشاط وتنبيهات الشبكات الجديدة لمفاتيح الوكلاء وحفظ المفاتيح والرموز كبصمات): مصلحتنا المشروعة في حماية الخدمة ومستخدميها (المادة 6(1)(و) من GDPR).",
           "مجاميع الزيارات اليومية المجهولة التي يراها أصحاب المواقع: مصلحتنا المشروعة في تقديم إحصاءات أساسية دون تتبع الأشخاص (المادة 6(1)(و) من GDPR).",
           "مفاتيح API للمستخدمين: يمكن للفريق إدخال اسم وبريد اختياري لكل مفتاح. الفريق يقرر إدخالهما وعليه إبلاغ أصحابهما؛ وتستخدمهما مساحات فقط لعرضهما على الفريق وللتحقق من المفاتيح.",
@@ -3798,9 +4002,9 @@ function privacyText(
       [
         "مزودو الخدمة (المعالجون) والجهات المتلقية",
         [
-          "Cloudflare: إذا فعّل المدير خلفية البيانات والملفات، تُحفظ قيم KV والملفات المرفوعة للمواقع المسموح لها لدى Cloudflare ‏(Workers KV وR2). وتُنشر وركرز الفرق على شبكة Cloudflare عبر حساب Cloudflare الخاص بالمنصة، وتحفظ Cloudflare كودها ومتغيراتها وأسرارها.",
+          "Cloudflare: إذا فعّل المدير خلفية البيانات والملفات، تُحفظ قيم KV والملفات المرفوعة للمواقع المسموح لها لدى Cloudflare ‏(Workers KV وR2). وتُنشر وركرات الفرق على شبكة Cloudflare عبر حساب Cloudflare الخاص بالمنصة، وتحفظ Cloudflare كودها ومتغيراتها وأسرارها.",
           "يُقدَّم هذا الموقع، ومنه لوحات التحكم بعد تسجيل الدخول، عبر Cloudflare التي تضيف سكربت Web Analytics الخاص بها (static.cloudflareinsights.com). يعدّ مشاهدات الصفحات ويقيس سرعة التحميل بلا كوكيز، ويصل إلى Cloudflare عنوان الصفحة والصفحة السابقة ونوع المتصفح وعنوان IP. الخطوط وبقية الملفات تُقدَّم من هذا الخادم.",
-          "النسخ الاحتياطية: مرة كل يوم يُشفَّر مجلد البيانات كاملًا (الحسابات بكلمات مرور مبصومة، والمفاتيح كبصمات، والنشاط والملاحظات وكود الوركرز وإصداراتها والإعدادات) على هذا الخادم بـ AES-256-GCM ويُحفظ في Cloudflare R2. لا تستطيع Cloudflare قراءته، والمفتاح لا يُحفظ مع النسخ.",
+          "النسخ الاحتياطية: مرة كل يوم يُشفَّر مجلد البيانات كاملًا (الحسابات بكلمات مرور مبصومة، والمفاتيح كبصمات، والنشاط والملاحظات وكود الوركرات وإصداراتها والإعدادات) على هذا الخادم بـ AES-256-GCM ويُحفظ في Cloudflare R2. لا تستطيع Cloudflare قراءته، والمفتاح لا يُحفظ مع النسخ.",
           "GitHub: لفحص المستودعات فقط (أعلاه)، وللمستودعات التي يربطها فريق فقط.",
           "ترسل الـ Webhooks الصادرة نص الإشعار (اسم الفريق ومن فعل ماذا) فقط إلى الروابط التي يحددها مالك الفريق أو المدير.",
           "المواقع المنشورة عامة بطبيعتها: يستطيع أي شخص لديه الرابط رؤيتها.",
@@ -3820,7 +4024,7 @@ function privacyText(
           "المواقع: حتى تنتهي مدتها أو تُحذف. الحسابات والمفاتيح ووصفات الفريق: حتى تُحذف أو تُلغى أو يُحذف الفريق.",
           "مجاميع الزيارات: 90 يومًا افتراضيًا. سجل النشاط: آخر 500 عملية لكل فريق. الإشعارات: آخر 200 لكل فريق. إصدارات الوركر: آخر 10 لكل وركر. عدّادات مفاتيح المستخدمين: 7 أيام.",
           "كوكي الجلسة: 7 أيام (للفرق) أو 12 ساعة (للمدير) على الأكثر. بيانات حدود المعدل في الذاكرة فقط.",
-          "فحوص الصحة: 7 أيام (المجاميع اليومية 31 يومًا). ملاحظات الوكلاء: آخر 500 لكل فريق. سجلات الوركرز وإحصاءاتها: بضع دقائق في الذاكرة.",
+          "فحوص الصحة: 7 أيام (المجاميع اليومية 31 يومًا). ملاحظات الوكلاء: آخر 500 لكل فريق. سجلات الوركرات وإحصاءاتها: بضع دقائق في الذاكرة.",
           "الفرق المحذوفة: تبقى 7 أيام ليستطيع المدير استعادتها، ثم تُحذف نهائيًا. ويبقى التصدير المأخوذ عند الحذف 30 يومًا أخرى ثم يُحذف.",
           "النسخ الاحتياطية: 14 نسخة يومية و8 أسبوعية، لذا قد تبقى البيانات المحذوفة في نسخة مشفّرة نحو 8 أسابيع على الأكثر قبل أن تُستبدل.",
         ],
@@ -3838,7 +4042,7 @@ function privacyText(
       [
         "حقوقك",
         [
-          "تستطيع حذف مواقعك وقيم KV والملفات، وإلغاء المفاتيح والرموز، من لوحة التحكم أو الـ API في أي وقت. يستطيع مالك الفريق إزالة الأعضاء وإخراج الفريق كله من كل الأجهزة، ويستطيع المدير تصدير فريق (ملف zip قابل للنقل) وحذفه، فتُحذف أعضاؤه ومفاتيحه وإشعاراته وملاحظاته ووركرزه بعد مهلة 7 أيام.",
+          "تستطيع حذف مواقعك وقيم KV والملفات، وإلغاء المفاتيح والرموز، من لوحة التحكم أو الـ API في أي وقت. يستطيع مالك الفريق إزالة الأعضاء وإخراج الفريق كله من كل الأجهزة، ويستطيع المدير تصدير فريق (ملف zip قابل للنقل) وحذفه، فتُحذف أعضاؤه ومفاتيحه وإشعاراته وملاحظاته ووركراته بعد مهلة 7 أيام.",
           "بموجب GDPR لك الحق في الاطلاع على بياناتك الشخصية، وتصحيحها أو محوها، وتقييد معالجتها، والحصول عليها بصيغة قابلة للنقل، والاعتراض على المعالجة القائمة على المصلحة المشروعة (المواد 15 إلى 21).",
           `لممارسة هذه الحقوق راسلنا على ${op.email}. نرد خلال شهر واحد كما تشترط اللائحة.`,
           `ولك أيضًا الحق في تقديم شكوى إلى سلطة رقابية لحماية البيانات: ${auth}.`,
@@ -4006,11 +4210,11 @@ export function notesCallout(lang: Lang, dash?: "team" | "admin"): string {
   const ar = lang === "ar";
   const guide = localePath(lang, "/docs/recipes/agent-notes");
   const page = dash ? localePath(lang, dash === "team" ? "/team/notes" : "/admin/notes") : "";
-  return `<aside class="panel notes-callout" aria-label="${ar ? "ملاحظات الإيجنتس" : "Agent notes"}">${icon("notes")}<div><strong>${ar ? "واجهتكم مشكلة أو وصفة غير واضحة؟" : "Hit a problem, or a recipe is unclear?"}</strong> ${
+  return `<aside class="panel notes-callout" aria-label="${ar ? "ملاحظات الوكلاء" : "Agent notes"}">${icon("notes")}<div><strong>${ar ? "واجهتكم مشكلة أو وصفة غير واضحة؟" : "Hit a problem, or a recipe is unclear?"}</strong> ${
     ar
       ? 'اتركوا ملاحظة للمسؤول من أي مرحلة: <code class="ltr">POST /api/teams/&lt;team&gt;/notes</code> أو أداة MCP <code class="ltr">leave_note</code>.'
       : 'Leave a note for the admin at any stage: <code class="ltr">POST /api/teams/&lt;team&gt;/notes</code> or the MCP tool <code class="ltr">leave_note</code>.'
-  } <a class="text-link" href="${guide}">${ar ? "كيف؟" : "How"}</a>${page ? ` · <a class="text-link" href="${page}">${ar ? "ملاحظات الإيجنتس" : "Agent notes"}</a>` : ""}</div></aside>`;
+  } <a class="text-link" href="${guide}">${ar ? "كيف؟" : "How"}</a>${page ? ` · <a class="text-link" href="${page}">${ar ? "ملاحظات الوكلاء" : "Agent notes"}</a>` : ""}</div></aside>`;
 }
 
 export function recipesIndexHtml(lang: Lang, c: Config, list: RecipeSummary[]): string {
@@ -4032,7 +4236,7 @@ ${recipeCards(lang, list, (r) => localePath(lang, `/docs/recipes/${r.slug}`))}
   });
 }
 
-function recipeArticle(lang: Lang, r: Recipe, html: string, served: Lang): string {
+function recipeArticle(lang: Lang, r: Recipe, html: string, served: Lang, h = "h1"): string {
   const r14 = R14[lang];
   const title = (r.title[served] ?? r.title.en ?? r.title.ar ?? r.slug) as string;
   const summary = (r.summary[served] ?? "") as string;
@@ -4042,7 +4246,7 @@ function recipeArticle(lang: Lang, r: Recipe, html: string, served: Lang): strin
       ? `<p class="notice">${esc(r14.onlyIn(served === "ar" ? r14.arabic : r14.english))}</p>`
       : "";
   const alt = r.body[other] && served === lang ? "" : "";
-  return `${note}<article class="prose recipe" lang="${served}" dir="${served === "ar" ? "rtl" : "ltr"}"><h1>${esc(title)}</h1>${summary ? `<p class="lead">${esc(summary)}</p>` : ""}<p class="meta"><span class="badge muted">${esc(r14.scope[r.scope] ?? r.scope)}</span> ${esc(r14.version(r.version))}${r.updatedAt ? ` · ${esc(r14.updated)} ${esc(r.updatedAt.slice(0, 10))}` : ""} · <code class="ltr">${esc(r.slug)}</code></p>${alt}${html}</article>`;
+  return `${note}<article class="prose recipe" lang="${served}" dir="${served === "ar" ? "rtl" : "ltr"}"><${h}>${esc(title)}</${h}>${summary ? `<p class="lead">${esc(summary)}</p>` : ""}<p class="meta"><span class="badge muted">${esc(r14.scope[r.scope] ?? r.scope)}</span> ${esc(r14.version(r.version))}${r.updatedAt ? ` · ${esc(r14.updated)} ${esc(r.updatedAt.slice(0, 10))}` : ""} · <code class="ltr">${esc(r.slug)}</code></p>${alt}${html}</article>`;
 }
 
 /** Public: /docs/recipes/:slug */
@@ -4062,7 +4266,7 @@ export function recipePageHtml(
     <h2 class="h3" id="starter-h">${icon("download")} ${esc(lang === "ar" ? "القالب الجاهز للتنزيل" : "Starter template")}</h2>
     <p class="meta">${esc(lang === "ar" ? `${starter.count} ملفًا، تبني وتنجح اختباراتها. فكّوا الضغط، ثم npm install وnpm run check.` : `${starter.count} files that build and pass their own tests. Unzip, then npm install and npm run check.`)}</p>
     <p><a class="button" href="${esc(starter.zip)}" download>${icon("download")} <bdi dir="ltr">${esc(starter.name)}.zip</bdi></a></p>
-    <details><summary>${esc(lang === "ar" ? "هيكل الملفات" : "File tree")}</summary><pre dir="ltr" class="tree"><code>${esc(starter.tree)}</code></pre></details>
+    <details><summary>${esc(lang === "ar" ? "هيكل الملفات" : "File tree")}</summary><pre tabindex="0" dir="ltr" class="tree"><code>${esc(starter.tree)}</code></pre></details>
   </section>`
     : "";
   const nav = `<nav class="docs-nav" aria-label="${esc(r14.recipes)}"><ul>${list
@@ -4247,7 +4451,7 @@ export function dashRecipeHtml(
   const body = `<div class="page-wide">
   ${pageHead(o.kind === "team" ? t.team.eyebrow : DS[lang].adminArea, `<bdi>${esc((r.title[o.served] ?? r.slug) as string)}</bdi>`, "", `<div class="head-tools">${tools}<a class="button small ghost" href="${localePath(lang, base)}">${esc(r14.back)}</a></div>`)}
   ${flashBox(lang, o.flash ?? null)}
-  <section class="block panel">${recipeArticle(lang, r, o.html, o.served)}</section>
+  <section class="block panel">${recipeArticle(lang, r, o.html, o.served, "h2")}</section>
   ${o.canWrite ? `<section class="block">${recipeForm(lang, localePath(lang, base), o.csrf, r, o.skeleton)}</section>` : ""}
 </div>`;
   return dashLayout({
@@ -4365,7 +4569,7 @@ export const K14 = {
     cache: (n: number) =>
       `يتحقق المساعد من كل طلب (حدود دقيقة). الخيار { cache: ${n} } أسرع، لكن لكل نسخة من الوركر ذاكرتها فقد يتجاوز المفتاح حدّه قليلًا.`,
     readOnly: "يدير المفاتيح المالكون والمحررون فقط.",
-    notConfigured: "الوركرز غير مضبوطة على هذا الخادم.",
+    notConfigured: "الوركرات غير مضبوطة على هذا الخادم.",
     rowActions: "إجراءات",
   },
 };

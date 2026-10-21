@@ -11,6 +11,7 @@ import type { RateLimiter } from "./rate-limit.js";
 import { can, scopeError, type TeamAuth, type TeamCred } from "./team-auth.js";
 import type { Team, TeamStore } from "./teams.js";
 import { USAGE_RANGES, type UsageRange } from "./worker-analytics.js";
+import { healthRule } from "./worker-health.js";
 import type { WorkerOps } from "./worker-ops.js";
 import { WorkerError, type WorkerRec, type WorkerService } from "./workers.js";
 
@@ -20,6 +21,8 @@ export interface OpsRouteDeps {
   ops: WorkerOps;
   limiter: RateLimiter;
   teamAuth: TeamAuth;
+  /** 0.16.0: platform/team audit log writer (admin actions). */
+  audit?: (e: { teamId: string; actor: Actor; action: string; detail?: string }) => Promise<void>;
 }
 
 const err = (c: Context, status: number, code: string, message: string) =>
@@ -120,13 +123,28 @@ export function mountOpsRoutes(app: Hono, d: OpsRouteDeps): void {
   };
   const health = (c: Context, rec: WorkerRec) =>
     c.json({ worker: rec.name, health: ops.health.view(rec.id) });
-  const editHealth = async (c: Context, rec: WorkerRec, actor: Actor) => {
+  const editHealth = async (c: Context, recIn: WorkerRec, actor: Actor) => {
+    let rec = recIn;
     const b = ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
     if ("enabled" in b) {
       if (typeof b.enabled !== "boolean")
         return err(c, 400, "INVALID_REQUEST", "enabled: true or false");
       await ops.health.setEnabled(rec.id, b.enabled);
       await svc.auditOf(rec, actor, b.enabled ? "worker-health-on" : "worker-health-off");
+    }
+    if ("healthPath" in b || "healthExpect" in b) {
+      const meta: Record<string, unknown> = { ...(rec.meta ?? {}) };
+      for (const k of ["healthPath", "healthExpect"] as const) {
+        if (!(k in b)) continue;
+        if (b[k] === null || b[k] === "") delete meta[k];
+        else meta[k] = b[k];
+      }
+      try {
+        rec = await svc.setLinks(rec, { meta }, actor).then(() => svc.get(rec.id) ?? rec);
+      } catch (e) {
+        return fail(c, e);
+      }
+      await svc.auditOf(rec, actor, "worker-health-target", healthRule(rec));
     }
     if (b.check === true) {
       if (rec.status !== "active" || !rec.url)
@@ -241,7 +259,14 @@ export function mountOpsRoutes(app: Hono, d: OpsRouteDeps): void {
   app.put("/api/admin/workers/health-settings", small, async (c) => {
     const b = ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
     try {
-      return c.json({ intervalSec: await ops.health.setInterval(b.intervalSec) });
+      const intervalSec = await ops.health.setInterval(b.intervalSec);
+      await d.audit?.({
+        teamId: "_platform",
+        actor: { kind: "admin", label: "admin" },
+        action: "health-interval",
+        detail: `${intervalSec}s`,
+      });
+      return c.json({ intervalSec });
     } catch (e) {
       return fail(c, e);
     }

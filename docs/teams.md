@@ -13,8 +13,10 @@ never listed.
 ## Signing in
 
 Marsa Spaces has two browser sign-ins. Both create a **signed session cookie** (HMAC-SHA256 with
-`SESSION_SECRET`, `HttpOnly`, `Secure` on HTTPS with the `__Host-` prefix, `SameSite=Lax`). No key or
-token is stored in the browser.
+`SESSION_SECRET`, `HttpOnly`, `Secure` on HTTPS with the `__Host-` prefix, `SameSite=Lax`, so links
+from other sites into the dashboard keep you signed in). The sign-in forms use a separate short-lived CSRF
+cookie with `SameSite=Strict`; every form post also carries a CSRF token. No key or token is stored in
+the browser.
 
 | Who | Where | With | Session |
 | --- | --- | --- | --- |
@@ -80,9 +82,23 @@ and removals take effect at once, and a removed member's sessions end.
 **Audit log.** Changes are recorded with who made them: a member's name, *team key*, *edit token*,
 *admin* or an MCP token's name. That covers publishing, replacing, expiry changes, permanence,
 listing, deleting, MCP tokens, KV and file deletions, invites, joins, role changes, removals and
-password changes. The site page shows the last 30 entries for that site under *Activity on this
-site*, and *Members* shows the last 100 for the team. The last 500 entries per team are kept in
-`<DATA_DIR>/audit.json`. Members and invites live in `<DATA_DIR>/members.json` (mode 600). Deleting
+password changes, and (0.16.0) every admin change: team create/update/delete, limits and features,
+invite revocations, site deletions and permanence, sweeps, recipes, notes, the health interval, token
+permission rechecks, webhooks, backups and sign-out-everywhere. The site page shows the last 30 entries
+for that site under *Activity on this site*, and *Members* shows the last 100 for the team. The last 500
+entries per team are kept in `<DATA_DIR>/audit.json`.
+
+**Activity API and downloads (0.16.0).** `GET /api/teams/<team>/activity` (team key only; agent keys
+get `403 TEAM_KEY_REQUIRED`) and `GET /api/admin/activity?team=<id|platform>` (admin; no `team` = every
+log) return `{entries, count}`, newest first. Filters: `since` / `until` (ISO time or epoch ms),
+`action` (exact, or a prefix ending in `-` such as `worker-`), `site`, `limit` (default 500, max 5000).
+`format=csv` or `format=jsonl` downloads the same rows (CSV is UTF-8 with a BOM; cells that start with
+`=`, `+`, `-` or `@` are prefixed with `'`). The Activity pages have *CSV* and *JSONL* buttons.
+
+**Team export (0.16.0).** Owners download everything the team has on Spaces from *Settings → Export
+team*, or with `GET /api/teams/<team>/export` (team key). The zip has the sites and their files, the
+Workers with their versions, KV and uploads, members (no passwords), agent keys (no secrets) and the
+activity log. No key, token or secret value is included. Members and invites live in `<DATA_DIR>/members.json` (mode 600). Deleting
 a team deletes its members, invites and log.
 
 Admin API:
@@ -103,6 +119,7 @@ After signing in, a team member lands on `/team` (or `/ar/team`):
 
 - **Status**: the team name, how many sites are live, whether *data and files* are on for the team (and
   whether the server has a backend configured), and whether the team is listed on the home page.
+- **Getting started** (0.16.0): a checklist of first steps (publish a space, invite a member, an agent key, a Worker) that hides itself once done or dismissed.
 - **Live sites**: title, link, expiry, size and home-page visibility, with **Manage** and **Delete**.
 - **Publish a new site**: drag and drop files, a folder or one `.zip`, or pick them, then choose when
   it expires (within the instance limits).
@@ -114,6 +131,7 @@ After signing in, a team member lands on `/team` (or `/ar/team`):
 - Every table row opens its detail page (click, or focus it and press Enter); actions are icon
   buttons plus a labelled ⋮ menu. Tables have search, filters, sort, pagination and a card view on
   phones.
+- **Global search** (0.16.0): press ⌘K (or Ctrl+K, or `/`) on any dashboard page to search spaces, Workers, MCP servers, notes and the docs.
 - **Snippets for agents**: a `curl` call and a prompt using `$MARSA_TEAM_KEY` (never the real key).
 
 Team sites are managed through the session: nobody on the team needs the per-site edit token.
@@ -138,12 +156,12 @@ Sign in at `/admin/login` with `ADMIN_TOKEN`. The sidebar has five pages:
    `/admin/sites/<id>` (the same tabs as the team page).
 3. **Workers** (`/admin/workers`): per-team Workers settings and every team Worker.
 4. **Activity** (`/admin/activity`): every team's activity log plus the platform log, filtered by
-   team, actor kind and text.
+   team, actor kind and text, with CSV/JSONL downloads.
 5. **Settings** (`/admin/settings`): the Cloudflare connection for team Workers (write-only token,
    last 4 characters shown) and the server configuration.
 
 The team dashboard has the same layout: **Overview**, **Spaces**, **Workers**, **Members**,
-**Activity** and **Settings** (your password and sign-out-everywhere).
+**Activity** and **Settings** (your password, sign-out-everywhere and the team export).
 
 ## Uploading as a team
 
@@ -297,8 +315,8 @@ curl -s -X PATCH "$BASE/api/admin/teams/t_abc12345" -H "$AUTH" -H "Content-Type:
 # New key (old one stops working)
 curl -s -X POST "$BASE/api/admin/teams/t_abc12345/rotate" -H "$AUTH"
 
-# Delete the team (add ?sites=delete to also delete its sites)
-curl -s -X DELETE "$BASE/api/admin/teams/t_abc12345" -H "$AUTH"
+# Move the team to the trash for 7 days (type its name or id; add &sites=delete to also delete its sites)
+curl -s -X DELETE "$BASE/api/admin/teams/t_abc12345?confirm=t_abc12345" -H "$AUTH"
 ```
 
 Teams are stored in `DATA_DIR/teams.json` (written atomically, mode 600). Back it up with the

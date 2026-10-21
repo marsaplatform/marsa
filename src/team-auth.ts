@@ -79,7 +79,12 @@ export function makeTeamAuth(d: TeamAuthDeps) {
           })
           .catch(() => {});
       }
-      return { kind: "agent", team, key, actor: { kind: "api", label: `agent key ${key.name}` } };
+      return {
+        kind: "agent",
+        team,
+        key,
+        actor: { kind: "api", label: `agent key ${key.name}`, agentKey: key.name },
+      };
     }
     const team = isTeamKey(raw) ? d.teams.byTeamKey(raw) : null;
     if (!team) return "invalid";

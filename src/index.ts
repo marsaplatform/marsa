@@ -67,6 +67,16 @@ const healthTimer = setInterval(() => {
   void ops?.healthTick().catch((e) => console.error("[health] round failed", e?.message));
 }, 30_000);
 healthTimer.unref();
+// 0.16.0: keep the token permission reports warm so admin Settings never waits on the probes.
+const permsWarm = () => {
+  const ops = (svc as { ops?: WorkerOps } | null)?.ops;
+  if (!ops) return;
+  ops.permissionsNow("workers");
+  ops.permissionsNow("backend");
+};
+setTimeout(permsWarm, 5_000).unref();
+const permsTimer = setInterval(permsWarm, 4 * 60_000);
+permsTimer.unref();
 const flushTimer = setInterval(() => void visits.flush(), config.visits.flushSeconds * 1000);
 flushTimer.unref();
 

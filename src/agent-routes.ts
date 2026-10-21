@@ -35,14 +35,14 @@ export function agentErr(c: Context, e: unknown) {
 
 /** The ten rules every invited agent sees first (0.15.1). */
 export const TOP_RULES = [
-  "Never put keys, tokens or passwords in code, vars, repos, notes or logs: secrets go in the deploy `secrets` field.",
+  "Never put keys, tokens or passwords in code, vars, repos, notes or logs. Declare what the Worker needs with `requiredEnv`; set secrets with PUT …/workers/<name>/secrets/<NAME> (scope workers:secrets) or the MCP tool set_worker_secret.",
   "Start from the MCP-on-Worker starter; keep its structure (src/tools/<tool>.ts, src/lib/http.ts, tests).",
   "Run `npm run check` (typecheck, tests, build, size) before every deploy.",
   "Deploy one Workers ES module with `export default { fetch }`, through the Spaces API, with a `note`, `meta` and `repo`.",
   "Every upstream fetch: a fixed User-Agent, a timeout and retries on 429/5xx.",
   "Tools: verb_noun names, typed and described inputs (zod), Arabic input, pagination with nextCursor, `isError` results instead of throwing.",
   "Stateless MCP: POST /mcp with JSON responses, GET /mcp → 405, /health → 200.",
-  "After deploying, verify live: initialize, tools/list and one sample call (npm run smoke).",
+  "After deploying, verify live (npm run smoke: initialize, tools/list, one call), then watch it: worker_status (health, usage, errors), worker_env (missing names) and GET …/logs.",
   "Call other team Workers with a service binding (or global_fetch_strictly_public), never another team's Workers.",
   "Hit a problem, or a recipe is wrong? Leave a note (POST /api/teams/<team>/notes or the MCP tool leave_note) instead of working around the platform.",
 ] as const;
@@ -62,6 +62,13 @@ export function inviteOnboarding(config: Config, team: Team, inv: AgentInvite, t
       starterTree: `${base}/api/recipes/mcp-server-on-worker/starter`,
       recipe: `${base}/api/recipes/mcp-server-on-worker?format=md`,
       rules: TOP_RULES,
+      runAndObserve: [
+        "requiredEnv on deploy → GET …/workers/<name>/env (MCP worker_env): `missing` = declared but not set; `unset` = read in code without a default (info only). Values are never returned.",
+        'Secrets: PUT …/workers/<name>/secrets/<NAME> {"value"} or set_worker_secret (write-only, no redeploy; scope workers:secrets).',
+        "Health: GET …/workers/<name>/health. Web Workers need < 400 at the URL, MCP servers initialize or < 500; declare meta.healthPath / meta.healthExpect for your own check.",
+        "Usage and errors: GET …/usage?range=24h|7d|30d, GET …/logs; MCP worker_status returns health + usage + recent errors in one call.",
+        "Activity: GET /api/teams/<team>/activity (team key) lists every change; ask a human if you need it.",
+      ],
       changes: [
         {
           since: "0.16.0",

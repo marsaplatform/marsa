@@ -255,7 +255,7 @@ describe("team Workers", () => {
     };
     const viewer = await mk("viewer", "vera");
     const page = await (await viewer.get("/ar/team/workers")).text();
-    expect(page).toContain("الوركرز");
+    expect(page).toContain("الوركرات");
     expect(page).not.toContain('action="/ar/team/workers/deploy"');
     const vcsrf = await viewer.csrf("/team/workers");
     const vres = await viewer.post("/team/workers/deploy", {

@@ -82,6 +82,28 @@ const PAGES: { slug: string; lang: Lang; file: string; summary: string }[] = [
     summary:
       "Scoped, expiring agent keys, one-time agent invite links, notifications and webhooks.",
   },
+  // 0.16.0: Arabic translations, served at /ar/docs/<same slug>.
+  ...(
+    [
+      ["getting-started", "الرفع من المتصفح وما الذي تحصل عليه."],
+      ["api", "كل نقطة في الـ API مع أمثلة curl ورموز الأخطاء."],
+      ["agents", "تعليمات ومقتطفات ليتمكن وكيل ذكاء اصطناعي من النشر وإعادة رابط."],
+      ["managing", "تحديث موقع أو تمديده أو حذفه بمفتاح التعديل."],
+      ["use-cases", "تقارير ونماذج أولية وصفحات فعاليات وواجبات ومعاينات CI."],
+      ["self-hosting", "Docker والإعدادات والوكيل العكسي والإدارة والنسخ الاحتياطي."],
+      ["backend", "KV وملفات اختيارية للصفحات والوكلاء عبر Cloudflare Workers KV و R2."],
+      ["teams", "لوحة الإدارة: الفرق ومفاتيحها والوصول إلى الخلفية والدليل العام."],
+      ["mcp", "خادم MCP لكل مساحة: مفاتيح محددة وإعداد العملاء وأدوات للوكلاء."],
+      ["workers", "وركرات الفرق: انشر Cloudflare Workers عبر Spaces بلا مفتاح Cloudflare."],
+      ["agent-keys", "مفاتيح وكلاء محددة الصلاحيات وروابط دعوة لمرة واحدة وإشعارات وWebhooks."],
+    ] as const
+  ).map(([slug, summary]) => ({ slug, lang: "ar" as Lang, file: `ar/${slug}.md`, summary })),
+  {
+    slug: "glossary",
+    lang: "ar",
+    file: "ar/glossary.md",
+    summary: "المصطلحات العربية المعتمدة في الواجهة والتوثيق.",
+  },
   {
     slug: "guide",
     lang: "ar",
@@ -95,13 +117,14 @@ function docsDir(): string {
   return fileURLToPath(new URL("../docs/", import.meta.url));
 }
 
-function rewrite(html: string, publicUrl: string): string {
+function rewrite(html: string, publicUrl: string, lang: Lang = "en"): string {
+  const base = lang === "ar" ? "/ar/docs" : "/docs";
   return (
     html
       .replaceAll(DOCS_PLACEHOLDER_URL, publicUrl)
       .replace(/href="ar\/guide\.md"/g, 'href="/ar/docs/guide"')
       .replace(/href="([a-z-]+)\.md(#[^"]*)?"/g, (_m, slug: string, hash = "") =>
-        slug === "README" ? 'href="/docs"' : `href="/docs/${slug}${hash}"`,
+        slug === "README" ? `href="${base}"` : `href="${base}/${slug}${hash}"`,
       )
       // Links to repository files (examples/, .env.example) aren't served by the app: keep the text.
       .replace(/<a href="\.\.\/[^"]*">(.*?)<\/a>/g, "$1")
@@ -136,10 +159,32 @@ export function loadDocs(publicUrl: string): DocPage[] {
     const title = /^#\s+(.+)$/m.exec(src)?.[1]?.trim() ?? p.slug;
     const body = src.replace(/^#\s+.+\n/, "");
     seen = new Map();
-    const html = rewrite(md.parse(body, { async: false }) as string, publicUrl);
+    const html = a11yHtml(rewrite(md.parse(body, { async: false }) as string, publicUrl, p.lang));
     out.push({ slug: p.slug, lang: p.lang, title, summary: p.summary, html });
   }
   return out;
+}
+
+/**
+ * 0.16.0 accessibility for rendered Markdown: task-list checkboxes get a label (their text),
+ * scrollable code blocks can take keyboard focus, and the page keeps a single <h1>.
+ */
+export function a11yHtml(html: string): string {
+  const text = (s: string) =>
+    s
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 200)
+      .replace(/"/g, "&quot;");
+  return html
+    .replace(
+      /(<input\b[^>]*type="checkbox"[^>]*?)\s*\/?>([\s\S]*?)(?=<\/li>|<\/p>|<ul|<ol)/g,
+      (_m, input: string, rest: string) => `${input} aria-label="${text(rest) || "✓"}">${rest}`,
+    )
+    .replace(/<pre>/g, '<pre tabindex="0">')
+    .replace(/<h1(\s|>)/g, "<h2$1")
+    .replace(/<\/h1>/g, "</h2>");
 }
 
 /** A heading's anchor: lower case, letters/digits (any script) joined by dashes. */
@@ -151,4 +196,24 @@ export function headingId(text: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
+}
+
+/**
+ * 0.16.0: one page per slug for a reader language — the page in that language when there is
+ * one, otherwise the other language (in PAGES order).
+ */
+export function docsFor(lang: Lang, docs: DocPage[]): DocPage[] {
+  const out: DocPage[] = [];
+  const seen = new Set<string>();
+  for (const d of docs) {
+    if (seen.has(d.slug)) continue;
+    seen.add(d.slug);
+    out.push(docs.find((x) => x.slug === d.slug && x.lang === lang) ?? d);
+  }
+  return out;
+}
+
+/** The page for a slug in a language (falling back to the other language). */
+export function findDoc(lang: Lang, slug: string, docs: DocPage[]): DocPage | undefined {
+  return docs.find((d) => d.slug === slug && d.lang === lang) ?? docs.find((d) => d.slug === slug);
 }
