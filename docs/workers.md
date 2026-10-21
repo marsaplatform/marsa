@@ -32,7 +32,7 @@ Send the team key as `X-Team-Key: marsa_team_…` (or `Authorization: Bearer mar
 JSON body: `{"name": "hello", "code": "<ES module>", "vars": {"NAME": "value"}, "secrets": {"API_KEY": "…"}}`.
 
 - `code` must be one ES module (`export default { async fetch(request, env) { … } }`), up to the team's size limit.
-- `vars` are plain-text env vars (visible to the team). Omit `vars` on a redeploy to keep the current ones. Up to 32 vars, **32 KB each and 64 KB in total** (0.14.0; was 5 KB). Cloudflare limits one binding to 5 KB, so larger vars are delivered in a small generated module that a wrapper merges into `env`; the Worker sees them as normal `env.NAME` strings. That needs an object default export (`export default { fetch… }`), not a class.
+- `vars` are plain-text env vars (the team can set them; their values are no longer listed by default, see [Var values](#var-values)). Omit `vars` on a redeploy to keep the current ones. Up to 32 vars, **32 KB each and 64 KB in total** (0.14.0; was 5 KB). Cloudflare limits one binding to 5 KB, so larger vars are delivered in a small generated module that a wrapper merges into `env`; the Worker sees them as normal `env.NAME` strings. That needs an object default export (`export default { fetch… }`), not a class.
 - `note` (optional, 200 characters) is stored with the version; with a raw-script upload send it as the `X-Marsa-Note` header.
 - `secrets` are write-only Worker secrets (only their names are shown). `null` removes one.
 - Names: 1-30 characters, `a-z`, `0-9` and single hyphens, not at the ends.
@@ -66,6 +66,20 @@ curl -s -X DELETE "https://marsa.example.com/api/teams/sanad/workers/hello" -H "
 ```
 
 Errors: `401 UNAUTHORIZED` (no/unknown key), `404` (key of another team, unknown Worker), `403 WORKERS_NOT_ALLOWED` (not enabled for the team), `400 INVALID_NAME` / `NOT_A_MODULE` / `INVALID_REQUEST`, `413 SCRIPT_TOO_LARGE`, `409 WORKER_QUOTA` / `NAME_TAKEN` / `HOST_TAKEN` / `EXISTS`, `429 RATE_LIMITED` (60 deploys per team per hour), `502 CLOUDFLARE_ERROR` (Cloudflare's message, scrubbed), `503 WORKERS_NOT_CONFIGURED`.
+
+## Var values
+
+Since 0.16.0 the lists (`GET /api/teams/<team>/workers`, `GET …/workers/<name>`, admin `GET /api/admin/workers`
+and the MCP tool `list_workers`) return `varNames` for every Worker. Plain var values are leaving them:
+
+- **Until 2026-10-28 12:00 UTC** (`VAR_VALUES_SUNSET`), `vars` still has the values, each Worker is marked
+  `varValuesDeprecated: true`, and the response carries `deprecations: [{field:"vars", sunset, message, docs}]`
+  plus the headers `Deprecation`, `Sunset` and `Link: <…/docs/workers#var-values>; rel="deprecation"`.
+- **After that**, `vars` is left out. Send `?includeValues=1` (agent keys need `workers:deploy`; the team key
+  and the admin token may) or call `list_workers` with `{"includeValues": true}` to get the values.
+- Versions (`…/versions/<n>`) and the deploy answers are unchanged. Secrets were never returned.
+
+Agents: read `varNames`, and keep the values in your own config. Every team with Workers got a bell notice.
 
 ## Versions, one-click redeploy and rollback (0.14.0)
 
@@ -166,5 +180,6 @@ All with `Authorization: Bearer $ADMIN_TOKEN`:
 | `WORKERS_DEFAULT_MAX` | `3` | Workers per team unless the admin sets a quota |
 | `WORKER_MAX_KB` | `1024` | Script size per team unless the admin sets a quota |
 | `WORKERS_COMPAT_DATE` | `2025-09-01` | Cloudflare compatibility date for deployed scripts |
+| `VAR_VALUES_SUNSET` | `2026-10-28T12:00:00Z` | End of the period in which lists still return plain var values (see [Var values](#var-values)) |
 
 Not included yet: live log tailing (use the Cloudflare dashboard), bindings other than plain vars and secrets (KV, D1, R2, Durable Objects), and multi-file bundles (bundle first, e.g. with `esbuild --bundle --format=esm`).

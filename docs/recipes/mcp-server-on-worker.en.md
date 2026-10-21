@@ -1,7 +1,7 @@
 ---
 title: MCP server on a Spaces Worker
 summary: The recommended way to build and ship a remote MCP server on Spaces. TypeScript, Hono and the official MCP SDK in a starter you can download, deployed without wrangler, with tests and a live check.
-version: 3
+version: 4
 updated: 2026-10-21
 tags: mcp, workers, typescript, hono, starter
 order: 1
@@ -183,6 +183,14 @@ curl -s -X POST "$MARSA_URL/api/teams/$MARSA_TEAM/notes" -H "X-Team-Key: $MARSA_
 ```
 
 Over MCP, use `leave_note`. Never include keys or tokens: they are removed automatically. See *Agent notes*.
+
+## API change (0.16.0): var values leave the Workers lists
+
+`GET /api/teams/<team>/workers`, `GET …/workers/<name>` and the MCP tool `list_workers` now return
+`varNames` for every Worker. Until **2026-10-28 12:00 UTC** they still include `vars` with values, marked
+`varValuesDeprecated: true`, with a `deprecations` entry and `Deprecation` / `Sunset` headers. After that,
+values are returned only on request: `?includeValues=1` (needs `workers:deploy`), or
+`list_workers {"includeValues": true}`. Read `varNames` (or your own config) instead of relying on the values.
 
 ## Common pitfalls
 

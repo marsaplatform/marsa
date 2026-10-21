@@ -78,7 +78,7 @@ const tag = (xml: string, name: string): string | undefined => {
   return m?.[1] === undefined ? undefined : unxml(m[1]);
 };
 
-interface ListedObject {
+export interface ListedObject {
   key: string;
   size: number;
   lastModified: string;
@@ -359,6 +359,33 @@ export class CloudflareBackend implements SiteBackend {
     // S3 answers 204 for deletes, including already-missing objects.
     if (!res.ok && res.status !== 404) await this.r2Fail(res, "delete");
     await res.body?.cancel().catch(() => {});
+  }
+
+  // ---- raw objects for platform backups (0.16.0), under a "_marsa-…/" prefix ----------
+  /** Store one object (whole body; backups are a few MB). */
+  async blobPut(key: string, bytes: Uint8Array): Promise<void> {
+    const res = await this.r2(this.objectPath(key), {
+      method: "PUT",
+      body: bytes as unknown as BodyInit,
+      headers: { "content-type": "application/octet-stream" },
+    });
+    if (!res.ok) await this.r2Fail(res, "upload");
+    await res.body?.cancel().catch(() => {});
+  }
+
+  async blobGet(key: string): Promise<Uint8Array | null> {
+    const res = await this.r2(this.objectPath(key));
+    if (res.status === 404) return null;
+    if (!res.ok) await this.r2Fail(res, "download");
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  blobList(prefix: string, limit = 5000): Promise<ListedObject[]> {
+    return this.listObjects(prefix, limit);
+  }
+
+  blobDelete(key: string): Promise<void> {
+    return this.deleteObject(key);
   }
 
   async purgeSite(siteId: string): Promise<void> {

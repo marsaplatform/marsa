@@ -70,6 +70,23 @@ export function isTeamKey(s: string): boolean {
 
 const NAME_MAX = 80;
 
+/** A team in the 7-day trash (0.16.0): out of every lookup, restorable until purgeAfter. */
+export interface TrashedTeam {
+  team: Team;
+  deletedAt: string;
+  /** Hard delete (Workers, keys, members, data) happens after this time. */
+  purgeAfter: string;
+  deletedBy: string;
+  /** Also delete the team's sites at purge time. */
+  deleteSites: boolean;
+  /** Worker ids that the soft delete turned off (restore turns only these back on). */
+  disabledWorkers: string[];
+  /** File name of the export taken before the delete, under <dataDir>/trash/. */
+  exportFile: string | null;
+}
+
+export const TRASH_DAYS = 7;
+
 /** Trimmed team name, or null if it's empty/too long/has control characters. */
 export function cleanTeamName(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
@@ -89,6 +106,7 @@ export class TeamStore {
   private readonly tmpDir: string;
   private teams = new Map<string, Team>();
   private byKey = new Map<string, string>();
+  private trash = new Map<string, TrashedTeam>();
   private queue: Promise<void> = Promise.resolve();
   private loading: Promise<void> | null = null;
 
@@ -117,9 +135,11 @@ export class TeamStore {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
       throw err;
     }
-    const parsed = JSON.parse(raw) as { teams?: Team[] };
+    const parsed = JSON.parse(raw) as { teams?: Team[]; trash?: TrashedTeam[] };
     this.teams.clear();
     this.byKey.clear();
+    this.trash.clear();
+    for (const tr of parsed.trash ?? []) if (tr?.team?.id) this.trash.set(tr.team.id, tr);
     for (const t of parsed.teams ?? []) {
       if (typeof t.directory !== "boolean") t.directory = true;
       if (typeof t.permanent !== "boolean") t.permanent = !!t.backend;
@@ -142,7 +162,11 @@ export class TeamStore {
   }
 
   private persist(): Promise<void> {
-    const body = JSON.stringify({ version: 1, teams: this.list() }, null, 2);
+    const body = JSON.stringify(
+      { version: 1, teams: this.list(), trash: this.listTrash() },
+      null,
+      2,
+    );
     const run = async () => {
       await mkdir(this.tmpDir, { recursive: true });
       const tmp = join(this.tmpDir, `teams-${randomBytes(6).toString("hex")}.json`);
@@ -219,10 +243,56 @@ export class TeamStore {
 
   async delete(id: string): Promise<boolean> {
     const t = this.teams.get(id);
-    if (!t) return false;
+    const inTrash = this.trash.delete(id);
+    if (!t) {
+      if (inTrash) await this.persist();
+      return inTrash;
+    }
     this.teams.delete(id);
     this.byKey.delete(t.keyHash);
     await this.persist();
     return true;
+  }
+
+  // ---- trash (0.16.0) ------------------------------------------------------------------
+  /** Teams in the trash, soonest purge first. */
+  listTrash(): TrashedTeam[] {
+    return [...this.trash.values()].sort((a, b) => a.purgeAfter.localeCompare(b.purgeAfter));
+  }
+
+  getTrashed(id: string | undefined | null): TrashedTeam | null {
+    return id ? (this.trash.get(id) ?? null) : null;
+  }
+
+  /** Slugs held by live and trashed teams (a trashed team keeps its Worker hostnames). */
+  slugTaken(slug: string, exceptId: string): boolean {
+    for (const t of this.teams.values()) if (t.id !== exceptId && t.slug === slug) return true;
+    for (const tr of this.trash.values())
+      if (tr.team.id !== exceptId && tr.team.slug === slug) return true;
+    return false;
+  }
+
+  /** Move a team to the trash: its key and sessions stop working at once. */
+  async moveToTrash(id: string, info: Omit<TrashedTeam, "team">): Promise<TrashedTeam | null> {
+    const t = this.teams.get(id);
+    if (!t) return null;
+    this.teams.delete(id);
+    this.byKey.delete(t.keyHash);
+    const entry: TrashedTeam = { team: t, ...info };
+    this.trash.set(id, entry);
+    await this.persist();
+    return entry;
+  }
+
+  /** Bring a trashed team back (same id, key, slug and settings). */
+  async restore(id: string, now: number): Promise<Team | null> {
+    const tr = this.trash.get(id);
+    if (!tr) return null;
+    const team = { ...tr.team, updatedAt: new Date(now).toISOString() };
+    this.trash.delete(id);
+    this.teams.set(id, team);
+    this.byKey.set(team.keyHash, id);
+    await this.persist();
+    return team;
   }
 }

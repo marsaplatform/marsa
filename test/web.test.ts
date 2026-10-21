@@ -537,7 +537,33 @@ describe("admin console", () => {
     expect(await (await b.get(rot.headers.get("location") ?? "")).text()).toMatch(/marsa_team_/);
     expect((await s.signIn(t.key)).res.status).toBe(401);
 
-    await b.post(`/admin/teams/${t.team.id}/delete`, { _csrf: csrf, sites: "delete" });
+    // 0.16.0: a wrong typed name deletes nothing; the right one moves the team to the trash.
+    const adminH = { authorization: `Bearer ${ADMIN}` };
+    const trash = async () =>
+      (
+        (await (await s.api("GET", "/api/admin/trash", undefined, adminH)).json()) as {
+          teams: { team: { id: string } }[];
+        }
+      ).teams.map((x) => x.team.id);
+    await b.post(`/admin/teams/${t.team.id}/delete`, {
+      _csrf: csrf,
+      sites: "delete",
+      confirm: "nope",
+    });
+    expect(await trash()).toEqual([]);
+    const del = await b.post(`/admin/teams/${t.team.id}/delete`, {
+      _csrf: csrf,
+      sites: "delete",
+      confirm: "a",
+    });
+    expect(del.headers.get("location")).toMatch(/\/admin\/settings\?f=[^#]+#trash$/);
+    expect(await trash()).toEqual([t.team.id]);
+    expect(await s.store.get(tid)).not.toBeNull();
+    const settings = await (await b.get("/admin/settings")).text();
+    expect(settings).toContain(`/admin/trash/${t.team.id}/restore`);
+    // Delete now (typed name again) removes the team and, as asked, its spaces.
+    await b.post(`/admin/trash/${t.team.id}/purge`, { _csrf: csrf, confirm: "A" });
+    expect(await trash()).toEqual([]);
     expect(await s.store.get(tid)).toBeNull();
   });
 

@@ -62,6 +62,13 @@ export function inviteOnboarding(config: Config, team: Team, inv: AgentInvite, t
       starterTree: `${base}/api/recipes/mcp-server-on-worker/starter`,
       recipe: `${base}/api/recipes/mcp-server-on-worker?format=md`,
       rules: TOP_RULES,
+      changes: [
+        {
+          since: "0.16.0",
+          what: `Plain var values leave GET …/workers, GET …/workers/<name> and MCP list_workers on ${new Date(config.workers.varValuesSunset).toISOString()}. Read varNames; ask with ?includeValues=1 (needs workers:deploy) or list_workers {"includeValues": true} when you need values.`,
+          docs: `${base}/docs/workers#var-values`,
+        },
+      ],
       notes: {
         url: `${base}/api/teams/${ref}/notes`,
         how: 'POST {"severity":"info|bug|blocker|suggestion","stage":"deploy|build|runtime|recipe|other","category","message","target":{"type":"space|worker|mcp|recipe","id"},"version","agent"} with your key; MCP: leave_note. Read replies with GET.',
@@ -158,6 +165,10 @@ You were invited to work with the team **${o.team.name}** (slug \`${o.team.slug 
 Top 10 rules:
 
 ${o.startHere.rules.map((r, i) => `${i + 1}. ${r}`).join("\n")}
+
+API changes:
+
+${o.startHere.changes.map((ch) => `- **${ch.since}:** ${ch.what} (${ch.docs})`).join("\n")}
 
 ## 1. Claim your key (once)
 

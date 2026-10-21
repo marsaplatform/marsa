@@ -4,6 +4,7 @@ import { AgentKeyError, type AgentKeyStore } from "./agent-keys.js";
 import { NoteError, type NoteStore } from "./agent-notes.js";
 import { probeBackend } from "./backend/health.js";
 import type { SiteBackend } from "./backend/types.js";
+import type { BackupService } from "./backup.js";
 import { APP_VERSION } from "./brand.js";
 import { clientIp } from "./client-ip.js";
 import type { Config } from "./config.js";
@@ -40,6 +41,7 @@ import {
 import { type RepoChecker, RepoError, type RepoLink, readRepo } from "./repo-status.js";
 import { fingerprint, type Session, type Sessions, sameOrigin } from "./session.js";
 import type { SiteMeta, SiteStore } from "./store.js";
+import { type TeamLifecycle, TeamLifecycleError } from "./team-lifecycle.js";
 import { cleanTeamName, type Team, type TeamPatch, type TeamStore } from "./teams.js";
 import { hashToken, newEditToken, safeEqual } from "./tokens.js";
 import {
@@ -85,6 +87,7 @@ import {
   workerDetailHtml,
 } from "./ui-detail.js";
 import { type InsightRow, IX, mcpServersHtml } from "./ui-insight.js";
+import { backupsSection, lifecycleText, signOutAllSection, trashSection } from "./ui-lifecycle.js";
 import { NX, notesHtml } from "./ui-notes.js";
 import { intervalForm, OX, permsSection } from "./ui-ops.js";
 import type { UserKeyOps } from "./user-key-routes.js";
@@ -175,6 +178,10 @@ export interface WebDeps {
   repoChecker?: RepoChecker;
   /** 0.15.2: env view, health, analytics/logs, permission checklists. */
   ops?: WorkerOps;
+  /** 0.16.0: team export, trash and restore. */
+  lifecycle?: TeamLifecycle;
+  /** 0.16.0: daily encrypted backups. */
+  backups?: BackupService | null;
 }
 
 /** "NAME=value" lines into an object (blank lines and # comments skipped). */
@@ -803,6 +810,16 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           keyPrefix: team.keyPrefix,
           slug: team.slug ?? null,
           workers: workersSummary(team),
+          extra:
+            ts.role === "owner"
+              ? signOutAllSection(
+                  lang,
+                  href("/team/settings/signout-everyone"),
+                  sessions.csrfFor(s),
+                  "team",
+                  sessions.endedAllAt(`team:${team.id}`),
+                )
+              : "",
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
         }),
@@ -1295,6 +1312,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       },
       "viewer",
     );
+
+    teamPost("/team/settings/signout-everyone", async (c, { s, team, actor }) => {
+      sessions.endAll(`team:${team.id}`);
+      sessions.end(c, s);
+      await d.audit({ teamId: team.id, actor, action: "sessions-end-all" });
+      return c.redirect(href("/login?out=1"), 303);
+    });
 
     // ---- team Workers (0.12.0) -------------------------------------------------------
     const workersBack = href("/team/workers");
@@ -2323,27 +2347,128 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       return done(c, s, href("/admin"), keyFlash(t.admin.rotated, r.key));
     });
 
+    // ---- 0.16.0: team export, soft delete, trash, backups, sign out everywhere --------------
+    const lc = lifecycleText(lang);
+    const settingsHref = href("/admin/settings");
+    const day = (iso: string) =>
+      new Intl.DateTimeFormat(lang === "ar" ? "ar-EG" : "en-GB", { dateStyle: "medium" }).format(
+        new Date(iso),
+      );
+    const lifecycleErr = (c: Context, s: Session, back: string, e: unknown) => {
+      if (e instanceof TeamLifecycleError) {
+        const text =
+          e.code === "CONFIRM_MISMATCH" ? lc.mismatch : e.status === 404 ? t.notFound : e.message;
+        return done(c, s, back, { kind: "err", text });
+      }
+      if (e instanceof WorkerError) return done(c, s, back, { kind: "err", text: e.message });
+      throw e;
+    };
+    const zipResponse = (c: Context, ex: { file: string; zip: Uint8Array | Buffer }) => {
+      c.header("Content-Type", "application/zip");
+      c.header("Content-Disposition", `attachment; filename="${ex.file}"`);
+      c.header("Cache-Control", "no-store");
+      return c.body(new Uint8Array(ex.zip));
+    };
+
     adminPost("/admin/teams/:id/delete", async (c, { s, form }) => {
       const id = c.req.param("id") ?? "";
-      if (!teams.get(id)) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
+      const back = href(`/admin/teams/${id}?tab=settings`);
+      if (!d.lifecycle) return done(c, s, back, { kind: "err", text: t.notFound });
       try {
-        await d.workers.teardownTeam(id, ADMIN_ACTOR);
+        const tr = await d.lifecycle.softDelete(id, ADMIN_ACTOR, {
+          deleteSites: field(form, "sites") === "delete",
+          confirm: field(form, "confirm"),
+        });
+        return done(c, s, `${settingsHref}#trash`, {
+          kind: "ok",
+          text: lc.moved(day(tr.purgeAfter)),
+        });
       } catch (e) {
-        if (e instanceof WorkerError)
-          return done(c, s, href("/admin"), { kind: "err", text: e.message });
-        throw e;
+        return lifecycleErr(c, s, back, e);
       }
-      if (field(form, "sites") === "delete") {
-        for (const m of await store.list()) if (m.teamId === id) await d.deleteSite(m.id);
+    });
+
+    app.get(`${prefix}/admin/teams/:id/export`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      const team = teams.get(c.req.param("id") ?? "");
+      if (!team || !d.lifecycle) return c.notFound();
+      const ex = await d.lifecycle.exportTeam(team);
+      await d.audit({ teamId: team.id, actor: ADMIN_ACTOR, action: "team-export" });
+      return zipResponse(c, ex);
+    });
+
+    app.get(`${prefix}/admin/trash/:id/export`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      const ex = await d.lifecycle?.trashedExport(c.req.param("id") ?? "");
+      if (!ex) return c.notFound();
+      return zipResponse(c, ex);
+    });
+
+    adminPost("/admin/trash/:id/restore", async (c, { s }) => {
+      const id = c.req.param("id") ?? "";
+      if (!d.lifecycle) return done(c, s, settingsHref, { kind: "err", text: t.notFound });
+      try {
+        await d.lifecycle.restore(id, ADMIN_ACTOR);
+        return done(c, s, href(`/admin/teams/${id}`), { kind: "ok", text: lc.restored });
+      } catch (e) {
+        return lifecycleErr(c, s, `${settingsHref}#trash`, e);
       }
-      await teams.delete(id);
-      await members.purgeTeam(id);
-      await d.agentKeys.purgeTeam(id);
-      await d.notify.purgeTeam(id);
-      await d.userKeys.purgeTeam(id);
-      await d.recipes.purgeTeam(id);
-      d.invalidateDirectory();
-      return done(c, s, href("/admin"), { kind: "ok", text: t.admin.deleted });
+    });
+
+    adminPost("/admin/trash/:id/purge", async (c, { s, form }) => {
+      const id = c.req.param("id") ?? "";
+      if (!d.lifecycle) return done(c, s, settingsHref, { kind: "err", text: t.notFound });
+      try {
+        await d.lifecycle.purge(id, ADMIN_ACTOR, field(form, "confirm"));
+        return done(c, s, `${settingsHref}#trash`, { kind: "ok", text: lc.purged });
+      } catch (e) {
+        return lifecycleErr(c, s, `${settingsHref}#trash`, e);
+      }
+    });
+
+    adminPost("/admin/backups/run", async (c, { s }) => {
+      const back = `${settingsHref}#backups`;
+      if (!d.backups?.enabled) return done(c, s, back, { kind: "err", text: lc.backupsOff });
+      const r = await d.backups.run("manual");
+      await d.audit({
+        teamId: PLATFORM_AUDIT,
+        actor: ADMIN_ACTOR,
+        action: r.ok ? "backup-run" : "backup-fail",
+        detail: r.ok ? r.key : r.error,
+      });
+      return done(c, s, back, {
+        kind: r.ok ? "ok" : "err",
+        text: r.ok
+          ? lc.backupOk(`${Math.round(((r.bytes ?? 0) / 1024 / 1024) * 10) / 10} MB`)
+          : lc.backupFail(r.error ?? "?"),
+      });
+    });
+
+    adminPost("/admin/backups/test-restore", async (c, { s }) => {
+      const back = `${settingsHref}#backups`;
+      if (!d.backups?.enabled) return done(c, s, back, { kind: "err", text: lc.backupsOff });
+      const r = await d.backups.testRestore();
+      await d.audit({
+        teamId: PLATFORM_AUDIT,
+        actor: ADMIN_ACTOR,
+        action: "backup-restore-test",
+        detail: r.ok ? `ok, ${r.files ?? 0} files` : `failed: ${r.error ?? "?"}`,
+      });
+      return done(c, s, back, {
+        kind: r.ok ? "ok" : "err",
+        text: r.ok
+          ? lc.restoreOk((r.files ?? 0).toLocaleString(lang === "ar" ? "ar-EG" : "en-GB"))
+          : lc.restoreFail(r.error ?? "?"),
+      });
+    });
+
+    adminPost("/admin/sessions/end-all", async (c, { s }) => {
+      sessions.endAll("admin");
+      sessions.end(c, s);
+      await d.audit({ teamId: PLATFORM_AUDIT, actor: ADMIN_ACTOR, action: "sessions-end-all" });
+      return c.redirect(href("/admin/login?out=1"), 303);
     });
 
     // ---- admin: team, Worker and space detail pages (0.15.0) ---------------------------
@@ -2995,6 +3120,33 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
                 ),
               )
             : "",
+          lifecycle: [
+            d.backups
+              ? backupsSection(lang, await d.backups.status(), sessions.csrfFor(s), settingsHref)
+              : "",
+            trashSection(
+              lang,
+              teams.listTrash().map((tr) => ({
+                id: tr.team.id,
+                name: tr.team.name,
+                deletedAt: tr.deletedAt,
+                purgeAfter: tr.purgeAfter,
+                deletedBy: tr.deletedBy,
+                deleteSites: tr.deleteSites,
+                workersTurnedOff: tr.disabledWorkers.length,
+                hasExport: !!tr.exportFile,
+              })),
+              sessions.csrfFor(s),
+              settingsHref,
+            ),
+            signOutAllSection(
+              lang,
+              href("/admin/sessions/end-all"),
+              sessions.csrfFor(s),
+              "admin",
+              sessions.endedAllAt("admin"),
+            ),
+          ].join(""),
           csrf: sessions.csrfFor(s),
           flash: takeFlash(c, s),
         }),

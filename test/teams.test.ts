@@ -127,8 +127,12 @@ describe("admin teams API", () => {
     };
     expect(rot.key).not.toBe(key);
 
-    expect((await admin("DELETE", `/teams/${team.id}`)).status).toBe(200);
-    expect((await admin("DELETE", `/teams/${team.id}`)).status).toBe(404);
+    // 0.16.0: the typed name is required, and the team goes to the trash first.
+    expect((await admin("DELETE", `/teams/${team.id}`)).status).toBe(400);
+    const del = await admin("DELETE", `/teams/${team.id}?confirm=${team.id}`);
+    expect(del.status).toBe(200);
+    expect(((await del.json()) as { purged: boolean }).purged).toBe(false);
+    expect((await admin("DELETE", `/teams/${team.id}?confirm=${team.id}`)).status).toBe(404);
   });
 
   it("persists teams across restarts", async () => {
@@ -202,13 +206,16 @@ describe("team uploads and backend access", () => {
     expect((await upload({ "x-team-key": t.key })).status).toBe(401);
     expect((await upload({ "x-team-key": fresh })).status).toBe(201);
 
-    await admin("DELETE", `/teams/${t.team.id}`);
+    await admin("DELETE", `/teams/${t.team.id}?confirm=${t.team.id}`);
     expect((await kv(s1.id, s1.editToken)).status).toBe(403);
     expect(await store.get(s1.id)).not.toBeNull();
 
     const t2 = await createTeam("Wipe", true);
     const s2 = await site({ "x-team-key": t2.key });
-    const del = await admin("DELETE", `/teams/${t2.team.id}?sites=delete`);
+    const del = await admin(
+      "DELETE",
+      `/teams/${t2.team.id}?sites=delete&purge=now&confirm=${t2.team.id}`,
+    );
     expect(((await del.json()) as { removedSites: number }).removedSites).toBe(1);
     expect(await store.get(s2.id)).toBeNull();
   });
@@ -241,7 +248,7 @@ describe("public directory", () => {
     expect(((await (await app.request("/api/directory")).json()) as Dir).teams).toHaveLength(0);
     await admin("PATCH", `/teams/${t.team.id}`, { directory: true });
     expect(((await (await app.request("/api/directory")).json()) as Dir).teams).toHaveLength(1);
-    await admin("DELETE", `/teams/${t.team.id}`);
+    await admin("DELETE", `/teams/${t.team.id}?confirm=${t.team.id}`);
     expect(((await (await app.request("/api/directory")).json()) as Dir).teams).toHaveLength(0);
   });
 

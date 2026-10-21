@@ -4,15 +4,19 @@ import { AlertTicker } from "./alerts.js";
 import { createApp } from "./app.js";
 import { CloudflareBackend } from "./backend/cloudflare.js";
 import { probeBackend } from "./backend/health.js";
+import type { BackupService } from "./backup.js";
 import { APP_NAME } from "./brand.js";
 import { loadConfig } from "./config.js";
-import type { NotificationCenter } from "./notify.js";
+import { type NotificationCenter, PLATFORM } from "./notify.js";
 import { SiteStore } from "./store.js";
 import { sweepExpired } from "./sweep.js";
+import type { TeamLifecycle } from "./team-lifecycle.js";
 import { TeamStore } from "./teams.js";
 import type { UserKeyStore } from "./user-keys.js";
 import { VisitCounter } from "./visits.js";
 import type { WorkerOps } from "./worker-ops.js";
+import type { WorkerService } from "./workers.js";
+import { ADMIN_ACTOR } from "./workers-routes.js";
 
 let config: ReturnType<typeof loadConfig>;
 try {
@@ -34,6 +38,8 @@ let svc: {
   notify: NotificationCenter;
   userKeys?: UserKeyStore;
   ops?: WorkerOps;
+  lifecycle?: TeamLifecycle;
+  backups?: BackupService;
 } | null = null;
 const app = createApp({
   config,
@@ -42,7 +48,7 @@ const app = createApp({
   teams,
   visits,
   expose: (s) => {
-    svc = s;
+    svc = { ...(svc ?? {}), ...s };
   },
 });
 // Alerts: expired agent keys and the storage check (every 10 minutes, and once at start).
@@ -71,7 +77,40 @@ const sweep = async () => {
   } catch (err) {
     console.error("[sweep] failed", err);
   }
+  // 0.16.0: teams whose 7-day grace period is over are purged.
+  try {
+    const purged =
+      (await (svc as { lifecycle?: TeamLifecycle } | null)?.lifecycle?.purgeDue(ADMIN_ACTOR)) ?? [];
+    if (purged.length) console.log(`[trash] purged ${purged.length} team(s)`);
+  } catch (err) {
+    console.error("[trash] failed", err);
+  }
 };
+// 0.16.0: daily encrypted backup (checked every 10 minutes; runs when due).
+const backupTick = () => {
+  const b = (svc as { backups?: BackupService } | null)?.backups;
+  void b?.maybeRun().catch((e) => console.error("[backup] failed", e?.message));
+};
+const backupTimer = setInterval(backupTick, 10 * 60_000);
+backupTimer.unref();
+setTimeout(backupTick, 60_000).unref();
+// 0.16.0: tell teams (bell only, once) that var values leave the Workers lists.
+{
+  const s = svc as { notify?: NotificationCenter; workers?: WorkerService } | null;
+  const sunset = config.workers.varValuesSunset;
+  if (s?.notify && s.workers && Date.now() < sunset) {
+    const ids = [
+      PLATFORM,
+      ...teams
+        .list()
+        .filter((t) => s.workers?.enabledFor(t))
+        .map((t) => t.id),
+    ];
+    void s.notify
+      .announce(ids, "api-deprecation", new Date(sunset).toISOString().slice(0, 10))
+      .catch((e) => console.error("[notify] announce failed", e?.message));
+  }
+}
 await sweep();
 const timer = setInterval(sweep, config.sweepIntervalSeconds * 1000);
 timer.unref();

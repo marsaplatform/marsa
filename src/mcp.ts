@@ -22,7 +22,7 @@ import { UserKeyError } from "./user-keys.js";
 import { ALLOWED_COMPAT_FLAGS } from "./worker-config.js";
 import type { WorkerOps } from "./worker-ops.js";
 import { versionMeta } from "./worker-versions.js";
-import { WorkerError, type WorkerService, workerView } from "./workers.js";
+import { listedWorker, varValuesNotice, WorkerError, type WorkerService } from "./workers.js";
 
 /**
  * One MCP server per space: POST /mcp/s/<siteId> speaks MCP over Streamable
@@ -481,18 +481,31 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
       name: "list_workers",
       title: "List team Workers",
       description:
-        "The Cloudflare Workers this space's team deployed through Marsa Spaces (name, URL, status, env var names and values, secret names), and the team's quota. No Cloudflare key is needed: Spaces deploys on the team's behalf.",
-      inputSchema: obj({}),
+        "The Cloudflare Workers this space's team deployed through Marsa Spaces (name, URL, status, env var names, secret names), and the team's quota. No Cloudflare key is needed: Spaces deploys on the team's behalf. Plain var values are deprecated in this list (see deprecations); pass includeValues: true when you really need them.",
+      inputSchema: obj({
+        includeValues: {
+          type: "boolean",
+          description:
+            "Also return plain var values (they leave the default list after the deprecation period).",
+        },
+      }),
       annotations: { readOnlyHint: true },
       needsWorkers: true,
-      run: async (_a, { meta }) => {
+      run: async (a, { meta }) => {
         const team = teams.get(meta.teamId);
         const w = d.workers as WorkerService;
         if (!team) throw new ToolError("this space has no team");
+        const policy = {
+          includeValues: a.includeValues === true,
+          now: now(),
+          sunset: config.workers.varValuesSunset,
+        };
+        const notice = varValuesNotice(policy, config.publicUrl);
         return ok({
           slug: team.slug,
           quota: w.quotaOf(team),
-          workers: w.list(team.id).map(workerView),
+          workers: w.list(team.id).map((r) => listedWorker(r, policy)),
+          ...(notice ? { deprecations: [notice] } : {}),
         });
       },
     },

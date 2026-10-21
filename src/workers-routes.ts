@@ -9,7 +9,11 @@ import type { Team, TeamStore } from "./teams.js";
 import { ALLOWED_COMPAT_FLAGS } from "./worker-config.js";
 import { versionMeta } from "./worker-versions.js";
 import {
+  listedWorker,
   PLATFORM_AUDIT,
+  type VarValuesPolicy,
+  varValuesHeaders,
+  varValuesNotice,
   WorkerError,
   type WorkerRec,
   type WorkerService,
@@ -48,6 +52,21 @@ export function teamWorkersInfo(svc: WorkerService, team: Team) {
     quota: svc.quotaOf(team),
     allowedCompatibilityFlags: [...ALLOWED_COMPAT_FLAGS],
     workers: svc.list(team.id).map(workerView),
+  };
+}
+
+/** 0.16.0: GET /api/teams/:team/workers, where var values follow the deprecation policy. */
+export function teamWorkersList(
+  svc: WorkerService,
+  team: Team,
+  policy: VarValuesPolicy,
+  publicUrl: string,
+) {
+  const notice = varValuesNotice(policy, publicUrl);
+  return {
+    ...teamWorkersInfo(svc, team),
+    workers: svc.list(team.id).map((r) => listedWorker(r, policy)),
+    ...(notice ? { deprecations: [notice] } : {}),
   };
 }
 
@@ -157,6 +176,17 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
     if (!can(cred, scope)) return scopeError(c, scope);
     return cred;
   };
+  /** 0.16.0: may this caller see var values in lists (?includeValues=1 + workers:deploy)? */
+  const valuesPolicy = (c: Context, cred: TeamCred | null): VarValuesPolicy => ({
+    includeValues:
+      /^(1|true|yes)$/i.test(c.req.query("includeValues") ?? "") &&
+      (cred === null || can(cred, "workers:deploy")),
+    now: d.now(),
+    sunset: d.config.workers.varValuesSunset,
+  });
+  const withDeprecation = (c: Context, p: VarValuesPolicy) => {
+    for (const [k, v] of Object.entries(varValuesHeaders(p, d.config.publicUrl))) c.header(k, v);
+  };
   const MAX_BODY = 12 * 1024 * 1024;
   const limit = bodyLimit({
     maxSize: MAX_BODY,
@@ -199,7 +229,9 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
   app.get("/api/teams/:team/workers", async (c) => {
     const cr = await teamOf(c, "workers:read");
     if (cr instanceof Response) return cr;
-    return c.json(teamWorkersInfo(svc, cr.team));
+    const p = valuesPolicy(c, cr);
+    withDeprecation(c, p);
+    return c.json(teamWorkersList(svc, cr.team, p, d.config.publicUrl));
   });
   app.post("/api/teams/:team/workers", limit, async (c) => {
     const cr = await teamOf(c, "workers:deploy");
@@ -247,7 +279,14 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
     const rec = svc.find(cr.team.id, c.req.param("name"));
     if (!rec) return err(c, 404, "NOT_FOUND", "no such Worker");
     const live = c.req.query("probe") === "0" ? null : await svc.probe(rec);
-    return c.json({ worker: workerView(rec), ...(live ? { live } : {}) });
+    const p = valuesPolicy(c, cr);
+    withDeprecation(c, p);
+    const notice = varValuesNotice(p, d.config.publicUrl);
+    return c.json({
+      worker: listedWorker(rec, p),
+      ...(live ? { live } : {}),
+      ...(notice ? { deprecations: [notice] } : {}),
+    });
   });
   app.delete("/api/teams/:team/workers/:name", async (c) => {
     const cr = await teamOf(c, "workers:deploy");
@@ -393,10 +432,6 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
     ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
   const adminRec = (c: Context): WorkerRec | Response =>
     svc.get(c.req.param("id") ?? "") ?? err(c, 404, "NOT_FOUND", "worker not found");
-  const adminView = (r: WorkerRec) => ({
-    ...workerView(r),
-    team: { id: r.teamId, name: teams.get(r.teamId)?.name ?? null },
-  });
 
   app.get("/api/admin/workers/settings", (c) => c.json({ settings: svc.settingsView() }));
   app.put("/api/admin/workers/settings", async (c) => {
@@ -421,9 +456,19 @@ export function mountWorkerRoutes(app: Hono, d: WorkerRouteDeps): void {
       return workerErr(c, e);
     }
   });
-  app.get("/api/admin/workers", (c) =>
-    c.json({ settings: svc.settingsView(), workers: svc.list().map(adminView) }),
-  );
+  app.get("/api/admin/workers", (c) => {
+    const p = valuesPolicy(c, null);
+    withDeprecation(c, p);
+    const notice = varValuesNotice(p, d.config.publicUrl);
+    return c.json({
+      settings: svc.settingsView(),
+      workers: svc.list().map((r) => ({
+        ...listedWorker(r, p),
+        team: { id: r.teamId, name: teams.get(r.teamId)?.name ?? null },
+      })),
+      ...(notice ? { deprecations: [notice] } : {}),
+    });
+  });
   for (const [path, off] of [
     ["disable", true],
     ["enable", false],

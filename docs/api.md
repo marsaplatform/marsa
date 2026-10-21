@@ -97,7 +97,16 @@ A wrong token and a missing site both return `404` on purpose, so ids can't be p
 | `POST /api/admin/teams` | Create a team `{"name", "backend"?, "directory"?}`; the response has its key, once |
 | `PATCH /api/admin/teams/:id` | Change `name`, `backend` or `directory` |
 | `POST /api/admin/teams/:id/rotate` | New team key; the old one stops working |
-| `DELETE /api/admin/teams/:id` | Delete a team (`?sites=delete` also deletes its sites) |
+| `GET /api/admin/teams/:id/export` | The team as a zip (members without passwords, activity, spaces and files, data, Workers with code and versions, agent keys without secrets, recipes, notes, notifications) |
+| `DELETE /api/admin/teams/:id?confirm=<name or id>` | Move a team to the trash for 7 days (an export is saved, Workers are turned off, keys stop working). `?sites=delete` also deletes its sites when it is purged; `?purge=now` deletes it for good at once |
+| `GET /api/admin/trash` | Deleted teams waiting out the grace period |
+| `GET /api/admin/trash/:id/export` | The export saved when the team was deleted |
+| `POST /api/admin/trash/:id/restore` | Bring the team back (keys, members, Workers) |
+| `DELETE /api/admin/trash/:id?confirm=<name or id>` | Delete it for good now |
+| `GET /api/admin/backups` | Backup status: last run, last good run, kept backups, next run, last restore test |
+| `POST /api/admin/backups/run` | Take a backup now (encrypted, uploaded, read back and checked) |
+| `POST /api/admin/backups/test-restore` | Restore the newest backup into a scratch folder, check it, delete the folder |
+| `POST /api/admin/sessions/end-all` | End every admin session (they survive restarts otherwise) |
 
 If `ADMIN_TOKEN` is empty, these routes answer `404`. The browser console for teams is at `/admin`;
 see [Teams](teams.md).

@@ -305,7 +305,7 @@ describe("team Workers", () => {
     expect([...cf.routes.values()].some((r) => r.script === "team-sanad-three")).toBe(true);
     // Token can't be removed while Workers exist.
     expect((await t.admin("DELETE", "/workers/settings")).status).toBe(409);
-    const del = await t.admin("DELETE", `/teams/${team.team.id}`);
+    const del = await t.admin("DELETE", `/teams/${team.team.id}?purge=now&confirm=${team.team.id}`);
     expect((await del.json()).removedWorkers).toBe(1);
     expect(cf.scripts.has("team-sanad-three")).toBe(false);
     expect(cf.routes.size).toBe(1);
