@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.14.0] - 2026-10-21
+
+### Added
+- **Worker versions, one-click redeploy and rollback.** Every deploy stores a version (code, vars,
+  secret *names* only, who, when, size, SHA-256, note); the last 10 per Worker are kept. The Workers
+  page has **Redeploy** and **Versions** (roll back with a confirmation, download the code). API:
+  `GET …/workers/<name>/versions[/<n>[/code]]`, `POST …/redeploy`, `POST …/rollback`; MCP:
+  `list_worker_versions`, `get_worker_version`, `redeploy_worker`, `rollback_worker`.
+- **Agent keys**: per-team keys with scopes (`workers:read`, `workers:deploy`, `spaces:read`,
+  `spaces:write`, `kv:read`, `kv:write`, `mcp`) and a required expiry (7/30/90 days or custom, max
+  1 year). Shown once, stored hashed, prefix and last use visible, revocable. Accepted wherever the
+  team key is (uploads, sites, KV/files, Workers, MCP) with the scopes enforced (`403
+  INSUFFICIENT_SCOPE`). New `GET /api/teams/<team>/sites`.
+- **Agent invite links**: one-time, 24 h; `GET` shows onboarding (Markdown or JSON), `POST
+  …/claim` returns the key once. Rate-limited and audited.
+- **Notification center**: a bell with an unread count for owners and the admin (deploys,
+  rollbacks, deletes, agent keys, team key rotation, members, Cloudflare token, storage check).
+  Optional team and platform **webhooks** (Slack/Discord-compatible JSON, HMAC-SHA256 signed, test
+  button, 3 attempts).
+- **Privacy policy** in English and Arabic at `/privacy` and `/ar/privacy`, linked from the footer,
+  sign-in and join pages. Operator, address, jurisdiction and contact are marked placeholders.
+
+### Changed
+- Worker vars: 32 KB per var and 64 KB in total (was 5 KB per var). Vars over Cloudflare's 5 KB
+  binding limit are delivered in a generated module merged into `env` by a small wrapper.
+- Admin overview: the Workers count sits next to the Workers switch instead of under it.
+
 ## [0.13.1] - 2026-10-21
 
 ### Fixed

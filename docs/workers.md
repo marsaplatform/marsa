@@ -14,7 +14,7 @@ Teams can deploy small [Cloudflare Workers](https://developers.cloudflare.com/wo
 
 ## API (team key)
 
-Send the team key as `X-Team-Key: marsa_team_…` (or `Authorization: Bearer marsa_team_…`). `<team>` is the team's slug or id.
+Send the team key as `X-Team-Key: marsa_team_…` (or `Authorization: Bearer marsa_team_…`). `<team>` is the team's slug or id. An [agent key](agent-keys.md) works too: reads need `workers:read`, changes need `workers:deploy`.
 
 | Method | Path | What |
 | --- | --- | --- |
@@ -22,12 +22,18 @@ Send the team key as `X-Team-Key: marsa_team_…` (or `Authorization: Bearer mar
 | `PUT` | `/api/teams/<team>/workers/<name>` | Create or redeploy (JSON, or the raw script as `application/javascript`) |
 | `POST` | `/api/teams/<team>/workers` | Create (JSON with `name`); `409 EXISTS` if it exists |
 | `GET` | `/api/teams/<team>/workers/<name>` | One Worker plus a live check (`live.status`); `?probe=0` skips it |
-| `DELETE` | `/api/teams/<team>/workers/<name>` | Delete it (route, DNS record, script) |
+| `DELETE` | `/api/teams/<team>/workers/<name>` | Delete it (route, DNS record, script) and its stored versions |
+| `GET` | `/api/teams/<team>/workers/<name>/versions` | Stored versions, newest first (no code) |
+| `GET` | `/api/teams/<team>/workers/<name>/versions/<n>` | One version with its vars (never secret values) |
+| `GET` | `/api/teams/<team>/workers/<name>/versions/<n>/code` | Download the code of a version |
+| `POST` | `/api/teams/<team>/workers/<name>/redeploy` | One-click redeploy of the newest stored version (`{"note"?}`) |
+| `POST` | `/api/teams/<team>/workers/<name>/rollback` | Deploy an older version again: `{"version": 2, "note"?}` |
 
 JSON body: `{"name": "hello", "code": "<ES module>", "vars": {"NAME": "value"}, "secrets": {"API_KEY": "…"}}`.
 
 - `code` must be one ES module (`export default { async fetch(request, env) { … } }`), up to the team's size limit.
-- `vars` are plain-text env vars (visible to the team). Omit `vars` on a redeploy to keep the current ones.
+- `vars` are plain-text env vars (visible to the team). Omit `vars` on a redeploy to keep the current ones. Up to 32 vars, **32 KB each and 64 KB in total** (0.14.0; was 5 KB). Cloudflare limits one binding to 5 KB, so larger vars are delivered in a small generated module that a wrapper merges into `env`; the Worker sees them as normal `env.NAME` strings. That needs an object default export (`export default { fetch… }`), not a class.
+- `note` (optional, 200 characters) is stored with the version; with a raw-script upload send it as the `X-Marsa-Note` header.
 - `secrets` are write-only Worker secrets (only their names are shown). `null` removes one.
 - Names: 1-30 characters, `a-z`, `0-9` and single hyphens, not at the ends.
 
@@ -61,9 +67,19 @@ curl -s -X DELETE "https://marsa.example.com/api/teams/sanad/workers/hello" -H "
 
 Errors: `401 UNAUTHORIZED` (no/unknown key), `404` (key of another team, unknown Worker), `403 WORKERS_NOT_ALLOWED` (not enabled for the team), `400 INVALID_NAME` / `NOT_A_MODULE` / `INVALID_REQUEST`, `413 SCRIPT_TOO_LARGE`, `409 WORKER_QUOTA` / `NAME_TAKEN` / `HOST_TAKEN` / `EXISTS`, `429 RATE_LIMITED` (60 deploys per team per hour), `502 CLOUDFLARE_ERROR` (Cloudflare's message, scrubbed), `503 WORKERS_NOT_CONFIGURED`.
 
+## Versions, one-click redeploy and rollback (0.14.0)
+
+Every successful deploy is stored as a version on the Spaces server: the code, the plain vars, the **names** of the secrets (never their values), who deployed it, when, its size and SHA-256, and the note. The last **10** per Worker are kept (in `<DATA_DIR>/worker-versions/`, mode 600) and deleted with the Worker.
+
+- **Redeploy** (one click on the Workers page, or `POST …/redeploy`) deploys the newest stored version again with the same code and vars. Secrets stay as they are on Cloudflare.
+- **Roll back to this** (Versions page, with a confirmation, or `POST …/rollback`) deploys an older version's code and vars. It is recorded as a new version (`action: "rollback"`, `from: <n>`). If the old version used secrets that are not set now, the answer lists them in `missingSecrets`.
+- **Download code** on the Versions page, or `GET …/versions/<n>/code`.
+- Workers deployed before 0.14.0 show "No stored version — the next deploy will be saved".
+- Deploy, redeploy, rollback and delete raise a notification for the team's owners (see [Agent keys and alerts](agent-keys.md)).
+
 ## MCP tools
 
-When Workers are on for the team, a space's MCP server (see [MCP per space](mcp.md)) also offers `list_workers` (read-only tokens) and `deploy_worker` / `delete_worker` (read-write tokens), with the same rules as the API.
+When Workers are on for the team, a space's MCP server (see [MCP per space](mcp.md)) also offers `list_workers`, `list_worker_versions` and `get_worker_version` (read-only tokens) and `deploy_worker`, `redeploy_worker`, `rollback_worker` and `delete_worker` (read-write tokens), with the same rules as the API.
 
 ## Admin API
 

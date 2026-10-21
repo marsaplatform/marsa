@@ -21,6 +21,8 @@ export interface Config {
   apiRequestsPerMinute: number;
   /** Trust X-Forwarded-For / X-Real-IP (only behind a reverse proxy you control). */
   trustProxy: boolean;
+  /** Allow http:// and private hosts for outgoing webhooks (local testing only). */
+  webhookAllowPrivate: boolean;
   /** Optional admin token. Empty = admin API disabled. */
   adminToken: string;
   /** How often the expiry sweeper runs, in seconds. */
@@ -126,6 +128,7 @@ export function loadConfig(env: Env = process.env): Config {
     uploadsPerHour: int(env, "UPLOADS_PER_HOUR", 20, 1),
     apiRequestsPerMinute: int(env, "API_REQUESTS_PER_MINUTE", 120, 1),
     trustProxy: bool(env, "TRUST_PROXY", false),
+    webhookAllowPrivate: bool(env, "WEBHOOK_ALLOW_PRIVATE", false),
     adminToken: env.ADMIN_TOKEN?.trim() ?? "",
     sweepIntervalSeconds: int(env, "SWEEP_INTERVAL_SECONDS", 60, 5),
     cloudflare: cloudflareConfig(env),

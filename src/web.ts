@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Context, Hono, MiddlewareHandler } from "hono";
+import { AgentKeyError, type AgentKeyStore } from "./agent-keys.js";
 import { probeBackend } from "./backend/health.js";
 import type { SiteBackend } from "./backend/types.js";
 import { APP_VERSION } from "./brand.js";
@@ -25,6 +26,7 @@ import {
   roleRank,
   verifyPassword,
 } from "./members.js";
+import { type NotificationCenter, PLATFORM, WebhookError } from "./notify.js";
 import type { RateLimiter } from "./rate-limit.js";
 import { fingerprint, type Session, type Sessions, sameOrigin } from "./session.js";
 import type { SiteMeta, SiteStore } from "./store.js";
@@ -35,10 +37,12 @@ import {
   type AdminStats,
   type AuditView,
   adminActivityHtml,
+  adminNotificationsHtml,
   adminSettingsHtml,
   adminSitesHtml,
   adminTeamsHtml,
   adminWorkersHtml,
+  bellHtml,
   type Flash,
   joinHtml,
   localePath,
@@ -47,18 +51,24 @@ import {
   messageHtml,
   type TeamSiteRow,
   teamActivityHtml,
+  teamAgentsHtml,
   teamHtml,
+  teamNotificationsHtml,
   teamSettingsHtml,
   teamSiteHtml,
   teamSitesHtml,
   teamWorkersHtml,
+  V14,
   WS,
+  workerVersionsHtml,
 } from "./ui.js";
 import type { VisitCounter, VisitSummary } from "./visits.js";
+import { versionMeta } from "./worker-versions.js";
 import { PLATFORM_AUDIT, WorkerError, type WorkerService, workerView } from "./workers.js";
 import {
   ADMIN_ACTOR,
   applyTeamWorkers,
+  codeDownload,
   readTeamWorkers,
   teamWorkersInfo,
 } from "./workers-routes.js";
@@ -113,6 +123,8 @@ export interface WebDeps {
   invalidateDirectory: () => void;
   siteCounts: () => Promise<Map<string, number>>;
   workers: WorkerService;
+  agentKeys: AgentKeyStore;
+  notify: NotificationCenter;
 }
 
 /** "NAME=value" lines into an object (blank lines and # comments skipped). */
@@ -184,6 +196,21 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
   };
 
   const page = (c: Context, html: string, status = 200) => {
+    // The bell in the dashboard top bar: unread notifications for owners and the admin.
+    const bell = /<!--marsa:bell:(team|admin):(en|ar)-->/.exec(html);
+    if (bell) {
+      const [mark, kind, bl] = bell as unknown as [string, "team" | "admin", Lang];
+      let out = "";
+      if (kind === "admin" && adminSession(c))
+        out = bellHtml(bl, "admin", d.notify.unread(null, null));
+      if (kind === "team") {
+        const ts = teamSession(c);
+        if (ts && ts.role === "owner") {
+          out = bellHtml(bl, "team", d.notify.unread(ts.team.id, ts.member?.id ?? "key"));
+        }
+      }
+      html = html.replace(mark, out);
+    }
     const res = d.appPage(c, html, status);
     res.headers.set("Cache-Control", "no-store");
     res.headers.set("X-Robots-Tag", "noindex, nofollow");
@@ -1017,7 +1044,13 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       try {
         const w = await d.workers.deploy(
           team,
-          { name: field(form, "name"), code, ...(vars ? { vars } : {}), secrets },
+          {
+            name: field(form, "name"),
+            code,
+            ...(vars ? { vars } : {}),
+            secrets,
+            note: field(form, "note"),
+          },
           actor,
         );
         return done(c, s, workersBack, {
@@ -1042,6 +1075,264 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
         throw e;
       }
       return done(c, s, workersBack, { kind: "ok", text: WS[lang].deleted });
+    });
+
+    // ---- Worker versions, one-click redeploy, rollback (0.14.0) ------------------------
+    const v14 = V14[lang];
+    workerPost("/team/workers/:name/redeploy", async (c, { s, team, actor }) => {
+      const rec = d.workers.find(team.id, c.req.param("name") ?? "");
+      if (!rec) return done(c, s, workersBack, { kind: "err", text: t.notFound });
+      try {
+        const w = await d.workers.redeploy(team, rec, actor);
+        return done(c, s, workersBack, {
+          kind: "ok",
+          text: v14.redeployed,
+          ...(w.url ? { link: w.url } : {}),
+        });
+      } catch (e) {
+        if (e instanceof WorkerError)
+          return done(c, s, workersBack, { kind: "err", text: e.message });
+        throw e;
+      }
+    });
+    workerPost("/team/workers/:name/rollback", async (c, { s, team, form, actor }) => {
+      const rec = d.workers.find(team.id, c.req.param("name") ?? "");
+      if (!rec) return done(c, s, workersBack, { kind: "err", text: t.notFound });
+      const back = href(`/team/workers/${rec.name}/versions`);
+      const n = Number(field(form, "version"));
+      try {
+        const r = await d.workers.rollback(team, rec, n, actor);
+        return done(c, s, back, {
+          kind: "ok",
+          text: r.missingSecrets.length
+            ? v14.missingSecrets(r.missingSecrets.join(", "))
+            : v14.rolledBack(n),
+        });
+      } catch (e) {
+        if (e instanceof WorkerError) return done(c, s, back, { kind: "err", text: e.message });
+        throw e;
+      }
+    });
+    app.get(`${prefix}/team/workers/:name/versions`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      const rec = d.workers.find(team.id, c.req.param("name") ?? "");
+      if (!rec) return done(c, s, workersBack, { kind: "err", text: t.notFound });
+      const info = teamWorkersInfo(d.workers, team);
+      return page(
+        c,
+        workerVersionsHtml(lang, config, {
+          ...(await teamInfo(team)),
+          backendConfigured: !!backend,
+          sites: [],
+          me: meOf(ts),
+          worker: workerView(rec),
+          versions: (await d.workers.listVersions(rec)).map(versionMeta),
+          canDeploy: info.enabled && info.configured && roleRank[ts.role] >= roleRank.editor,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+    app.get(`${prefix}/team/workers/:name/versions/:n/code`, async (c) => {
+      const ts = needTeam(c, "editor");
+      if (ts instanceof Response) return ts;
+      const rec = d.workers.find(ts.team.id, c.req.param("name") ?? "");
+      const v = rec ? await d.workers.getVersion(rec, Number(c.req.param("n"))) : null;
+      if (!rec || !v) return done(c, ts.s, workersBack, { kind: "err", text: t.notFound });
+      return codeDownload(c, rec.name, v.n, v.code);
+    });
+
+    // ---- agent keys and invites (0.14.0) ---------------------------------------------
+    const agentsBack = href("/team/agents");
+    const keyInput = (form: FormData) => {
+      const exp = field(form, "expiry");
+      return {
+        name: field(form, "name"),
+        description: field(form, "description"),
+        scopes: form.getAll("scopes").map(String),
+        expiresInDays: exp === "custom" ? field(form, "customDays") : exp,
+      };
+    };
+    const keyErr = (c: Context, s: Session, e: unknown) => {
+      if (e instanceof AgentKeyError)
+        return done(c, s, agentsBack, { kind: "err", text: e.message });
+      throw e;
+    };
+    app.get(`${prefix}/team/agents`, async (c) => {
+      const ts = needTeam(c);
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      await d.agentKeys.ready();
+      const owner = ts.role === "owner";
+      return page(
+        c,
+        teamAgentsHtml(lang, config, {
+          ...(await teamInfo(team)),
+          backendConfigured: !!backend,
+          sites: [],
+          me: meOf(ts),
+          keys: owner ? d.agentKeys.list(team.id).map((k) => d.agentKeys.view(k)) : [],
+          invites: owner
+            ? d.agentKeys.openInvites(team.id).map((i) => d.agentKeys.inviteView(i))
+            : [],
+          isOwner: owner,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+    const agentPost = (
+      path: string,
+      fn: (c: Context, ctx: TeamCtx & { form: FormData }) => Promise<Response>,
+    ) => {
+      app.post(`${prefix}${path}`, async (c) => {
+        const ts = needTeam(c, "owner");
+        if (ts instanceof Response) return ts;
+        const form = await guardPost(c, ts.s, lang, agentsBack);
+        if (form instanceof Response) return form;
+        return fn(c, { ...ts, form });
+      });
+    };
+    agentPost("/team/agents", async (c, { s, team, form, actor }) => {
+      try {
+        const { key, secret } = await d.agentKeys.create(team.id, keyInput(form), actor.label);
+        await d.audit({
+          teamId: team.id,
+          actor,
+          action: "agent-key-create",
+          detail: `${key.name} (${key.prefix}…)`,
+        });
+        return done(c, s, agentsBack, {
+          kind: "ok",
+          text: v14.keyCreated,
+          secret: { label: v14.keySecret, note: v14.keyNote, value: secret },
+        });
+      } catch (e) {
+        return keyErr(c, s, e);
+      }
+    });
+    agentPost("/team/agents/invite", async (c, { s, team, form, actor }) => {
+      try {
+        const { invite, secret } = await d.agentKeys.createInvite(
+          team.id,
+          keyInput(form),
+          actor.label,
+        );
+        await d.audit({ teamId: team.id, actor, action: "agent-invite", detail: invite.name });
+        return done(c, s, agentsBack, {
+          kind: "ok",
+          text: v14.inviteCreated,
+          secret: {
+            label: v14.inviteLabel,
+            note: v14.inviteNote,
+            value: `${config.publicUrl}/agent-invite/${secret}`,
+          },
+        });
+      } catch (e) {
+        return keyErr(c, s, e);
+      }
+    });
+    agentPost("/team/agents/:id/revoke", async (c, { s, team, actor }) => {
+      const k = await d.agentKeys.revoke(team.id, c.req.param("id") ?? "", actor.label);
+      if (!k) return done(c, s, agentsBack, { kind: "err", text: t.notFound });
+      await d.audit({
+        teamId: team.id,
+        actor,
+        action: "agent-key-revoke",
+        detail: `${k.name} (${k.prefix}…)`,
+      });
+      return done(c, s, agentsBack, { kind: "ok", text: v14.revoked });
+    });
+    agentPost("/team/agents/invites/:id/cancel", async (c, { s, team }) => {
+      const ok = await d.agentKeys.revokeInvite(team.id, c.req.param("id") ?? "");
+      return done(c, s, agentsBack, ok ? undefined : { kind: "err", text: t.notFound });
+    });
+
+    // ---- notification center + team webhook (0.14.0) ---------------------------------
+    const alertsBack = href("/team/notifications");
+    const rowsFor = (teamId: string | null, who: string | null) =>
+      d.notify.forViewer(teamId, who).map((n) => ({
+        ...n,
+        ...(teamId === null
+          ? { teamName: n.teamId === PLATFORM ? null : (teams.get(n.teamId)?.name ?? n.teamId) }
+          : {}),
+      }));
+    app.get(`${prefix}/team/notifications`, async (c) => {
+      const ts = needTeam(c, "owner");
+      if (ts instanceof Response) return ts;
+      const { s, team } = ts;
+      await d.notify.ready();
+      const who = ts.member?.id ?? "key";
+      return page(
+        c,
+        teamNotificationsHtml(lang, config, {
+          ...(await teamInfo(team)),
+          backendConfigured: !!backend,
+          sites: [],
+          me: meOf(ts),
+          notices: rowsFor(team.id, who),
+          unread: d.notify.unread(team.id, who),
+          hook: d.notify.hook(team.id),
+          canManage: true,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+    const alertPost = (
+      path: string,
+      fn: (c: Context, ctx: TeamCtx & { form: FormData }) => Promise<Response>,
+    ) => {
+      app.post(`${prefix}${path}`, async (c) => {
+        const ts = needTeam(c, "owner");
+        if (ts instanceof Response) return ts;
+        const form = await guardPost(c, ts.s, lang, alertsBack);
+        if (form instanceof Response) return form;
+        return fn(c, { ...ts, form });
+      });
+    };
+    alertPost("/team/notifications/read", async (c, { s, team, member }) => {
+      await d.notify.markRead(team.id, member?.id ?? "key");
+      return done(c, s, alertsBack);
+    });
+    const hookErr = (c: Context, s: Session, back: string, e: unknown) => {
+      if (e instanceof WebhookError) return done(c, s, back, { kind: "err", text: e.message });
+      throw e;
+    };
+    const hookSaved = (secret: string): Flash => ({
+      kind: "ok",
+      text: v14.hookSaved,
+      secret: { label: v14.hookSecret, note: v14.hookSecretNote, value: secret },
+    });
+    const testFlash = (last: { ok: boolean; status: number | null } | null | undefined): Flash =>
+      last?.ok
+        ? { kind: "ok", text: v14.hookTestOk(last.status ?? 200) }
+        : { kind: "err", text: v14.hookTestFail(last?.status ?? null) };
+    alertPost("/team/notifications/webhook", async (c, { s, team, form, actor }) => {
+      try {
+        const r = await d.notify.setHook(team.id, field(form, "url"));
+        await d.audit({
+          teamId: team.id,
+          actor,
+          action: "webhook-set",
+          detail: new URL(r.hook.url).host,
+        });
+        return done(c, s, alertsBack, hookSaved(r.secret));
+      } catch (e) {
+        return hookErr(c, s, alertsBack, e);
+      }
+    });
+    alertPost("/team/notifications/webhook/test", async (c, { s, team, actor }) => {
+      const r = limiter.hit(`whtest:${team.id}`, 10, 3_600_000);
+      if (!r.allowed) return done(c, s, alertsBack, { kind: "err", text: t.badRequest });
+      return done(c, s, alertsBack, testFlash(await d.notify.test(team.id, actor.label)));
+    });
+    alertPost("/team/notifications/webhook/delete", async (c, { s, team, actor }) => {
+      await d.notify.clearHook(team.id);
+      await d.audit({ teamId: team.id, actor, action: "webhook-clear" });
+      return done(c, s, alertsBack, { kind: "ok", text: v14.hookRemoved });
     });
 
     // ---- joining with an invite link -------------------------------------------------
@@ -1310,6 +1601,7 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
     adminPost("/admin/teams/:id/rotate", async (c, { s }) => {
       const r = await teams.rotate(c.req.param("id") ?? "", now());
       if (!r) return done(c, s, href("/admin"), { kind: "err", text: t.notFound });
+      await d.audit({ teamId: r.team.id, actor: ADMIN_ACTOR, action: "team-key-rotate" });
       return done(c, s, href("/admin"), keyFlash(t.admin.rotated, r.key));
     });
 
@@ -1328,8 +1620,54 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
       }
       await teams.delete(id);
       await members.purgeTeam(id);
+      await d.agentKeys.purgeTeam(id);
+      await d.notify.purgeTeam(id);
       d.invalidateDirectory();
       return done(c, s, href("/admin"), { kind: "ok", text: t.admin.deleted });
+    });
+
+    // ---- admin: notification center + platform webhook (0.14.0) ------------------------
+    const aAlerts = href("/admin/notifications");
+    app.get(`${prefix}/admin/notifications`, async (c) => {
+      const s = needAdmin(c);
+      if (s instanceof Response) return s;
+      await d.notify.ready();
+      return page(
+        c,
+        adminNotificationsHtml(lang, config, {
+          notices: rowsFor(null, null),
+          unread: d.notify.unread(null, null),
+          hook: d.notify.hook(PLATFORM),
+          canManage: true,
+          csrf: sessions.csrfFor(s),
+          flash: takeFlash(c, s),
+        }),
+      );
+    });
+    adminPost("/admin/notifications/read", async (c, { s }) => {
+      await d.notify.markRead(null, null);
+      return done(c, s, aAlerts);
+    });
+    adminPost("/admin/notifications/webhook", async (c, { s, form }) => {
+      try {
+        const r = await d.notify.setHook(PLATFORM, field(form, "url"));
+        await d.audit({
+          teamId: PLATFORM_AUDIT,
+          actor: ADMIN_ACTOR,
+          action: "webhook-set",
+          detail: new URL(r.hook.url).host,
+        });
+        return done(c, s, aAlerts, hookSaved(r.secret));
+      } catch (e) {
+        return hookErr(c, s, aAlerts, e);
+      }
+    });
+    adminPost("/admin/notifications/webhook/test", async (c, { s }) =>
+      done(c, s, aAlerts, testFlash(await d.notify.test(PLATFORM, "admin"))),
+    );
+    adminPost("/admin/notifications/webhook/delete", async (c, { s }) => {
+      await d.notify.clearHook(PLATFORM);
+      return done(c, s, aAlerts, { kind: "ok", text: v14.hookRemoved });
     });
 
     // ---- admin: Workers (0.12.0) ------------------------------------------------------

@@ -1,3 +1,5 @@
+import type { AgentInviteView, AgentKeyView } from "./agent-keys.js";
+import { EXPIRY_MAX_DAYS, SCOPES } from "./agent-keys.js";
 import { ASSET_VERSION } from "./assets.js";
 import { PLATFORM_URL } from "./brand.js";
 import type { Config } from "./config.js";
@@ -6,8 +8,10 @@ import type { DocPage } from "./docs.js";
 import { bytesLabel, hoursLabel, type Lang, type LimitValues, STRINGS } from "./i18n.js";
 import type { MemberRole } from "./members.js";
 import { currentNavAccount } from "./nav-state.js";
+import { type Notice, noticeText, noticeTone, type WebhookView } from "./notify.js";
 import { isPermanentIso } from "./store.js";
 import type { VisitSummary } from "./visits.js";
+import type { VersionMeta } from "./worker-versions.js";
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
@@ -207,6 +211,7 @@ ${o.body}
       <a href="/openapi.json" lang="en">OpenAPI</a>
       <a href="/llms.txt" lang="en">llms.txt</a>
       <a href="/docs/self-hosting" lang="en">Self-host</a>
+      <a href="${href("/privacy")}">${esc(V14[o.lang].privacy)}</a>
     </div>
     <div>
       <h2>${esc(t.footer.platform)}</h2>
@@ -651,7 +656,7 @@ export function loginHtml(lang: Lang, c: Config, o: LoginOpts): string {
   ${pageHead(team ? t.team.eyebrow : t.admin.eyebrow, esc(title), sub)}
   ${err}${note}
   ${form}
-  <p class="meta login-foot">${team ? `${esc(t.login.noKey)} · <a class="text-link" href="${localePath(lang, "/admin/login")}">${esc(t.login.adminLink)}</a>` : `<a class="text-link" href="${localePath(lang, "/login")}">${esc(t.login.title)}</a>`}</p>
+  <p class="meta login-foot">${team ? `${esc(t.login.noKey)} · <a class="text-link" href="${localePath(lang, "/admin/login")}">${esc(t.login.adminLink)}</a>` : `<a class="text-link" href="${localePath(lang, "/login")}">${esc(t.login.title)}</a>`} · <a class="text-link" href="${localePath(lang, "/privacy")}">${esc(V14[lang].privacy)}</a></p>
 </div>`;
   return layout({
     lang,
@@ -1635,6 +1640,7 @@ export function joinHtml(
     <input id="confirm" name="confirm" type="password" dir="ltr" required minlength="10" maxlength="200" autocomplete="new-password">
     <button class="button" type="submit">${esc(tm.join)}</button>
   </form>
+  <p class="meta login-foot"><a class="text-link" href="${localePath(lang, "/privacy")}">${esc(V14[lang].privacy)}</a></p>
 </div>`;
   return layout({
     lang,
@@ -1722,12 +1728,12 @@ export function adminTeamsHtml(
           : td(
               d.workersCol,
               tm.slug && o.cfConfigured
-                ? `<div class="acts">${postForm(
+                ? `<div class="acts wk-cell">${postForm(
                     href(`/admin/workers/teams/${tm.id}`),
                     o.csrf,
                     `<input type="hidden" name="back" value="admin">${tm.workers ? "" : `<input type="hidden" name="enabled" value="1">`}<button type="submit" class="pill-toggle${tm.workers ? " on" : ""}" aria-pressed="${tm.workers ? "true" : "false"}" aria-label="${esc(`${d.workersCol} · ${tm.name}: ${tm.workers ? t.admin.turnOff : t.admin.turnOn}`)}"><span class="knob" aria-hidden="true"></span>${esc(tm.workers ? t.common.on : t.common.off)}</button>`,
                     tm.workers && tm.workerCount ? { confirm: WS[lang].turnOffConfirm } : {},
-                  )}${tm.workers ? `<span class="meta">${esc(String(tm.workerCount ?? 0))}</span>` : ""}</div>`
+                  )}${tm.workers ? `<span class="badge muted wk-count" title="${esc(d.stats.workers)}"><span class="sr-only">${esc(d.stats.workers)}: </span>${esc(String(tm.workerCount ?? 0))}</span>` : ""}</div>`
                 : `<a class="text-link" href="${href("/admin/workers")}">${esc(tm.workers ? t.common.on : d.manage)}</a>`,
             );
       return `<tr>
@@ -2221,6 +2227,8 @@ export const WS = {
 } as const;
 
 export interface WorkerRowView {
+  /** Newest stored version (0.14.0), null when nothing is stored yet. */
+  version?: number | null;
   id: string;
   name: string;
   url: string;
@@ -2285,10 +2293,19 @@ export function teamWorkersHtml(
         <div><dt>${esc(d.lastDeploy)}</dt><dd>${x.deployedAt ? `${timeTag(lang, x.deployedAt)} <span class="meta">${esc(d.by)} <bdi>${esc(by)}</bdi></span>` : "—"}</dd></div>
         <div><dt>${esc(w.size)}</dt><dd>${esc(bytesLabel(lang, x.bytes))}</dd></div>
         <div class="fact-wide"><dt>${esc(w.env)}</dt><dd>${workerEnvCell(x)}</dd></div>
+        <div><dt>${esc(V14[lang].version)}</dt><dd>${x.version ? `<span class="badge on">v${esc(String(x.version))}</span>` : `<span class="meta">${esc(V14[lang].noVersion)}</span>`}</dd></div>
       </dl>
       ${
         edit
-          ? `<div class="acts">${canDeploy ? `<a class="button small ghost" href="${href(`/team/workers?redeploy=${encodeURIComponent(x.name)}#deploy`)}">${esc(d.redeploy)}</a>` : ""}${postForm(
+          ? `<div class="acts">${
+              canDeploy && x.version
+                ? postForm(
+                    href(`/team/workers/${x.name}/redeploy`),
+                    o.csrf,
+                    `<button class="button small" type="submit" data-busy aria-label="${esc(`${d.redeploy}: ${x.name}`)}">${esc(d.redeploy)}</button>`,
+                  )
+                : ""
+            }<a class="button small ghost" href="${href(`/team/workers/${x.name}/versions`)}">${esc(V14[lang].versions)}</a>${canDeploy ? `<a class="button small ghost" href="${href(`/team/workers?redeploy=${encodeURIComponent(x.name)}#deploy`)}">${esc(V14[lang].newCode)}</a>` : ""}${postForm(
               href(`/team/workers/${x.name}/delete`),
               o.csrf,
               `<button class="button small danger" type="submit" aria-label="${esc(`${w.del}: ${x.name}`)}">${esc(w.del)}</button>`,
@@ -2331,6 +2348,9 @@ export function teamWorkersHtml(
         <textarea id="wsecrets" name="secrets" rows="3" dir="ltr" spellcheck="false" autocomplete="off" aria-describedby="wsecrets-help" placeholder="API_KEY=…"></textarea>
         <p class="form-help" id="wsecrets-help">${esc(w.secretsHelp)}</p></div>
       </div>
+      <label for="wnote">${esc(V14[lang].note)}</label>
+      <input id="wnote" name="note" type="text" maxlength="200" autocomplete="off" aria-describedby="wnote-help">
+      <p class="form-help" id="wnote-help">${esc(V14[lang].noteHelp)}</p>
       <button class="button" type="submit" data-busy>${esc(w.deploy)}</button>
     </form>
     </details>
@@ -2671,6 +2691,8 @@ export const DS = {
       sites: "Spaces",
       workers: "Workers",
       members: "Members",
+      agents: "Agent keys",
+      alerts: "Notifications",
       activity: "Activity",
       settings: "Settings",
     } as Record<string, string>,
@@ -2786,6 +2808,8 @@ export const DS = {
       sites: "المساحات",
       workers: "الوركرز",
       members: "الأعضاء",
+      agents: "مفاتيح الوكلاء",
+      alerts: "الإشعارات",
       activity: "سجل النشاط",
       settings: "الإعدادات",
     } as Record<string, string>,
@@ -2912,6 +2936,10 @@ const ICONS: Record<string, string> = {
   ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/>',
   book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 5v16M19 19v2H6"/>',
   copy: '<path d="M9 9h10v10H9zM5 15V5h10"/>',
+  agents:
+    '<path d="M15 7a4 4 0 1 1-3.9 4.9L4 19v2h3v-2h2v-2h2l1.4-1.4A4 4 0 0 1 15 7zM16 10h.01"/>',
+  alerts: '<path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/>',
+  shield: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/>',
 };
 export const icon = (name: string, cls = "icon") =>
   `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name] ?? ""}</svg>`;
@@ -2943,6 +2971,8 @@ const TEAM_NAV = [
   ["sites", "/team/sites"],
   ["workers", "/team/workers"],
   ["members", "/team/members"],
+  ["agents", "/team/agents"],
+  ["alerts", "/team/notifications"],
   ["activity", "/team/activity"],
   ["settings", "/team/settings"],
 ] as const;
@@ -2951,6 +2981,7 @@ const ADMIN_NAV = [
   ["sites", "/admin/sites"],
   ["workers", "/admin/workers"],
   ["activity", "/admin/activity"],
+  ["alerts", "/admin/notifications"],
   ["settings", "/admin/settings"],
 ] as const;
 
@@ -3020,6 +3051,7 @@ function dashLayout(o: DashOpts): string {
   <a class="wordmark" href="${href("/")}" aria-label="${esc(`${t.product}: ${t.nav.home}`)}">${brandMark(o.lang)}</a>
   <span class="dash-area">${esc(area)}</span>
   <div class="dash-top-tools">
+    <!--marsa:bell:${o.kind}:${o.lang}-->
     <a class="locale-link" href="${localePath(other, o.path)}" hreflang="${other}" lang="${other}">${esc(t.switchLabel)}</a>
   </div>
 </header>
@@ -3097,4 +3129,745 @@ function activityFeed(lang: Lang, rows: AuditView[], withSite = true): string {
       return `<li><span class="feed-dot k-${esc(e.kind)}" aria-hidden="true"></span><div><p><strong><bdi>${esc(who)}</bdi></strong> ${esc(what)}${e.detail && !/^\d{4}-\d\d-\d\dT/.test(e.detail) ? ` <span class="meta"><bdi>${esc(e.detail)}</bdi></span>` : ""}${site}</p>${timeTag(lang, e.at)}</div></li>`;
     })
     .join("")}</ol>`;
+}
+
+// ---- 0.14.0: versions, agent keys, notifications, privacy --------------------------------
+
+export const V14 = {
+  en: {
+    version: "Version",
+    status: "Status",
+    rowActions: "Actions",
+    versions: "Versions",
+    noVersion: "No stored version — the next deploy will be saved",
+    newCode: "Deploy new code",
+    note: "Note (optional)",
+    noteHelp: "Stored with this version, e.g. what changed. Up to 200 characters.",
+    versionsSub: (n: string) =>
+      `The last 10 deploys of ${n}: one-click redeploy, roll back, or download the code.`,
+    current: "Current",
+    when: "When",
+    who: "By",
+    action: "Action",
+    size: "Size",
+    sha: "SHA-256",
+    env: "Vars and secrets",
+    actions: { deploy: "Deploy", redeploy: "Redeploy", rollback: "Rollback" } as Record<
+      string,
+      string
+    >,
+    rolledFrom: (n: number) => `from v${n}`,
+    rollback: "Roll back to this",
+    rollbackConfirm: (n: number) =>
+      `Deploy version ${n} again? Its code and vars replace the current ones; secrets stay as they are.`,
+    download: "Download code",
+    redeployed: "Redeployed.",
+    rolledBack: (n: number) => `Rolled back to v${n}.`,
+    missingSecrets: (k: string) =>
+      `Rolled back. This version also used secrets that are not set now: ${k}`,
+    secretsNote: "Secret values are never stored: only their names.",
+    privacy: "Privacy",
+    // agent keys
+    agentsSub:
+      "Scoped API keys for agents and tools. Each key has an expiry and only the scopes you pick.",
+    keysTitle: "Agent keys",
+    keyName: "Name",
+    keyDesc: "Description (optional)",
+    scopes: "Scopes",
+    expiry: "Expires in",
+    days: (n: number) => `${n} days`,
+    customDays: "Custom (days)",
+    customHelp: `Required. 1 to ${EXPIRY_MAX_DAYS} days.`,
+    create: "Create key",
+    createTitle: "New agent key",
+    createInvite: "Create invite link",
+    inviteTitle: "Invite an agent",
+    inviteSub:
+      "A one-time link, valid 24 hours. The agent opens it for instructions and claims its own key once; then the link stops working.",
+    keyCreated: "Agent key created.",
+    keySecret: "Your new agent key",
+    keyNote: "Copy it now: it is shown only once. Spaces stores only a hash.",
+    inviteCreated: "Invite link created.",
+    inviteLabel: "Agent invite link",
+    inviteNote:
+      "Shown once. Send it to the agent over a private channel; it works once, for 24 hours.",
+    revoke: "Revoke",
+    revokeConfirm: "Revoke this agent key? Agents using it stop working at once.",
+    revoked: "Key revoked.",
+    cancelInvite: "Cancel",
+    prefix: "Key",
+    lastUsed: "Last used",
+    never: "Never",
+    expires: "Expires",
+    state: { active: "Active", expired: "Expired", revoked: "Revoked" } as Record<string, string>,
+    noKeys: "No agent keys yet.",
+    noKeysSub: "Create one for an agent, or send it an invite link.",
+    openInvites: "Open invite links",
+    viaInvite: "via invite",
+    ownersOnly: "Only team owners can manage agent keys.",
+    scopeHelp: {
+      "workers:read": "List Workers, versions and code",
+      "workers:deploy": "Deploy, redeploy, roll back and delete Workers",
+      "spaces:read": "List and read the team's spaces",
+      "spaces:write": "Publish, replace, extend and delete spaces",
+      "kv:read": "Read KV values and uploaded files",
+      "kv:write": "Write KV values and files",
+      mcp: "Use a space's MCP server with this key",
+    } as Record<string, string>,
+    // notifications
+    alertsSub: "Deploys, rollbacks, keys, members and security events. Newest first.",
+    adminAlertsSub: "Every team's alerts plus platform events (Cloudflare token, storage checks).",
+    unread: (n: number) => (n === 1 ? "1 unread" : `${n} unread`),
+    noAlerts: "No notifications yet.",
+    noAlertsSub: "Deploys, key changes and member changes show up here.",
+    markRead: "Mark all as read",
+    bell: (n: number) => (n ? `Notifications: ${n} unread` : "Notifications"),
+    webhook: "Outgoing webhook",
+    webhookSub:
+      "Optional. Each notification is POSTed as JSON with `text` and `content` (Slack and Discord read these), signed with HMAC-SHA256 in X-Marsa-Signature. Up to 3 attempts.",
+    adminWebhookSub:
+      "Optional. Receives every notification on the platform. Same JSON and signature as team webhooks.",
+    webhookUrl: "Webhook URL (https)",
+    saveHook: "Save webhook",
+    testHook: "Send test",
+    removeHook: "Remove",
+    removeHookConfirm: "Remove this webhook?",
+    hookSaved: "Webhook saved.",
+    hookSecret: "Signing secret",
+    hookSecretNote:
+      'Shown once. Verify X-Marsa-Signature = sha256=HMAC(secret, timestamp + "." + body).',
+    hookRemoved: "Webhook removed.",
+    hookTestOk: (s: number) => `Test delivered (HTTP ${s}).`,
+    hookTestFail: (s: number | null) => `Test failed${s ? ` (HTTP ${s})` : " (no response)"}.`,
+    hookNone: "No webhook set.",
+    lastDelivery: "Last delivery",
+    ok: "OK",
+    failed: "Failed",
+    platform: "Platform",
+  },
+  ar: {
+    version: "الإصدار",
+    status: "الحالة",
+    rowActions: "إجراءات",
+    versions: "الإصدارات",
+    noVersion: "لا يوجد إصدار محفوظ — سيُحفظ النشر القادم",
+    newCode: "انشر كودًا جديدًا",
+    note: "ملاحظة (اختيارية)",
+    noteHelp: "تُحفظ مع هذا الإصدار، مثل ما الذي تغيّر. حتى 200 حرف.",
+    versionsSub: (n: string) =>
+      `آخر 10 عمليات نشر لـ ${n}: إعادة نشر بنقرة، أو رجوع لإصدار سابق، أو تنزيل الكود.`,
+    current: "الحالي",
+    when: "متى",
+    who: "بواسطة",
+    action: "العملية",
+    size: "الحجم",
+    sha: "SHA-256",
+    env: "المتغيرات والأسرار",
+    actions: { deploy: "نشر", redeploy: "إعادة نشر", rollback: "رجوع" } as Record<string, string>,
+    rolledFrom: (n: number) => `من v${n}`,
+    rollback: "ارجع لهذا الإصدار",
+    rollbackConfirm: (n: number) =>
+      `هل تنشر الإصدار ${n} من جديد؟ سيحل كوده ومتغيراته محل الحالية، وتبقى الأسرار كما هي.`,
+    download: "نزّل الكود",
+    redeployed: "تمت إعادة النشر.",
+    rolledBack: (n: number) => `تم الرجوع إلى v${n}.`,
+    missingSecrets: (k: string) => `تم الرجوع. هذا الإصدار كان يستخدم أسرارًا غير موجودة الآن: ${k}`,
+    secretsNote: "قيم الأسرار لا تُحفظ أبدًا: أسماؤها فقط.",
+    privacy: "الخصوصية",
+    agentsSub:
+      "مفاتيح API محددة الصلاحيات للوكلاء والأدوات. لكل مفتاح تاريخ انتهاء والصلاحيات التي تختارها فقط.",
+    keysTitle: "مفاتيح الوكلاء",
+    keyName: "الاسم",
+    keyDesc: "الوصف (اختياري)",
+    scopes: "الصلاحيات",
+    expiry: "ينتهي بعد",
+    days: (n: number) => (n === 7 ? "7 أيام" : `${n} يومًا`),
+    customDays: "مدة مخصصة (بالأيام)",
+    customHelp: `مطلوب. من يوم إلى ${EXPIRY_MAX_DAYS} يومًا.`,
+    create: "أنشئ المفتاح",
+    createTitle: "مفتاح وكيل جديد",
+    createInvite: "أنشئ رابط دعوة",
+    inviteTitle: "ادعُ وكيلًا",
+    inviteSub:
+      "رابط يُستخدم مرة واحدة وصالح 24 ساعة. يفتحه الوكيل ليقرأ التعليمات ثم يستلم مفتاحه مرة واحدة، وبعدها يتوقف الرابط.",
+    keyCreated: "تم إنشاء مفتاح الوكيل.",
+    keySecret: "مفتاح الوكيل الجديد",
+    keyNote: "انسخه الآن: يظهر مرة واحدة فقط. لا نحفظ إلا بصمته (hash).",
+    inviteCreated: "تم إنشاء رابط الدعوة.",
+    inviteLabel: "رابط دعوة الوكيل",
+    inviteNote: "يظهر مرة واحدة. أرسله للوكيل عبر قناة خاصة؛ يعمل مرة واحدة خلال 24 ساعة.",
+    revoke: "ألغِ",
+    revokeConfirm: "هل تلغي مفتاح الوكيل هذا؟ سيتوقف أي وكيل يستخدمه فورًا.",
+    revoked: "تم إلغاء المفتاح.",
+    cancelInvite: "ألغِ",
+    prefix: "المفتاح",
+    lastUsed: "آخر استخدام",
+    never: "لم يُستخدم",
+    expires: "ينتهي",
+    state: { active: "فعّال", expired: "منتهي", revoked: "ملغى" } as Record<string, string>,
+    noKeys: "لا توجد مفاتيح وكلاء بعد.",
+    noKeysSub: "أنشئ مفتاحًا لوكيل، أو أرسل له رابط دعوة.",
+    openInvites: "روابط دعوة مفتوحة",
+    viaInvite: "عبر دعوة",
+    ownersOnly: "إدارة مفاتيح الوكلاء لمالكي الفريق فقط.",
+    scopeHelp: {
+      "workers:read": "عرض الوركرز وإصداراتها وكودها",
+      "workers:deploy": "نشر الوركرز وإعادة نشرها والرجوع بها وحذفها",
+      "spaces:read": "عرض مساحات الفريق وقراءتها",
+      "spaces:write": "نشر المساحات واستبدالها وتمديدها وحذفها",
+      "kv:read": "قراءة قيم KV والملفات المرفوعة",
+      "kv:write": "كتابة قيم KV والملفات",
+      mcp: "استخدام خادم MCP لأي مساحة بهذا المفتاح",
+    } as Record<string, string>,
+    alertsSub: "عمليات النشر والرجوع والمفاتيح والأعضاء وأحداث الأمان. الأحدث أولًا.",
+    adminAlertsSub: "إشعارات كل الفرق مع أحداث المنصة (رمز Cloudflare وفحوص التخزين).",
+    unread: (n: number) => (n === 1 ? "واحد غير مقروء" : `${n} غير مقروءة`),
+    noAlerts: "لا توجد إشعارات بعد.",
+    noAlertsSub: "تظهر هنا عمليات النشر وتغييرات المفاتيح والأعضاء.",
+    markRead: "علّم الكل كمقروء",
+    bell: (n: number) => (n ? `الإشعارات: ${n} غير مقروءة` : "الإشعارات"),
+    webhook: "Webhook صادر",
+    webhookSub:
+      "اختياري. يُرسل كل إشعار بطلب POST بصيغة JSON فيه الحقلان text وcontent (يقرؤهما Slack وDiscord)، وموقّع بـ HMAC-SHA256 في الترويسة X-Marsa-Signature. حتى 3 محاولات.",
+    adminWebhookSub: "اختياري. يستقبل كل إشعارات المنصة، بنفس صيغة JSON والتوقيع.",
+    webhookUrl: "رابط الـ Webhook (https)",
+    saveHook: "احفظ الـ Webhook",
+    testHook: "أرسل تجربة",
+    removeHook: "احذف",
+    removeHookConfirm: "هل تحذف هذا الـ Webhook؟",
+    hookSaved: "تم حفظ الـ Webhook.",
+    hookSecret: "سر التوقيع",
+    hookSecretNote:
+      'يظهر مرة واحدة. تحقق من X-Marsa-Signature = sha256=HMAC(السر، الطابع الزمني + "." + المحتوى).',
+    hookRemoved: "تم حذف الـ Webhook.",
+    hookTestOk: (s: number) => `وصلت التجربة (HTTP ${s}).`,
+    hookTestFail: (s: number | null) => `فشلت التجربة${s ? ` (HTTP ${s})` : " (لا رد)"}.`,
+    hookNone: "لا يوجد Webhook.",
+    lastDelivery: "آخر إرسال",
+    ok: "نجح",
+    failed: "فشل",
+    platform: "المنصة",
+  },
+};
+
+/** The bell in the top bar (filled in per request by the web routes). */
+export function bellHtml(lang: Lang, kind: "team" | "admin", unread: number): string {
+  const v = V14[lang];
+  const to = localePath(lang, kind === "team" ? "/team/notifications" : "/admin/notifications");
+  const n = unread > 99 ? "99+" : String(unread);
+  return `<a class="bell${unread ? " has-unread" : ""}" href="${to}" aria-label="${esc(v.bell(unread))}">${icon("alerts")}${unread ? `<span class="bell-count" aria-hidden="true">${esc(n)}</span>` : ""}</a>`;
+}
+
+const shortSha = (h: string) => `${h.slice(0, 12)}…`;
+
+export interface WorkerVersionsOpts extends TeamPageOpts {
+  worker: WorkerRowView;
+  versions: VersionMeta[];
+  canDeploy: boolean;
+}
+
+export function workerVersionsHtml(lang: Lang, c: Config, o: WorkerVersionsOpts): string {
+  const t = STRINGS[lang];
+  const v = V14[lang];
+  const d = DS[lang];
+  const href = (p: string) => localePath(lang, p);
+  const w = o.worker;
+  const edit = canEdit(o.me);
+  const base = `/team/workers/${w.name}`;
+  const rows = o.versions
+    .map((x) => {
+      const isCur = x.n === w.version;
+      const env = [
+        ...x.varNames.map((k) => `<code class="ltr">${esc(k)}</code>`),
+        ...x.secretNames.map((k) => `<code class="ltr">${esc(k)}</code> 🔒`),
+      ].join(" ");
+      const acts = [
+        edit
+          ? `<a class="button small ghost" href="${href(`${base}/versions/${x.n}/code`)}" download>${esc(v.download)}</a>`
+          : "",
+        o.canDeploy && !isCur
+          ? postForm(
+              href(`${base}/rollback`),
+              o.csrf,
+              `<input type="hidden" name="version" value="${x.n}"><button class="button small warn" type="submit" data-busy aria-label="${esc(`${v.rollback}: v${x.n}`)}">${esc(v.rollback)}</button>`,
+              { confirm: v.rollbackConfirm(x.n) },
+            )
+          : "",
+      ].join("");
+      return `<tr${isCur ? ' class="current-row"' : ""}>${td(v.version, `<strong>v${x.n}</strong>${isCur ? ` <span class="badge on">${esc(v.current)}</span>` : ""}`)}${td(v.when, timeTag(lang, x.at))}${td(v.who, `<bdi>${esc(t.members.actorLabels[x.by] ?? x.by)}</bdi>`)}${td(v.action, `${esc(v.actions[x.action] ?? x.action)}${x.from ? ` <span class="meta">${esc(v.rolledFrom(x.from))}</span>` : ""}${x.note ? `<div class="meta"><bdi>${esc(x.note)}</bdi></div>` : ""}`)}${td(v.size, esc(bytesLabel(lang, x.bytes)))}${td(v.sha, `<code class="ltr" title="${esc(x.sha256)}">${esc(shortSha(x.sha256))}</code>`)}${td(v.env, env || "—")}${td("", `<div class="acts">${acts}</div>`, "row-acts")}</tr>`;
+    })
+    .join("");
+  const table = o.versions.length
+    ? `<div class="table-wrap"><table class="data stack versions-table" aria-labelledby="ver-title"><thead><tr><th scope="col">${esc(v.version)}</th><th scope="col">${esc(v.when)}</th><th scope="col">${esc(v.who)}</th><th scope="col">${esc(v.action)}</th><th scope="col">${esc(v.size)}</th><th scope="col">${esc(v.sha)}</th><th scope="col">${esc(v.env)}</th><th scope="col"><span class="sr-only">${esc(v.rowActions)}</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
+    : emptyState(v.noVersion, WS[lang].deploySub);
+  const redeploy =
+    o.canDeploy && w.version
+      ? postForm(
+          href(`${base}/redeploy`),
+          o.csrf,
+          `<button class="button small" type="submit" data-busy>${esc(d.redeploy)}</button>`,
+        )
+      : "";
+  const body = `<div class="page-wide">
+  ${pageHead(t.team.eyebrow, `<code class="ltr">${esc(w.name)}</code> · ${esc(v.versions)}`, v.versionsSub(w.name), `<div class="head-tools">${redeploy}<a class="button small ghost" href="${href("/team/workers")}">${esc(d.nav.workers ?? "Workers")}</a></div>`)}
+  ${flashBox(lang, o.flash)}
+  <section class="block" aria-labelledby="ver-title">
+    <h2 id="ver-title">${esc(v.versions)} <span class="count">${esc(String(o.versions.length))}</span></h2>
+    <p class="meta">${esc(v.secretsNote)}</p>
+    ${table}
+  </section>
+</div>`;
+  return dashLayout({
+    lang,
+    config: c,
+    kind: "team",
+    active: "workers",
+    title: `${w.name} · ${v.versions} · ${o.team.name} · ${t.product}`,
+    description: v.versionsSub(w.name),
+    path: `${base}/versions`,
+    body,
+    csrf: o.csrf,
+    ctx: teamCtx(lang, o),
+    crumbs: [{ label: w.name, href: href("/team/workers") }, { label: v.versions }],
+  });
+}
+
+/** Scope checkboxes + expiry radios for the key and invite forms. */
+function keyFields(lang: Lang, idp: string): string {
+  const v = V14[lang];
+  const scopes = SCOPES.map(
+    (sc) =>
+      `<label class="check"><input type="checkbox" name="scopes" value="${sc}"${sc === "spaces:read" || sc === "workers:read" ? " checked" : ""}><span><code class="ltr">${esc(sc)}</code> <span class="meta">${esc(v.scopeHelp[sc] ?? "")}</span></span></label>`,
+  ).join("");
+  const presets = [7, 30, 90]
+    .map(
+      (n) =>
+        `<label class="check inline"><input type="radio" name="expiry" value="${n}"${n === 30 ? " checked" : ""}><span>${esc(v.days(n))}</span></label>`,
+    )
+    .join("");
+  return `<label for="${idp}-name">${esc(v.keyName)}</label>
+      <input id="${idp}-name" name="name" type="text" required maxlength="60" autocomplete="off">
+      <label for="${idp}-desc">${esc(v.keyDesc)}</label>
+      <input id="${idp}-desc" name="description" type="text" maxlength="300" autocomplete="off">
+      <fieldset class="scope-set"><legend>${esc(v.scopes)}</legend>${scopes}</fieldset>
+      <fieldset class="expiry-set"><legend>${esc(v.expiry)}</legend>${presets}
+        <label class="check inline"><input type="radio" name="expiry" value="custom"><span>${esc(v.customDays)}</span></label>
+        <input class="days-input" name="customDays" type="number" min="1" max="${EXPIRY_MAX_DAYS}" inputmode="numeric" aria-label="${esc(v.customDays)}" aria-describedby="${idp}-exp-help">
+        <p class="form-help" id="${idp}-exp-help">${esc(v.customHelp)}</p>
+      </fieldset>`;
+}
+
+export interface TeamAgentsOpts extends TeamPageOpts {
+  keys: AgentKeyView[];
+  invites: AgentInviteView[];
+  isOwner: boolean;
+}
+
+export function teamAgentsHtml(lang: Lang, c: Config, o: TeamAgentsOpts): string {
+  const t = STRINGS[lang];
+  const v = V14[lang];
+  const href = (p: string) => localePath(lang, p);
+  const scopeTags = (xs: string[]) =>
+    xs.map((x) => `<code class="ltr scope">${esc(x)}</code>`).join(" ");
+  const rows = o.keys
+    .map((k) => {
+      const tone = k.state === "active" ? "on" : k.state === "revoked" ? "muted" : "warn";
+      return `<tr>${td(v.keyName, `<strong><bdi>${esc(k.name)}</bdi></strong>${k.description ? `<div class="meta"><bdi>${esc(k.description)}</bdi></div>` : ""}${k.viaInvite ? ` <span class="badge muted">${esc(v.viaInvite)}</span>` : ""}`)}${td(v.prefix, `<code class="ltr">${esc(k.prefix)}…</code>`)}${td(v.scopes, scopeTags(k.scopes))}${td(v.expires, timeTag(lang, k.expiresAt))}${td(v.lastUsed, k.lastUsedAt ? timeTag(lang, k.lastUsedAt) : `<span class="meta">${esc(v.never)}</span>`)}${td(v.status, `<span class="badge ${tone}">${esc(v.state[k.state] ?? k.state)}</span>`)}${td(
+        "",
+        o.isOwner && k.state === "active"
+          ? postForm(
+              href(`/team/agents/${k.id}/revoke`),
+              o.csrf,
+              `<button class="button small danger" type="submit" aria-label="${esc(`${v.revoke}: ${k.name}`)}">${esc(v.revoke)}</button>`,
+              { confirm: v.revokeConfirm },
+            )
+          : "",
+        "row-acts",
+      )}</tr>`;
+    })
+    .join("");
+  const table = o.keys.length
+    ? `<div class="table-wrap"><table class="data stack keys-table" aria-labelledby="keys-title"><thead><tr><th scope="col">${esc(v.keyName)}</th><th scope="col">${esc(v.prefix)}</th><th scope="col">${esc(v.scopes)}</th><th scope="col">${esc(v.expires)}</th><th scope="col">${esc(v.lastUsed)}</th><th scope="col">${esc(v.status)}</th><th scope="col"><span class="sr-only">${esc(v.rowActions)}</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
+    : emptyState(v.noKeys, v.noKeysSub);
+  const invites = o.invites.length
+    ? `<section class="block" aria-labelledby="inv-title"><h2 id="inv-title" class="h3">${esc(v.openInvites)} <span class="count">${o.invites.length}</span></h2><ul class="plain-list">${o.invites
+        .map(
+          (i) =>
+            `<li><strong><bdi>${esc(i.name)}</bdi></strong> <code class="ltr">${esc(i.prefix)}…</code> ${scopeTags(i.scopes)} <span class="meta">${esc(v.expires)} ${timeTag(lang, i.expiresAt)}</span> ${o.isOwner ? postForm(href(`/team/agents/invites/${i.id}/cancel`), o.csrf, `<button class="button small ghost" type="submit">${esc(v.cancelInvite)}</button>`) : ""}</li>`,
+        )
+        .join("")}</ul></section>`
+    : "";
+  const forms = o.isOwner
+    ? `<section class="block two-col" aria-label="${esc(v.createTitle)}">
+    <form method="post" action="${href("/team/agents")}" class="panel key-form">
+      ${csrfField(o.csrf)}
+      <h2 class="h3">${icon("agents")} ${esc(v.createTitle)}</h2>
+      ${keyFields(lang, "k")}
+      <button class="button" type="submit">${esc(v.create)}</button>
+    </form>
+    <form method="post" action="${href("/team/agents/invite")}" class="panel key-form">
+      ${csrfField(o.csrf)}
+      <h2 class="h3">${icon("plus")} ${esc(v.inviteTitle)}</h2>
+      <p class="meta">${esc(v.inviteSub)}</p>
+      ${keyFields(lang, "i")}
+      <button class="button ghost" type="submit">${esc(v.createInvite)}</button>
+    </form>
+  </section>`
+    : `<p class="notice">${esc(v.ownersOnly)}</p>`;
+  const body = `<div class="page-wide">
+  ${teamHead(lang, o, v.agentsSub, "agents")}
+  ${flashBox(lang, o.flash)}
+  <section class="block" aria-labelledby="keys-title">
+    <h2 id="keys-title">${esc(v.keysTitle)} <span class="count">${esc(String(o.keys.filter((k) => k.state === "active").length))}</span></h2>
+    ${table}
+  </section>
+  ${invites}
+  ${forms}
+</div>`;
+  return dashLayout({
+    lang,
+    config: c,
+    kind: "team",
+    active: "agents",
+    title: `${v.keysTitle} · ${o.team.name} · ${t.product}`,
+    description: v.agentsSub,
+    path: "/team/agents",
+    body,
+    csrf: o.csrf,
+    ctx: teamCtx(lang, o),
+  });
+}
+
+export interface NoticeRow extends Notice {
+  unread: boolean;
+  teamName?: string | null;
+}
+
+function noticeList(lang: Lang, rows: NoticeRow[], withTeam: boolean): string {
+  const v = V14[lang];
+  return `<ol class="notice-list">${rows
+    .map((n) => {
+      const team =
+        withTeam && n.teamName !== undefined
+          ? `<span class="badge muted"><bdi>${esc(n.teamName ?? v.platform)}</bdi></span> `
+          : "";
+      return `<li class="notice-item tone-${noticeTone(n.kind)}${n.unread ? " unread" : ""}"><span class="notice-dot" aria-hidden="true"></span><div><p>${team}<bdi>${esc(noticeText(lang, n))}</bdi>${n.unread ? ` <span class="sr-only">(${esc(v.unread(1))})</span>` : ""}</p>${timeTag(lang, n.at)}</div></li>`;
+    })
+    .join("")}</ol>`;
+}
+
+function webhookCard(
+  lang: Lang,
+  hook: WebhookView | null,
+  action: string,
+  csrf: string,
+  sub: string,
+  canManage: boolean,
+): string {
+  const v = V14[lang];
+  const last = hook?.last
+    ? `<p class="meta">${esc(v.lastDelivery)}: <span class="badge ${hook.last.ok ? "on" : "warn"}">${esc(hook.last.ok ? v.ok : v.failed)}</span> ${hook.last.status ? `HTTP ${hook.last.status}` : ""} · ${timeTag(lang, hook.last.at)}</p>`
+    : "";
+  const current = hook
+    ? `<p><code class="ltr">${esc(hook.url.replace(/(https?:\/\/[^/]+\/).{6,}$/, "$1…"))}</code></p>${last}${
+        canManage
+          ? `<div class="acts">${postForm(`${action}/test`, csrf, `<button class="button small ghost" type="submit" data-busy>${esc(v.testHook)}</button>`)}${postForm(`${action}/delete`, csrf, `<button class="button small danger" type="submit">${esc(v.removeHook)}</button>`, { confirm: v.removeHookConfirm })}</div>`
+          : ""
+      }`
+    : `<p class="meta">${esc(v.hookNone)}</p>`;
+  const form = canManage
+    ? `<form method="post" action="${action}" class="stack-form">${csrfField(csrf)}<label for="hook-url">${esc(v.webhookUrl)}</label><input id="hook-url" name="url" type="url" dir="ltr" required maxlength="500" placeholder="https://hooks.slack.com/services/…" autocomplete="off"><button class="button small" type="submit">${esc(v.saveHook)}</button></form>`
+    : "";
+  return `<section class="block panel" aria-labelledby="hook-title"><h2 id="hook-title" class="h3">${esc(v.webhook)}</h2><p class="meta">${esc(sub)}</p>${current}${form}</section>`;
+}
+
+export interface NotificationsOpts {
+  notices: NoticeRow[];
+  unread: number;
+  hook: WebhookView | null;
+  canManage: boolean;
+  csrf: string;
+  flash?: Flash | null;
+}
+
+export function teamNotificationsHtml(
+  lang: Lang,
+  c: Config,
+  o: TeamPageOpts & NotificationsOpts,
+): string {
+  const t = STRINGS[lang];
+  const v = V14[lang];
+  const href = (p: string) => localePath(lang, p);
+  const list = o.notices.length
+    ? noticeList(lang, o.notices, false)
+    : emptyState(v.noAlerts, v.noAlertsSub);
+  const body = `<div class="page-wide">
+  ${teamHead(lang, o, v.alertsSub, "alerts", o.unread ? postForm(href("/team/notifications/read"), o.csrf, `<button class="button small ghost" type="submit">${esc(v.markRead)}</button>`) : "")}
+  ${flashBox(lang, o.flash)}
+  <div class="alerts-grid">
+  <section class="block" aria-labelledby="alerts-title">
+    <h2 id="alerts-title">${esc(DS[lang].nav.alerts ?? "")} ${o.unread ? `<span class="count">${esc(v.unread(o.unread))}</span>` : ""}</h2>
+    ${list}
+  </section>
+  ${webhookCard(lang, o.hook, href("/team/notifications/webhook"), o.csrf, v.webhookSub, o.canManage)}
+  </div>
+</div>`;
+  return dashLayout({
+    lang,
+    config: c,
+    kind: "team",
+    active: "alerts",
+    title: `${DS[lang].nav.alerts} · ${o.team.name} · ${t.product}`,
+    description: v.alertsSub,
+    path: "/team/notifications",
+    body,
+    csrf: o.csrf,
+    ctx: teamCtx(lang, o),
+  });
+}
+
+export function adminNotificationsHtml(lang: Lang, c: Config, o: NotificationsOpts): string {
+  const t = STRINGS[lang];
+  const v = V14[lang];
+  const href = (p: string) => localePath(lang, p);
+  const list = o.notices.length
+    ? noticeList(lang, o.notices, true)
+    : emptyState(v.noAlerts, v.noAlertsSub);
+  const body = `<div class="page-wide">
+  ${pageHead(t.admin.eyebrow, esc(DS[lang].nav.alerts ?? ""), v.adminAlertsSub, adminTools(lang, "activity", o.csrf, o.unread ? postForm(href("/admin/notifications/read"), o.csrf, `<button class="button small ghost" type="submit">${esc(v.markRead)}</button>`) : ""))}
+  ${flashBox(lang, o.flash)}
+  <div class="alerts-grid">
+  <section class="block" aria-labelledby="alerts-title">
+    <h2 id="alerts-title">${esc(DS[lang].nav.alerts ?? "")} ${o.unread ? `<span class="count">${esc(v.unread(o.unread))}</span>` : ""}</h2>
+    ${list}
+  </section>
+  ${webhookCard(lang, o.hook, href("/admin/notifications/webhook"), o.csrf, v.adminWebhookSub, true)}
+  </div>
+</div>`;
+  return dashLayout({
+    lang,
+    config: c,
+    kind: "admin",
+    active: "alerts",
+    title: `${DS[lang].nav.alerts} · ${t.product}`,
+    description: v.adminAlertsSub,
+    path: "/admin/notifications",
+    body,
+    csrf: o.csrf,
+    ctx: ADMIN_CTX(lang),
+  });
+}
+
+/**
+ * The privacy policy. Every statement describes what this code does; facts the code
+ * cannot know (who operates the instance, where, how to reach them) are placeholders.
+ */
+export const PRIVACY_PLACEHOLDER = {
+  en: "[PLACEHOLDER: to be completed by the operator]",
+  ar: "[نص مؤقت: يكمله مشغّل الخدمة]",
+};
+
+const PRIVACY = {
+  en: {
+    title: "Privacy policy",
+    sub: "What this Marsa Spaces instance stores, why, for how long, and how it is protected. It describes what the software does.",
+    updated: "Last updated: 21 October 2026 (version 0.14.0)",
+    sections: [
+      [
+        "Who runs this service",
+        [
+          `Operator (legal entity): ${PRIVACY_PLACEHOLDER.en}`,
+          `Address: ${PRIVACY_PLACEHOLDER.en}`,
+          `Applicable law and jurisdiction: ${PRIVACY_PLACEHOLDER.en}`,
+          `Privacy contact: ${PRIVACY_PLACEHOLDER.en}`,
+        ],
+      ],
+      [
+        "What you publish",
+        [
+          "The files you upload (HTML, CSS, images and so on) are stored on this server and served publicly at the site's link until it expires or is deleted. Anyone with the link can see them, and sites of teams that allow it are listed on the home page.",
+          "Expired sites are deleted automatically, with their files, their visit counts and their data. Permanent sites stay until they are deleted.",
+          "When you publish, you get an edit token. Only a SHA-256 hash of it is stored.",
+        ],
+      ],
+      [
+        "Accounts and teams",
+        [
+          "There is no email sign-up. A team member has a username, a display name and a password; the password is stored only as an scrypt hash.",
+          "Team keys, invite links, MCP tokens and agent keys are shown once and stored only as SHA-256 hashes, with a short prefix so you can tell them apart.",
+          "Each team has an activity log of the last 500 actions (who did what and when), visible to its members and the admin.",
+          "Notifications (deploys, key and member changes) are kept for the team's owners and the admin, the newest 200 per team.",
+        ],
+      ],
+      [
+        "Cookies",
+        [
+          "Signing in sets one session cookie (httpOnly, SameSite=Lax, Secure on https). It expires after 7 days for teams and 12 hours for the admin by default, and signing out removes it.",
+          "There are no advertising or tracking cookies. Public pages and published sites set no cookies.",
+        ],
+      ],
+      [
+        "Visit counts",
+        [
+          "Page views are counted per site and per day on this server. No cookies are used and no IP address or user agent is stored.",
+          "Visitors are estimated with a hash of an hourly random salt, the site, the IP and the user agent. The salt is kept only in memory and replaced every hour, so the hashes cannot be linked or recomputed. Only daily totals are kept, for 90 days by default.",
+          "Visitors who send Do Not Track or Global Privacy Control are counted as views only. Bots and link previews are not counted.",
+        ],
+      ],
+      [
+        "IP addresses",
+        [
+          "IP addresses are used in memory for rate limits (uploads, sign-in attempts, invite links) and are not written to disk by the application.",
+          "When an agent key is used, a keyed hash of the IP (HMAC with a server secret) is kept with the key, the last 20, to warn the team when the key is used from a new address. The IP itself is not stored.",
+        ],
+      ],
+      [
+        "Service providers",
+        [
+          "If the admin enables the data and files backend, KV values and uploaded files of allowed sites are stored with Cloudflare (Workers KV and R2).",
+          "Team Workers are deployed to Cloudflare's network through the platform's Cloudflare account. Their code, plain variables and secrets are stored by Cloudflare.",
+          "This site may be served through Cloudflare, which can add its Web Analytics script; the page security policy allows it. Fonts and other assets are served from this server.",
+          "Outgoing webhooks send notification text (team name, who did what) only to the URLs the team owner or admin sets.",
+        ],
+      ],
+      [
+        "Team Workers",
+        [
+          "Each deploy is stored as a version on this server: the code, the plain variables, the names of the secrets, who deployed it, when, its size and SHA-256, and an optional note. The last 10 versions per Worker are kept and deleted with the Worker.",
+          "Secret values are never stored by Spaces: they go straight to Cloudflare and only their names are kept.",
+        ],
+      ],
+      [
+        "Security",
+        [
+          "The platform's Cloudflare API token and webhook signing secrets are encrypted at rest with AES-256-GCM, using a key that is not stored with the data.",
+          "Keys and tokens are stored only as hashes (SHA-256), and passwords as scrypt hashes.",
+          "Agent keys carry scopes (for example workers:read or spaces:write) and a required expiry of at most one year; calls outside a key's scopes are refused. Keys can be revoked at any time.",
+          "Webhooks are signed with HMAC-SHA256. Published sites run in a sandbox with a strict content security policy, separate from the app.",
+        ],
+      ],
+      [
+        "Your choices",
+        [
+          "You can delete your sites, KV values and files, and revoke keys and tokens from the dashboard or the API at any time. A team owner can remove members; the admin can delete a team, which removes its members, keys, notifications and Workers.",
+          `For other requests about your data, contact the operator: ${PRIVACY_PLACEHOLDER.en}`,
+        ],
+      ],
+    ] as [string, string[]][],
+  },
+  ar: {
+    title: "سياسة الخصوصية",
+    sub: "ما الذي تحفظه نسخة Marsa Spaces هذه، ولماذا، وإلى متى، وكيف تحميه. تصف السياسة ما يفعله البرنامج فعليًا.",
+    updated: "آخر تحديث: 21 أكتوبر 2026 (الإصدار 0.14.0)",
+    sections: [
+      [
+        "من يشغّل الخدمة",
+        [
+          `المشغّل (الكيان القانوني): ${PRIVACY_PLACEHOLDER.ar}`,
+          `العنوان: ${PRIVACY_PLACEHOLDER.ar}`,
+          `القانون والاختصاص القضائي: ${PRIVACY_PLACEHOLDER.ar}`,
+          `التواصل بشأن الخصوصية: ${PRIVACY_PLACEHOLDER.ar}`,
+        ],
+      ],
+      [
+        "ما تنشره",
+        [
+          "الملفات التي ترفعها (HTML وCSS والصور وغيرها) تُحفظ على هذا الخادم وتُعرض علنًا على رابط الموقع حتى تنتهي مدته أو يُحذف. يستطيع أي شخص لديه الرابط رؤيتها، وتظهر مواقع الفرق التي تسمح بذلك في الصفحة الرئيسية.",
+          "تُحذف المواقع المنتهية تلقائيًا مع ملفاتها وعدّاد زياراتها وبياناتها. المواقع الدائمة تبقى حتى تُحذف.",
+          "عند النشر تحصل على رمز تعديل، ولا نحفظ إلا بصمته (SHA-256).",
+        ],
+      ],
+      [
+        "الحسابات والفرق",
+        [
+          "لا يوجد تسجيل بالبريد الإلكتروني. لعضو الفريق اسم مستخدم واسم ظاهر وكلمة مرور تُحفظ كبصمة scrypt فقط.",
+          "مفاتيح الفرق وروابط الدعوة ورموز MCP ومفاتيح الوكلاء تظهر مرة واحدة وتُحفظ كبصمات SHA-256 فقط، مع بادئة قصيرة للتمييز بينها.",
+          "لكل فريق سجل نشاط بآخر 500 عملية (من فعل ماذا ومتى) يراه أعضاؤه والمدير.",
+          "تُحفظ الإشعارات (النشر وتغييرات المفاتيح والأعضاء) لمالكي الفريق والمدير، آخر 200 إشعار لكل فريق.",
+        ],
+      ],
+      [
+        "ملفات تعريف الارتباط (الكوكيز)",
+        [
+          "تسجيل الدخول يضع كوكي جلسة واحدًا (httpOnly وSameSite=Lax وSecure على https). تنتهي افتراضيًا بعد 7 أيام للفرق و12 ساعة للمدير، ويحذفها تسجيل الخروج.",
+          "لا توجد كوكيز إعلانية أو للتتبع. الصفحات العامة والمواقع المنشورة لا تضع أي كوكيز.",
+        ],
+      ],
+      [
+        "عدّ الزيارات",
+        [
+          "تُعدّ مشاهدات الصفحات لكل موقع ولكل يوم على هذا الخادم، بلا كوكيز، ولا يُحفظ عنوان IP ولا بيانات المتصفح.",
+          "يُقدَّر عدد الزوار ببصمة من ملح عشوائي يتغير كل ساعة مع الموقع وعنوان IP وبيانات المتصفح. الملح في الذاكرة فقط ويُستبدل كل ساعة، فلا يمكن ربط البصمات أو إعادة حسابها. تُحفظ المجاميع اليومية فقط، لمدة 90 يومًا افتراضيًا.",
+          "من يرسل Do Not Track أو Global Privacy Control يُعدّ مشاهدة فقط. لا تُعدّ الروبوتات ومعاينات الروابط.",
+        ],
+      ],
+      [
+        "عناوين IP",
+        [
+          "تُستخدم عناوين IP في الذاكرة لحدود المعدل (الرفع ومحاولات الدخول وروابط الدعوة) ولا يكتبها التطبيق على القرص.",
+          "عند استخدام مفتاح وكيل تُحفظ بصمة مفتاحية لعنوان IP (HMAC بسر الخادم) مع المفتاح، آخر 20 بصمة، لتنبيه الفريق إذا استُخدم المفتاح من عنوان جديد. لا يُحفظ العنوان نفسه.",
+        ],
+      ],
+      [
+        "مزودو الخدمة",
+        [
+          "إذا فعّل المدير خلفية البيانات والملفات، تُحفظ قيم KV والملفات المرفوعة للمواقع المسموح لها لدى Cloudflare ‏(Workers KV وR2).",
+          "تُنشر وركرز الفرق على شبكة Cloudflare عبر حساب Cloudflare الخاص بالمنصة، وتحفظ Cloudflare كودها ومتغيراتها وأسرارها.",
+          "قد يُقدَّم هذا الموقع عبر Cloudflare التي يمكن أن تضيف سكربت Web Analytics الخاص بها، وسياسة أمان الصفحات تسمح به. الخطوط وبقية الملفات تُقدَّم من هذا الخادم.",
+          "ترسل الـ Webhooks الصادرة نص الإشعار (اسم الفريق ومن فعل ماذا) فقط إلى الروابط التي يحددها مالك الفريق أو المدير.",
+        ],
+      ],
+      [
+        "وركرز الفرق",
+        [
+          "كل نشر يُحفظ كإصدار على هذا الخادم: الكود والمتغيرات العادية وأسماء الأسرار ومن نشره ومتى وحجمه وبصمته SHA-256 وملاحظة اختيارية. تُحفظ آخر 10 إصدارات لكل وركر وتُحذف معه.",
+          "لا تحفظ Spaces قيم الأسرار أبدًا: تذهب مباشرة إلى Cloudflare ونحفظ أسماءها فقط.",
+        ],
+      ],
+      [
+        "الأمان",
+        [
+          "رمز Cloudflare الخاص بالمنصة وأسرار توقيع الـ Webhooks مشفّرة أثناء التخزين بـ AES-256-GCM بمفتاح لا يُحفظ مع البيانات.",
+          "المفاتيح والرموز تُحفظ كبصمات فقط (SHA-256)، وكلمات المرور كبصمات scrypt.",
+          "لمفاتيح الوكلاء صلاحيات محددة (مثل workers:read أو spaces:write) وتاريخ انتهاء إلزامي لا يتجاوز سنة، ويُرفض أي طلب خارج صلاحيات المفتاح. ويمكن إلغاء المفاتيح في أي وقت.",
+          "الـ Webhooks موقّعة بـ HMAC-SHA256. المواقع المنشورة تعمل في بيئة معزولة بسياسة أمان صارمة ومنفصلة عن التطبيق.",
+        ],
+      ],
+      [
+        "اختياراتك",
+        [
+          "تستطيع حذف مواقعك وقيم KV والملفات، وإلغاء المفاتيح والرموز، من لوحة التحكم أو الـ API في أي وقت. يستطيع مالك الفريق إزالة الأعضاء، ويستطيع المدير حذف فريق فتُحذف معه أعضاؤه ومفاتيحه وإشعاراته ووركرزه.",
+          `لأي طلب آخر يخص بياناتك، تواصل مع المشغّل: ${PRIVACY_PLACEHOLDER.ar}`,
+        ],
+      ],
+    ] as [string, string[]][],
+  },
+};
+
+export function privacyHtml(lang: Lang, c: Config): string {
+  const p = PRIVACY[lang];
+  const sections = p.sections
+    .map(
+      ([h, items], i) =>
+        `<section class="policy-section" aria-labelledby="p-${i}"><h2 id="p-${i}">${i === 8 ? `${icon("shield")} ` : ""}${esc(h)}</h2><ul>${items
+          .map((x) => {
+            const ph = PRIVACY_PLACEHOLDER[lang];
+            return `<li>${x.includes(ph) ? esc(x).replace(esc(ph), `<mark class="placeholder">${esc(ph)}</mark>`) : esc(x)}</li>`;
+          })
+          .join("")}</ul></section>`,
+    )
+    .join("");
+  const body = `<div class="wrap page-narrow policy">
+  ${pageHead(STRINGS[lang].product, esc(p.title), p.sub)}
+  <p class="meta">${esc(p.updated)}</p>
+  ${sections}
+</div>`;
+  return layout({
+    lang,
+    title: `${p.title} · ${STRINGS[lang].product}`,
+    description: p.sub,
+    path: "/privacy",
+    body,
+    config: c,
+  });
 }

@@ -1,9 +1,12 @@
 import { serve } from "@hono/node-server";
+import type { AgentKeyStore } from "./agent-keys.js";
+import { AlertTicker } from "./alerts.js";
 import { createApp } from "./app.js";
 import { CloudflareBackend } from "./backend/cloudflare.js";
 import { probeBackend } from "./backend/health.js";
 import { APP_NAME } from "./brand.js";
 import { loadConfig } from "./config.js";
+import type { NotificationCenter } from "./notify.js";
 import { SiteStore } from "./store.js";
 import { sweepExpired } from "./sweep.js";
 import { TeamStore } from "./teams.js";
@@ -24,7 +27,27 @@ await teams.init();
 
 const backend = config.cloudflare ? new CloudflareBackend(config.cloudflare) : null;
 const visits = new VisitCounter(config.dataDir, config.visits);
-const app = createApp({ config, store, backend, teams, visits });
+let svc: { agentKeys: AgentKeyStore; notify: NotificationCenter } | null = null;
+const app = createApp({
+  config,
+  store,
+  backend,
+  teams,
+  visits,
+  expose: (s) => {
+    svc = s;
+  },
+});
+// Alerts: expired agent keys and the storage check (every 10 minutes, and once at start).
+const alerts = svc
+  ? new AlertTicker({
+      agentKeys: (svc as { agentKeys: AgentKeyStore }).agentKeys,
+      notify: (svc as { notify: NotificationCenter }).notify,
+      backend,
+    })
+  : null;
+const alertTimer = setInterval(() => void alerts?.tick(), 10 * 60_000);
+alertTimer.unref();
 const flushTimer = setInterval(() => void visits.flush(), config.visits.flushSeconds * 1000);
 flushTimer.unref();
 
@@ -50,6 +73,7 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
   console.log(
     `data/files backend: ${config.cloudflare ? `cloudflare (KV namespace ${config.cloudflare.kvNamespaceId}, R2 bucket ${config.cloudflare.r2Bucket})` : "off (static publishing only)"}`,
   );
+  void alerts?.tick();
   // Fail loudly at start if the store rejects us (e.g. a token that lost a permission).
   if (backend) {
     probeBackend(backend)

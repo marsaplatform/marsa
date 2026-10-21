@@ -9,7 +9,8 @@ interface NodeBindings {
  * Best-effort client IP. Behind a reverse proxy (TRUST_PROXY=true) uses
  * X-Real-IP, else the LAST X-Forwarded-For hop (the one your proxy appended;
  * earlier hops are client-controlled). Otherwise the socket address.
- * The IP is only used as an in-memory rate-limit key; it is never stored or logged.
+ * The IP is used as an in-memory rate-limit key and is never stored or logged. Agent keys
+ * (0.14.0) keep only a keyed HMAC of it, to flag use from a new address.
  */
 export function clientIp(c: Context, trustProxy: boolean): string {
   if (trustProxy) {

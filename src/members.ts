@@ -376,8 +376,16 @@ export class MemberStore {
     await Promise.all([this.persist(), this.persistAudit()]);
   }
 
+  /** Called after every audit entry (0.14.0: the notification center listens here). */
+  onLog: ((e: Omit<AuditEntry, "at">) => void) | null = null;
+
   // audit
   log(e: Omit<AuditEntry, "at">): Promise<void> {
+    try {
+      this.onLog?.(e);
+    } catch {
+      // never let a listener break the audit log
+    }
     const list = this.audit.get(e.teamId) ?? [];
     list.push({ at: new Date(this.now()).toISOString(), ...e });
     if (list.length > AUDIT_MAX) list.splice(0, list.length - AUDIT_MAX);

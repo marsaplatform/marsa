@@ -5,6 +5,7 @@ import type { Config } from "../config.js";
 import { isBlocked, mimeFor } from "../mime.js";
 import { SITE_CSP } from "../security.js";
 import type { SiteMeta, SiteStore } from "../store.js";
+import { can, credentialOf, hasEditBearer, type TeamAuth } from "../team-auth.js";
 import type { TeamStore } from "../teams.js";
 import { bearer, hashToken, safeEqual } from "../tokens.js";
 import type { SiteBackend } from "./types.js";
@@ -20,6 +21,8 @@ export interface BackendRouteDeps {
   now: () => number;
   /** Counts a write against the per-IP upload limit; returns a 429 response or null. */
   uploadRate: (c: Context) => Promise<Response | null>;
+  /** Team key / agent key resolver (0.14.0): kv:read / kv:write on the team's own sites. */
+  teamAuth?: TeamAuth;
 }
 
 const err = (c: Context, status: number, code: string, message: string) =>
@@ -82,6 +85,20 @@ export function mountBackendRoutes(app: Hono, deps: BackendRouteDeps): void {
   /** The live site, after the read/write policy check. */
   async function site(c: Context, write: boolean): Promise<SiteMeta | Response> {
     const meta = await store.get(c.req.param("id") ?? "");
+    // The team key or an agent key with kv:read / kv:write works on the team's own sites.
+    if (deps.teamAuth && credentialOf(c) && !hasEditBearer(c)) {
+      const cred = await deps.teamAuth(c);
+      if (!meta || !cred || cred === "invalid" || cred.team.id !== meta.teamId) {
+        return err(c, 404, "NOT_FOUND", "site not found or token invalid");
+      }
+      const scope = write ? "kv:write" : "kv:read";
+      if (!can(cred, scope)) {
+        return err(c, 403, "INSUFFICIENT_SCOPE", `this agent key does not have the ${scope} scope`);
+      }
+      if (Date.parse(meta.expiresAt) <= now())
+        return err(c, 410, "EXPIRED", "this link has expired");
+      return meta;
+    }
     const token = bearer(c.req.header("authorization"));
     const tokenOk = !!meta && !!token && safeEqual(hashToken(token), meta.tokenHash);
     if (!meta || ((write || !limits.publicRead) && !tokenOk)) {

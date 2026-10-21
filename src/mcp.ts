@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { randomBytes } from "node:crypto";
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import type { Scope } from "./agent-keys.js";
 import type { SiteBackend } from "./backend/types.js";
 import { APP_VERSION, PRODUCT_NAME } from "./brand.js";
 import type { Config } from "./config.js";
@@ -11,8 +12,10 @@ import type { AuditEntry } from "./members.js";
 import { isBlocked, mimeFor } from "./mime.js";
 import type { RateLimiter } from "./rate-limit.js";
 import type { SiteMeta, SiteStore } from "./store.js";
+import { isAgentKey, type TeamAuth } from "./team-auth.js";
 import type { TeamStore } from "./teams.js";
 import { bearer, hashToken, safeEqual } from "./tokens.js";
+import { versionMeta } from "./worker-versions.js";
 import { WorkerError, type WorkerService, workerView } from "./workers.js";
 
 /**
@@ -31,6 +34,8 @@ export interface McpToken {
   hash: string;
   prefix: string;
   createdAt: string;
+  /** Set when an agent key (0.14.0) is used instead of a space token: its scopes. */
+  agentScopes?: Scope[];
 }
 
 export const MCP_TOKEN_PREFIX = "marsa_mcp_";
@@ -82,7 +87,18 @@ export interface McpDeps {
   replaceSite: (meta: SiteMeta, entries: UploadEntry[]) => Promise<SiteMeta>;
   /** Team Workers (tools appear only when the admin enabled Workers for the space's team). */
   workers?: WorkerService;
+  /** Team/agent key resolver (0.14.0): an agent key with the mcp scope works as the token. */
+  teamAuth?: TeamAuth;
 }
+
+/** The agent-key scope a tool needs. */
+function toolScope(t: { write?: boolean; needsBackend?: boolean; needsWorkers?: boolean }): Scope {
+  if (t.needsWorkers) return t.write ? "workers:deploy" : "workers:read";
+  if (t.needsBackend) return t.write ? "kv:write" : "kv:read";
+  return t.write ? "spaces:write" : "spaces:read";
+}
+const allowedFor = (token: McpToken, t: Parameters<typeof toolScope>[0]) =>
+  !token.agentScopes || token.agentScopes.includes(toolScope(t));
 
 type Json = Record<string, unknown>;
 interface Tool {
@@ -453,6 +469,105 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
         }
       },
     },
+    {
+      name: "list_worker_versions",
+      title: "List a Worker's stored versions",
+      description:
+        "The last stored versions of one of the team's Workers (newest first): number, when, who, action (deploy, redeploy, rollback), size, SHA-256, note, var names and secret names. Code is not included; use get_worker_version.",
+      inputSchema: obj({ name: { type: "string" } }, ["name"]),
+      annotations: { readOnlyHint: true },
+      needsWorkers: true,
+      run: async (a, { meta }) => {
+        const team = teams.get(meta.teamId);
+        const w = d.workers as WorkerService;
+        const rec = team ? w.find(team.id, str(a, "name")) : null;
+        if (!rec) return fail("no such Worker");
+        const versions = (await w.listVersions(rec)).map(versionMeta);
+        return ok({
+          worker: rec.name,
+          current: rec.version ?? null,
+          versions,
+          ...(versions.length ? {} : { note: "no stored version — the next deploy will be saved" }),
+        });
+      },
+    },
+    {
+      name: "get_worker_version",
+      title: "Read a stored Worker version",
+      description: "One stored version of a Worker, with its code and vars (never secret values).",
+      inputSchema: obj({ name: { type: "string" }, version: { type: "integer" } }, [
+        "name",
+        "version",
+      ]),
+      annotations: { readOnlyHint: true },
+      needsWorkers: true,
+      run: async (a, { meta }) => {
+        const team = teams.get(meta.teamId);
+        const w = d.workers as WorkerService;
+        const rec = team ? w.find(team.id, str(a, "name")) : null;
+        if (!rec) return fail("no such Worker");
+        const v = await w.getVersion(rec, Number(a.version));
+        if (!v) return fail("no such stored version");
+        return ok({ version: { ...versionMeta(v), vars: v.vars, code: v.code } });
+      },
+    },
+    {
+      name: "redeploy_worker",
+      title: "Redeploy a Worker",
+      description:
+        "One-click redeploy: deploy the newest stored version of a Worker again (same code and vars; secrets are kept).",
+      inputSchema: obj({ name: { type: "string" }, note: { type: "string" } }, ["name"]),
+      annotations: { destructiveHint: false },
+      write: true,
+      needsWorkers: true,
+      run: async (a, { meta, token }) => {
+        const team = teams.get(meta.teamId);
+        const w = d.workers as WorkerService;
+        const rec = team ? w.find(team.id, str(a, "name")) : null;
+        if (!team || !rec) return fail("no such Worker");
+        try {
+          return ok({
+            worker: await w.redeploy(team, rec, { kind: "mcp", label: token.name }, a.note),
+          });
+        } catch (err) {
+          if (err instanceof WorkerError) return fail(`${err.code}: ${err.message}`);
+          throw err;
+        }
+      },
+    },
+    {
+      name: "rollback_worker",
+      title: "Roll a Worker back",
+      description:
+        "Deploy an older stored version of a Worker again (its code and vars). It is recorded as a new version. Secrets stay as they are now.",
+      inputSchema: obj(
+        { name: { type: "string" }, version: { type: "integer" }, note: { type: "string" } },
+        ["name", "version"],
+      ),
+      annotations: { destructiveHint: true },
+      write: true,
+      needsWorkers: true,
+      run: async (a, { meta, token }) => {
+        const team = teams.get(meta.teamId);
+        const w = d.workers as WorkerService;
+        const rec = team ? w.find(team.id, str(a, "name")) : null;
+        if (!team || !rec) return fail("no such Worker");
+        try {
+          return ok(
+            await w.rollback(
+              team,
+              rec,
+              Number(a.version),
+              { kind: "mcp", label: token.name },
+              a.note,
+            ),
+          );
+        } catch (err) {
+          if (err instanceof WorkerError) return fail(`${err.code}: ${err.message}`);
+          throw err;
+        }
+      },
+    },
   ];
 
   function workersOn(meta: SiteMeta) {
@@ -474,6 +589,7 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
     tools.filter(
       (t) =>
         (!t.write || token.scope === "rw") &&
+        allowedFor(token, t) &&
         (!t.needsBackend || backendOn(meta)) &&
         (!t.needsWorkers || workersOn(meta)),
     );
@@ -526,7 +642,26 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
       }
       const meta = await store.get(c.req.param("id") ?? "");
       const secret = bearer(c.req.header("authorization")) ?? "";
-      const token = meta ? findMcpToken(meta, secret) : null;
+      let token = meta ? findMcpToken(meta, secret) : null;
+      if (meta && !token && d.teamAuth && isAgentKey(secret)) {
+        const cred = await d.teamAuth(c, secret);
+        if (cred && cred !== "invalid" && cred.kind === "agent" && cred.team.id === meta.teamId) {
+          if (!cred.key.scopes.includes("mcp")) {
+            return httpErr(c, 403, "this agent key does not have the mcp scope");
+          }
+          token = {
+            id: cred.key.id,
+            name: cred.actor.label,
+            scope: cred.key.scopes.some((x) => x.endsWith(":write") || x === "workers:deploy")
+              ? "rw"
+              : "ro",
+            hash: cred.key.hash,
+            prefix: cred.key.prefix,
+            createdAt: cred.key.createdAt,
+            agentScopes: cred.key.scopes,
+          };
+        }
+      }
       if (!meta || !token || Date.parse(meta.expiresAt) <= now()) {
         c.header("WWW-Authenticate", 'Bearer realm="marsa-mcp"');
         return httpErr(c, 401, "missing, revoked or unknown MCP token for this space");
@@ -596,6 +731,14 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
           if (!tool) return c.json(rpcErr(id, -32602, `unknown tool: ${name}`));
           if (tool.write && token.scope !== "rw") {
             return c.json(rpc(id, fail("this token is read-only")));
+          }
+          if (!allowedFor(token, tool)) {
+            return c.json(
+              rpc(
+                id,
+                fail(`INSUFFICIENT_SCOPE: this agent key needs the ${toolScope(tool)} scope`),
+              ),
+            );
           }
           if (tool.needsBackend && !backendOn(meta)) {
             return c.json(

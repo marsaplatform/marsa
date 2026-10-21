@@ -50,7 +50,7 @@ export function openapi(config: Config) {
     openapi: "3.1.0",
     info: {
       title: `${APP_NAME} API`,
-      version: "0.13.1",
+      version: "0.14.0",
       description: `${APP_TAGLINE} Upload static files and get an expiring, shareable link. No account: the edit token returned at creation manages the site. Teams can also sign in in a browser at /login (team key) to manage their sites; the admin signs in at /admin/login. Those browser routes use session cookies and are not part of this API. Each site also has an MCP server (Streamable HTTP, JSON-RPC) at /mcp/s/{siteId} with per-site bearer tokens; see /docs/mcp.`,
       license: { name: "MIT", identifier: "MIT" },
     },
@@ -64,7 +64,7 @@ export function openapi(config: Config) {
           in: "header",
           name: "X-Team-Key",
           description:
-            "Optional team key (from the admin). Attaches a new site to its team. Authorization: Bearer <team key> also works.",
+            "Optional team key (from the admin). Attaches a new site to its team. Authorization: Bearer <team key> also works. An agent key (marsa_agent_…) works wherever the team key does, limited to its scopes (403 INSUFFICIENT_SCOPE otherwise); see /docs/agent-keys.",
         },
       },
       schemas: {
@@ -291,6 +291,127 @@ export function openapi(config: Config) {
             { name: "name", in: "path", required: true, schema: { type: "string" } },
           ],
           responses: { "204": { description: "Deleted" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/versions": {
+        get: {
+          summary: "Stored versions of a Worker (newest first, last 10)",
+          operationId: "listWorkerVersions",
+          description: "No code; secret names only. Agent keys need workers:read.",
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "Versions" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/versions/{n}/code": {
+        get: {
+          summary: "Download the code of a stored version",
+          operationId: "getWorkerVersionCode",
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+            { name: "n", in: "path", required: true, schema: { type: "integer" } },
+          ],
+          responses: { "200": { description: "The script (text/javascript)" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/redeploy": {
+        post: {
+          summary: "One-click redeploy of the newest stored version",
+          operationId: "redeployWorker",
+          description:
+            'Optional JSON {"note"}. Secrets are kept. 409 NO_STORED_VERSION when nothing is stored yet.',
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "Redeployed" } },
+        },
+      },
+      "/api/teams/{team}/workers/{name}/rollback": {
+        post: {
+          summary: "Roll a Worker back to a stored version",
+          operationId: "rollbackWorker",
+          description:
+            'JSON {"version": n, "note"?}. Recorded as a new version; returns missingSecrets.',
+          security: [{ teamKey: [] }],
+          parameters: [
+            { name: "team", in: "path", required: true, schema: { type: "string" } },
+            { name: "name", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "Rolled back" } },
+        },
+      },
+      "/api/teams/{team}/sites": {
+        get: {
+          summary: "The team's live sites",
+          operationId: "listTeamSites",
+          description: "Team key, or an agent key with spaces:read.",
+          security: [{ teamKey: [] }],
+          parameters: [{ name: "team", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "200": { description: "Sites" } },
+        },
+      },
+      "/api/teams/{team}/agent-keys": {
+        get: {
+          summary: "List agent keys and open invite links (team key only)",
+          operationId: "listAgentKeys",
+          security: [{ teamKey: [] }],
+          parameters: [{ name: "team", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "200": { description: "Keys (never secrets)" } },
+        },
+        post: {
+          summary: "Create an agent key (team key only)",
+          operationId: "createAgentKey",
+          description:
+            'JSON {"name","description"?,"scopes":[…],"expiresInDays": 1-365}. Scopes: workers:read, workers:deploy, spaces:read, spaces:write, kv:read, kv:write, mcp. The key is returned once.',
+          security: [{ teamKey: [] }],
+          parameters: [{ name: "team", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "201": { description: "Created" } },
+        },
+      },
+      "/api/teams/{team}/agent-invites": {
+        post: {
+          summary: "Create a one-time agent invite link (24 h, team key only)",
+          operationId: "createAgentInvite",
+          security: [{ teamKey: [] }],
+          parameters: [{ name: "team", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "201": { description: "Invite URL" } },
+        },
+      },
+      "/agent-invite/{token}/claim": {
+        post: {
+          summary: "Claim an agent invite: returns the agent key once",
+          operationId: "claimAgentInvite",
+          parameters: [{ name: "token", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "201": { description: "The key" },
+            "404": { description: "Invalid, used or expired" },
+          },
+        },
+      },
+      "/api/teams/{team}/notifications": {
+        get: {
+          summary: "The team's notifications (team key only)",
+          operationId: "listNotifications",
+          security: [{ teamKey: [] }],
+          parameters: [{ name: "team", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "200": { description: "Notifications and the unread count" } },
+        },
+      },
+      "/api/teams/{team}/webhook": {
+        put: {
+          summary: "Set the team webhook (team key only)",
+          operationId: "setWebhook",
+          description: 'JSON {"url"} (https, public host). Returns the signing secret once.',
+          security: [{ teamKey: [] }],
+          parameters: [{ name: "team", in: "path", required: true, schema: { type: "string" } }],
+          responses: { "200": { description: "Saved" } },
         },
       },
       "/api/sites": {

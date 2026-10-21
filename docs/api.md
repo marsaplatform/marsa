@@ -107,6 +107,12 @@ see [Teams](teams.md).
 - Upload with `X-Team-Key: <team key>` (or `Authorization: Bearer <team key>`) on `POST /api/sites`
   to attach the site to a team. A wrong key answers `401 INVALID_TEAM_KEY`.
 - `GET /api/directory`: public JSON of live sites of listed teams, grouped by team (cached 30 s).
+- An [agent key](agent-keys.md) (`marsa_agent_…`, 0.14.0) works wherever the team key does, limited
+  to its scopes: `spaces:write` to publish/replace/extend/delete the team's sites, `spaces:read` for
+  `GET /api/sites/:id` and `GET /api/teams/:team/sites`, `kv:read`/`kv:write` for the team's KV and
+  files. Outside its scopes: `403 INSUFFICIENT_SCOPE`.
+- `GET /api/teams/:team/sites` (team key or `spaces:read`): the team's live sites.
+- Agent keys, invite links, notifications and webhooks: see [Agent keys and alerts](agent-keys.md).
 
 ## Error codes
 
