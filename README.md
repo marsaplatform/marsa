@@ -2,6 +2,11 @@
 
 # Marsa
 
+![Current local application](docs/media/current-home.png)
+
+Local application captured on 24 October 2026 with an empty, isolated data directory. Counters and limits reflect this local configuration.
+
+
 **Marsa is the harbor where your AI agent's work lands.**
 Turn any static page, HTML report or prototype into a shareable link in seconds, with no account.
 
@@ -335,7 +340,7 @@ Marsa is open source because a place to drop work should be one you control:
 | --- | --- | --- |
 | **Atlas MCP · أطلس** | Source-cited migration & asylum services, organizations and legal references for Egypt (21 tools, no key) | <https://atlas.marsaplatform.com/mcp> · [GitHub](https://github.com/marsaplatform/atlas-mcp) |
 | **ERX · مرصد مصر البحثي** | Egypt Research Commons: research archive + MCP for Egyptian public affairs (hosted MCP needs a free API key) | <https://egypt-research.marsaplatform.com> · [GitHub](https://github.com/marsaplatform/erx-mcp) |
-| **Malja MCP · ملجأ** | Humanitarian & refugee data (UNHCR, World Bank, HDX, ReliefWeb) with sources; self-hosted, hosted endpoint coming soon | [Project page](https://spaces.marsaplatform.com/s/k3sb9ww3dj/) |
+| **Malja MCP · ملجأ** | Humanitarian & refugee data (UNHCR, World Bank, HDX, ReliefWeb) with sources; self-hosted; see the current source setup guide | [GitHub and setup](https://github.com/marsaplatform/malja-mcp) |
 
 ## بالعربي
 
