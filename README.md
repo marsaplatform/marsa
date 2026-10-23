@@ -1,3 +1,5 @@
+[![CI](https://github.com/marsaplatform/marsa/actions/workflows/ci.yml/badge.svg)](https://github.com/marsaplatform/marsa/actions/workflows/ci.yml)
+
 # Marsa
 
 **Marsa is the harbor where your AI agent's work lands.**
