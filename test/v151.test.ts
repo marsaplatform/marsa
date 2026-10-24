@@ -19,7 +19,7 @@ afterEach(async () => {
 
 const KEY = "k".repeat(48);
 const GH_TOKEN = "test-github-token-not-real-0123456789";
-const MCP_CODE = `import{Hono as h}from"x";const a=new Hono();a.post("/mcp",()=>0);export default{fetch(r){return new Response("Context is not finalized")}};`;
+const MCP_CODE = `const Hono=class{post(){}};const a=new Hono();a.post("/mcp",()=>0);export default{fetch(r){return new Response("Context is not finalized")}};`;
 const WEB_CODE = `export default { async fetch() { return new Response("hi"); } };`;
 
 /** A fake GitHub API: public repo "org/pub" (main at sha "b"*40), private "org/priv". */

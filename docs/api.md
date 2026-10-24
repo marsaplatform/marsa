@@ -96,6 +96,7 @@ A wrong token and a missing site both return `404` on purpose, so ids can't be p
 | `POST /api/admin/teams` | Create a team `{"name", "backend"?, "directory"?}`; the response has its key, once |
 | `PATCH /api/admin/teams/:id` | Change `name`, `backend` or `directory` |
 | `POST /api/admin/teams/:id/rotate` | New team key; the old one stops working |
+| `POST /api/admin/teams/:id/notes` | Post a note to the team as the platform admin `{"severity","message","stage"?,"category"?,"target"?}` (0.17.0; no notification, no webhook). Also the **Post a note to a team** form on Admin › Notes |
 | `GET /api/admin/teams/:id/export` | The team as a zip (members without passwords, activity, spaces and files, data, Workers with code and versions, agent keys without secrets, recipes, notes, notifications) |
 | `DELETE /api/admin/teams/:id?confirm=<name or id>` | Move a team to the trash for 7 days (an export is saved, Workers are turned off, keys stop working). `?sites=delete` also deletes its sites when it is purged; `?purge=now` deletes it for good at once |
 | `GET /api/admin/trash` | Deleted teams waiting out the grace period |
@@ -143,6 +144,10 @@ see [Teams](teams.md).
 | `INSUFFICIENT_SCOPE` | 403 | An agent key without the scope this call needs |
 | `TEAM_KEY_REQUIRED` | 403 | The call needs the team key itself (activity, export, webhook); agent keys can't use it |
 | `RATE_LIMITED` | 429 | Slow down; see the `Retry-After` header |
+| `SYNTAX_ERROR` / `MISSING_MODULE` / `NOT_A_MODULE` | 400 | A Worker's code was refused before upload (0.17.0; see [Workers](workers.md)) |
+| `VALIDATION_FAILED` | 400 | Cloudflare refused the Worker script (its error 10021) |
+| `INVALID_CRON` | 400 | A cron expression is malformed, or runs more often than every 10 minutes |
+| `CRON_QUOTA` / `CRON_ACCOUNT_LIMIT` / `KV_QUOTA` / `KV_ACCOUNT_LIMIT` | 409 | A cron or private-storage quota is full |
 
 ## Recipes and Worker API keys (0.14.0)
 
@@ -161,6 +166,18 @@ see [Teams](teams.md).
 curl -s "https://marsa.example.com/api/teams/sanad/activity?action=worker-&format=csv" \
   -H "X-Team-Key: $MARSA_TEAM_KEY" -o activity.csv
 ```
+
+## Deploy jobs and Worker runtime (0.17.0)
+
+- Worker deploys wait up to 60 s and answer as before; a slower deploy answers `202` with
+  `{"job": {"id", "status", "statusUrl"}}`. `?wait=0…90`, `?async=1` or `Prefer: respond-async` choose the
+  wait. Poll `GET /api/teams/<team>/jobs/<id>`; `GET /api/teams/<team>/jobs?worker=<name>` lists recent jobs.
+  Successful deploy answers include `health: {path, status, ms, ok}`.
+- `GET /api/teams/<team>/workers/<name>/runtime`: compatibility date and flags, bindings, crons, storage,
+  var and secret names, and the limits (32 vars, 32 KB per value, 64 KB in total per Worker).
+- Deploys accept `"crons": ["*/30 * * * *"]` and `"storage": "kv"` (private KV as `env.STORE`). Details in
+  [Workers](workers.md#deploy-jobs-checks-crons-and-private-storage-0170).
+- Python `urllib` gets Cloudflare error 1010 with its default User-Agent: send your own `User-Agent` header.
 
 ## Everything else
 

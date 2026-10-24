@@ -243,6 +243,10 @@ export class WorkerOps {
         zoneId: a.zoneId ?? sv.zoneId ?? null,
         sampleScript: sample?.script ?? null,
         lastDeployAt,
+        bicConfirmedAt: (() => {
+          const b = this.d.workers.bicView();
+          return b.enabled && b.ruleId ? (b.at ?? null) : null;
+        })(),
         now: this.d.now(),
       }),
     );

@@ -8,7 +8,7 @@ import {
   sendActivity,
 } from "./activity-export.js";
 import { AgentKeyError, type AgentKeyStore } from "./agent-keys.js";
-import { NoteError, type NoteStore } from "./agent-notes.js";
+import { NoteError, type NoteStore, readNote } from "./agent-notes.js";
 import { probeBackend } from "./backend/health.js";
 import type { SiteBackend } from "./backend/types.js";
 import type { BackupService } from "./backup.js";
@@ -3055,9 +3055,37 @@ export function mountWebRoutes(app: Hono, d: WebDeps): void {
           ctx: ADMIN_CTX(lang),
           flash: takeFlash(c, s),
           notes: d.notes?.list({}, 500) ?? [],
-          teams: teams.list().map((x) => ({ id: x.id, name: x.name })),
+          teams: teams.list().map((x) => ({ id: x.id, name: x.name, slug: x.slug ?? null })),
         }),
       );
+    });
+    // 0.17.0: the admin posts a note to a team (no notification, no webhook).
+    adminPost("/admin/team-notes", async (c, { s, form }) => {
+      const back = href("/admin/notes");
+      const team = teams.get(field(form, "team"));
+      if (!d.notes || !team) return done(c, s, back, { kind: "err", text: t.notFound });
+      const worker = field(form, "worker").trim();
+      try {
+        const n = await d.notes.add(
+          team.id,
+          readNote(
+            {
+              severity: field(form, "severity"),
+              stage: field(form, "stage") || "other",
+              ...(field(form, "category").trim() ? { category: field(form, "category") } : {}),
+              message: field(form, "message"),
+              ...(worker ? { target: { type: "worker", id: worker } } : {}),
+            },
+            "platform admin",
+          ),
+          "admin",
+        );
+        await d.audit({ teamId: team.id, actor: ADMIN_ACTOR, action: "note-post", detail: n.id });
+      } catch (e) {
+        if (e instanceof NoteError) return done(c, s, back, { kind: "err", text: e.message });
+        throw e;
+      }
+      return done(c, s, back, { kind: "ok", text: NX[lang].posted });
     });
     adminPost("/admin/notes/:id", async (c, { s, form }) => {
       const back = localBack(form, href("/admin/notes"));

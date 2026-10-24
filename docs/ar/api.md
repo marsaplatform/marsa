@@ -96,6 +96,7 @@ curl -s -X DELETE "https://marsa.example.com/api/sites/$ID" -H "Authorization: B
 | `POST /api/admin/teams` | إنشاء فريق `{"name", "backend"?, "directory"?}`؛ الاستجابة فيها مفتاحه مرة واحدة |
 | `PATCH /api/admin/teams/:id` | تغيير `name` أو `backend` أو `directory` |
 | `POST /api/admin/teams/:id/rotate` | مفتاح فريق جديد؛ القديم يتوقف عن العمل |
+| `POST /api/admin/teams/:id/notes` | إرسال ملاحظة إلى الفريق باسم مسؤول المنصة `{"severity","message","stage"?,"category"?,"target"?}` (0.17.0؛ بلا تنبيه ولا webhook). وأيضًا نموذج **أرسل ملاحظة إلى فريق** في الإدارة › الملاحظات |
 | `GET /api/admin/teams/:id/export` | الفريق كملف zip (الأعضاء بلا كلمات مرور، والنشاط، والمساحات وملفاتها، والبيانات، والوركرات بكودها وإصداراتها، ومفاتيح الوكلاء بلا أسرار، والوصفات، والملاحظات، والإشعارات) |
 | `DELETE /api/admin/teams/:id?confirm=<name or id>` | نقل فريق إلى سلة المحذوفات لمدة ٧ أيام (يُحفظ تصدير، وتُطفأ الوركرات، وتتوقف المفاتيح). `?sites=delete` يحذف مواقعه أيضًا عند الحذف النهائي؛ `?purge=now` يحذفه نهائيًا فورًا |
 | `GET /api/admin/trash` | الفرق المحذوفة التي تنتظر انتهاء المهلة |
@@ -143,6 +144,10 @@ curl -s -X DELETE "https://marsa.example.com/api/sites/$ID" -H "Authorization: B
 | `INSUFFICIENT_SCOPE` | 403 | مفتاح وكيل بلا الصلاحية التي يحتاجها الاستدعاء |
 | `TEAM_KEY_REQUIRED` | 403 | الاستدعاء يحتاج مفتاح الفريق نفسه (النشاط، التصدير، الـ Webhook)؛ لا تستطيع مفاتيح الوكلاء استخدامه |
 | `RATE_LIMITED` | 429 | تمهّل؛ انظر ترويسة `Retry-After` |
+| `SYNTAX_ERROR` / `MISSING_MODULE` / `NOT_A_MODULE` | 400 | رُفض كود الوركر قبل الرفع (0.17.0؛ انظر [الوركرات](workers.md)) |
+| `VALIDATION_FAILED` | 400 | رفضت Cloudflare سكربت الوركر (خطؤها 10021) |
+| `INVALID_CRON` | 400 | تعبير cron غير صحيح، أو يعمل أكثر من مرة كل ١٠ دقائق |
+| `CRON_QUOTA` / `CRON_ACCOUNT_LIMIT` / `KV_QUOTA` / `KV_ACCOUNT_LIMIT` | 409 | امتلأت حصة الجدولة أو التخزين الخاص |
 
 ## الوصفات ومفاتيح API للوركرات (0.14.0)
 
@@ -161,6 +166,18 @@ curl -s -X DELETE "https://marsa.example.com/api/sites/$ID" -H "Authorization: B
 curl -s "https://marsa.example.com/api/teams/sanad/activity?action=worker-&format=csv" \
   -H "X-Team-Key: $MARSA_TEAM_KEY" -o activity.csv
 ```
+
+## مهام النشر وإعدادات تشغيل الوركر (0.17.0)
+
+- ينتظر نشر الوركر حتى ٦٠ ثانية ويردّ كما كان؛ والنشر الأبطأ يردّ `202` مع
+  `{"job": {"id", "status", "statusUrl"}}`. `?wait=0…90` أو `?async=1` أو `Prefer: respond-async` تحدد الانتظار.
+  استعلم `GET /api/teams/<team>/jobs/<id>`؛ و`GET /api/teams/<team>/jobs?worker=<name>` يعرض المهام الأخيرة.
+  ردود النشر الناجح فيها `health: {path, status, ms, ok}`.
+- `GET /api/teams/<team>/workers/<name>/runtime`: تاريخ التوافق وعلاماته، والربط، والجدولة، والتخزين،
+  وأسماء المتغيرات والأسرار، والحدود (٣٢ متغيرًا، ٣٢ كيلوبايت للقيمة، ٦٤ كيلوبايت إجمالًا لكل وركر).
+- يقبل النشر `"crons": ["*/30 * * * *"]` و`"storage": "kv"` (تخزين KV خاص باسم `env.STORE`). التفاصيل في
+  [الوركرات](workers.md).
+- `urllib` في Python يحصل على خطأ Cloudflare رقم 1010 بقيمة User-Agent الافتراضية: أرسل ترويسة `User-Agent` خاصة بك.
 
 ## كل ما سوى ذلك
 

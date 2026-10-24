@@ -54,6 +54,12 @@ export const NX = {
       "With the team key or any agent key: POST /api/teams/<team>/notes. Over MCP: the leave_note tool. Keys, tokens and passwords are removed; 30 notes per hour per key.",
     saved: "Note updated.",
     category: "Category",
+    postTitle: "Post a note to a team",
+    postHint:
+      "The team sees it on its Notes page and in GET /api/teams/<team>/notes. No notification or webhook is sent.",
+    post: "Post note",
+    posted: "Note posted.",
+    targetWorker: "Worker name (optional)",
   },
   ar: {
     title: "ملاحظات الوكلاء",
@@ -86,6 +92,12 @@ export const NX = {
       "بمفتاح الفريق أو أي مفتاح وكيل: POST /api/teams/<team>/notes. وعبر MCP: أداة leave_note. تُحذف المفاتيح وكلمات المرور تلقائيًا؛ ٣٠ ملاحظة في الساعة لكل مفتاح.",
     saved: "تم تحديث الملاحظة.",
     category: "التصنيف",
+    postTitle: "أرسل ملاحظة إلى فريق",
+    postHint:
+      "يراها الفريق في صفحة الملاحظات وفي GET /api/teams/<team>/notes. لا يُرسل أي تنبيه أو webhook.",
+    post: "أرسل الملاحظة",
+    posted: "أُرسلت الملاحظة.",
+    targetWorker: "اسم الوركر (اختياري)",
   },
 } as const;
 
@@ -243,9 +255,34 @@ export function notesHtml(lang: Lang, c: Config, o: NotesPageOpts): string {
   const how = `<details class="panel how-notes"><summary>${icon("info")} ${esc(x.howTitle)}</summary><p class="meta">${esc(x.howBody)}</p><pre tabindex="0" class="code ltr" dir="ltr"><code>curl -X POST "${esc(c.publicUrl)}/api/teams/&lt;team&gt;/notes" \\
   -H "X-Team-Key: $MARSA_AGENT_KEY" -H "content-type: application/json" \\
   -d '{"severity":"bug","stage":"deploy","category":"bindings","message":"…","target":{"type":"worker","id":"news"},"version":"4","agent":"my-agent"}'</code></pre><p><a class="text-link" href="${esc(href("/docs/recipes/agent-notes"))}">${esc(lang === "ar" ? "الدليل" : "Guide")}</a></p></details>`;
+  const sel = (name: string, label: string, vals: [string, string][]) =>
+    `<label>${esc(label)} <select name="${name}">${vals.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("")}</select></label>`;
+  const postForm = admin
+    ? `<details class="panel post-note" id="post-note"><summary>${icon("plus")} ${esc(x.postTitle)}</summary><p class="meta">${esc(x.postHint)}</p><form method="post" action="${esc(href("/admin/team-notes"))}" class="stack">${csrfField(o.csrf)}
+  ${sel(
+    "team",
+    x.team,
+    o.teams.map((t) => [t.id, t.slug ? `${t.name} (${t.slug})` : t.name]),
+  )}
+  ${sel(
+    "severity",
+    x.severity,
+    (["info", "suggestion", "bug", "blocker"] as const).map((v) => [v, x.severities[v]]),
+  )}
+  ${sel(
+    "stage",
+    x.stage,
+    (["other", "deploy", "build", "runtime", "recipe"] as const).map((v) => [v, x.stages[v]]),
+  )}
+  <label>${esc(x.category)} <input name="category" maxlength="40" dir="auto" value="platform"></label>
+  <label>${esc(x.targetWorker)} <input name="worker" maxlength="30" dir="ltr" class="ltr"></label>
+  <label>${esc(x.message)} <textarea name="message" rows="4" maxlength="2000" required dir="auto"></textarea></label>
+  <button class="button" type="submit">${esc(x.post)}</button></form></details>`
+    : "";
   const body = `<div class="page-wide">
   ${pageHead(admin ? DS[lang].adminArea : (o.ctx.name ?? ""), x.title, admin ? x.subAdmin : x.subTeam)}
   ${flashBox(lang, o.flash)}
+  ${postForm}
   ${how}
   <section class="block" aria-label="${esc(x.title)}">${table}</section>
 </div>`;
