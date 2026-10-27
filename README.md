@@ -1,27 +1,15 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
-    <img src="docs/assets/hero-light.svg" width="100%" alt="Marsa Spaces: the harbor where your AI agent's work lands. Spaces, Workers and MCP servers.">
-  </picture>
-</p>
+[![CI](https://github.com/marsaplatform/marsa/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/marsaplatform/marsa/actions/workflows/ci.yml)
+[![Version 0.17.0](https://img.shields.io/badge/version-0.17.0-145a49)](CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-145a49)](LICENSE)
 
-<p align="center">
-  <a href="CHANGELOG.md"><img alt="Version 0.16.1" src="https://img.shields.io/badge/version-0.16.1-145a49"></a>
-  <a href="https://github.com/marsaplatform/marsa/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/marsaplatform/marsa/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-145a49"></a>
-  <img alt="Node.js 20+" src="https://img.shields.io/badge/Node.js-20%2B-5fa04e?logo=nodedotjs&amp;logoColor=white">
-  <img alt="Hono 4" src="https://img.shields.io/badge/Hono-4-e36002?logo=hono&amp;logoColor=white">
-  <img alt="Cloudflare Workers, KV and R2" src="https://img.shields.io/badge/Cloudflare-Workers%20%C2%B7%20KV%20%C2%B7%20R2-f38020?logo=cloudflare&amp;logoColor=white">
-  <img alt="English and Arabic" src="https://img.shields.io/badge/UI-English%20%C2%B7%20%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-52665e">
-</p>
+# Marsa
 
-<p align="center">
-  <a href="https://spaces.marsaplatform.com"><b>Hosted instance</b></a> ·
-  <a href="#quick-start">Quick start</a> ·
-  <a href="docs/README.md">Docs</a> ·
-  <a href="#docs-changelog-and-security">Changelog &amp; security</a> ·
-  <a href="#بالعربي">العربية ↓</a>
-</p>
+[Hosted instance](https://spaces.marsaplatform.com) · [Quick start](#quick-start) · [Docs](docs/README.md) · [Changelog & security](#docs-changelog-and-security) · [العربية ↓](#بالعربي)
+
+![Current local application](docs/media/current-home.png)
+
+Local application captured on 24 October 2026 with an empty, isolated data directory. Counters and limits reflect this local configuration.
+
 
 **Marsa is the harbor where your AI agent's work lands.**
 Turn any static page, HTML report or prototype into a shareable link in seconds, with no account.
@@ -43,12 +31,7 @@ database, and it's MIT licensed.
 - **Health and usage**: uptime probes, alerts, error counts, logs and usage charts per Worker.
 - **Safety**: daily encrypted off-site backups with restore tests, team trash and export, and an audit log.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/features-dark.svg">
-    <img src="docs/assets/features-light.svg" width="100%" alt="Marsa in the middle, connected to Spaces, Workers, MCP servers, keys and rate limits, health and usage, and encrypted backups.">
-  </picture>
-</p>
+
 
 ### Screenshots
 
@@ -400,7 +383,7 @@ Marsa is open source because a place to drop work should be one you control:
 | --- | --- | --- |
 | **Atlas MCP · أطلس** | Source-cited migration & asylum services, organizations and legal references for Egypt (21 tools, no key) | <https://atlas.marsaplatform.com/mcp> · [GitHub](https://github.com/marsaplatform/atlas-mcp) |
 | **ERX · مرصد مصر البحثي** | Egypt Research Commons: research archive + MCP for Egyptian public affairs (hosted MCP needs a free API key) | <https://egypt-research.marsaplatform.com> · [GitHub](https://github.com/marsaplatform/erx-mcp) |
-| **Malja MCP · ملجأ** | Humanitarian & refugee data (UNHCR, World Bank, HDX, ReliefWeb) with sources; self-hosted, hosted endpoint coming soon | [Project page](https://spaces.marsaplatform.com/s/k3sb9ww3dj/) |
+| **Malja MCP · ملجأ** | Humanitarian & refugee data (UNHCR, World Bank, HDX, ReliefWeb) with sources; self-hosted; see the current source setup guide | [GitHub and setup](https://github.com/marsaplatform/malja-mcp) |
 
 ## بالعربي
 

@@ -55,11 +55,26 @@ const RUNTIME_PROPS = {
     description:
       'Service bindings to other Workers of THIS team: [{"name":"NEWS","worker":"news"}] gives env.NEWS.fetch(…). [] clears them; omit to keep.',
   },
+  crons: {
+    type: ["array", "null"],
+    items: { type: "string" },
+    maxItems: 3,
+    description:
+      '0.17.0: cron triggers (5-field, UTC), e.g. ["*/30 * * * *"]; the Worker needs `async scheduled(controller, env, ctx)`. At least 10 minutes apart; a per-team quota applies. [] or null clears them; omit to keep.',
+  },
+  storage: {
+    type: ["string", "null"],
+    enum: ["kv", null],
+    description:
+      '0.17.0: "kv" gives the Worker a private KV namespace as env.STORE (only this Worker sees it; deleted with the Worker). null removes it AND its data. Omit to keep.',
+  },
 };
 const runtimeArgs = (a: Record<string, unknown>) => ({
   ...("compatibilityDate" in a ? { compatibilityDate: a.compatibilityDate } : {}),
   ...("compatibilityFlags" in a ? { compatibilityFlags: a.compatibilityFlags } : {}),
   ...("bindings" in a ? { bindings: a.bindings } : {}),
+  ...("crons" in a ? { crons: a.crons } : {}),
+  ...("storage" in a ? { storage: a.storage } : {}),
 });
 
 /** Optional declared metadata and source repo (0.15.1): shown in the tables and MCP servers page. */
@@ -546,7 +561,8 @@ export function mountMcpRoutes(app: Hono, d: McpDeps): void {
             },
             { kind: "mcp", label: token.name },
           );
-          return ok({ worker: w });
+          const health = await (d.workers as WorkerService).healthAfterDeploy(w).catch(() => null);
+          return ok({ worker: w, health });
         } catch (err) {
           if (err instanceof WorkerError) return fail(`${err.code}: ${err.message}`);
           throw err;

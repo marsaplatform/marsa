@@ -19,6 +19,8 @@ interface Script {
   compatibilityDate?: string;
   compatibilityFlags?: string[];
   services?: Record<string, string>;
+  /** 0.17.0: kv_namespace bindings (name -> namespace id). */
+  kv?: Record<string, string>;
 }
 
 export class FakeCfWorkers {
@@ -31,6 +33,8 @@ export class FakeCfWorkers {
   calls: { method: string; path: string }[] = [];
   tokenStatus = "active";
   failPutScript = false;
+  /** 0.17.0: script name -> ms the script upload takes (to test queues and 202s). */
+  slow = new Map<string, number>();
   accountOwned = false;
   /** 0.15.2: capabilities the fake token lacks (answers 403): analytics, observability, tail, kv, r2. */
   denied = new Set<string>();
@@ -50,6 +54,15 @@ export class FakeCfWorkers {
     cpu: number;
   }[] = [];
   logEvents: unknown[] = [];
+  /** 0.17.0: cron triggers per script. */
+  schedules = new Map<string, string[]>([
+    ["erx-mcp", ["*/30 * * * *"]],
+    ["mail-worker", ["*/5 * * * *"]],
+  ]);
+  /** 0.17.0: KV namespaces (id -> title). */
+  kvNamespaces = new Map<string, string>([["kv_pre", "someone-else"]]);
+  /** 0.17.0: the zone's http_config_settings entry point (null = none yet). */
+  configRuleset: { id: string; rules: Record<string, unknown>[] } | null = null;
   private n = 0;
 
   constructor() {
@@ -169,8 +182,73 @@ export class FakeCfWorkers {
       if (this.denied.has("observability")) return deny("observability");
       return this.ok({ events: { events: this.logEvents, count: this.logEvents.length } });
     }
-    if (path === `/accounts/${CF_ACCOUNT}/storage/kv/namespaces`)
-      return this.denied.has("kv") ? deny("kv") : this.ok([]);
+    if (path === `/accounts/${CF_ACCOUNT}/storage/kv/namespaces`) {
+      if (this.denied.has("kv")) return deny("kv");
+      if (method === "POST") {
+        const b = await json();
+        const id = this.id("kv_");
+        this.kvNamespaces.set(id, b.title);
+        return this.ok({ id, title: b.title });
+      }
+      return this.ok([...this.kvNamespaces].map(([id, title]) => ({ id, title })));
+    }
+    m = path.match(new RegExp(`^/accounts/${CF_ACCOUNT}/storage/kv/namespaces/([^/]+)$`));
+    if (m && method === "DELETE") {
+      if (this.denied.has("kv")) return deny("kv");
+      return this.kvNamespaces.delete(m[1] as string)
+        ? this.ok(null)
+        : this.bad(404, "namespace not found", 10013);
+    }
+    m = path.match(new RegExp(`^${acc}/scripts/([^/]+)/schedules$`));
+    if (m) {
+      const name = m[1] as string;
+      if (!this.scripts.has(name)) return this.bad(404, "script not found", 10007);
+      if (method === "PUT") {
+        const b = (await json()) as { cron: string }[];
+        this.schedules.set(
+          name,
+          b.map((x) => x.cron),
+        );
+        return this.ok({ schedules: b });
+      }
+      return this.ok({ schedules: (this.schedules.get(name) ?? []).map((cron) => ({ cron })) });
+    }
+    const rs = `/zones/${CF_ZONE}/rulesets`;
+    if (path.startsWith(rs)) {
+      if (this.denied.has("configrules")) return deny("config rules");
+      if (path === `${rs}/phases/http_config_settings/entrypoint`) {
+        if (method === "GET")
+          return this.configRuleset
+            ? this.ok(this.configRuleset)
+            : this.bad(404, "could not find entrypoint ruleset", 10003);
+        if (method === "PUT") {
+          const b = await json();
+          this.configRuleset = {
+            id: this.id("rs_"),
+            rules: (b.rules ?? []).map((r: object) => ({ ...r, id: this.id("rule_") })),
+          };
+          return this.ok(this.configRuleset);
+        }
+      }
+      m = path.match(new RegExp(`^${rs}/([^/]+)/rules(?:/([^/]+))?$`));
+      const set = this.configRuleset;
+      if (m && set && set.id === m[1]) {
+        if (method === "POST") {
+          set.rules.push({ ...(await json()), id: this.id("rule_") });
+          return this.ok(set);
+        }
+        const i = set.rules.findIndex((r) => r.id === m?.[2]);
+        if (i < 0) return this.bad(404, "rule not found");
+        if (method === "PATCH") {
+          set.rules[i] = { ...(await json()), id: m[2] };
+          return this.ok(set);
+        }
+        if (method === "DELETE") {
+          set.rules.splice(i, 1);
+          return this.ok(set);
+        }
+      }
+    }
     if (path === `/accounts/${CF_ACCOUNT}/r2/buckets`)
       return this.denied.has("r2") ? deny("r2") : this.ok({ buckets: [] });
     if (path === `/zones/${CF_ZONE}` && method === "GET")
@@ -230,6 +308,8 @@ export class FakeCfWorkers {
       const name = m[1] as string;
       if (method === "PUT") {
         if (this.failPutScript) return this.bad(400, "Uncaught SyntaxError", 10021);
+        const delay = this.slow.get(name);
+        if (delay) await new Promise((r) => setTimeout(r, delay));
         const form = init.body as FormData;
         const meta = JSON.parse(await (form.get("metadata") as Blob).text());
         const modules: Record<string, string> = {};
@@ -241,9 +321,14 @@ export class FakeCfWorkers {
         const prev = this.scripts.get(name);
         const vars: Record<string, string> = {};
         const services: Record<string, string> = {};
+        const kv: Record<string, string> = {};
         for (const b of meta.bindings ?? []) {
           if (b.type === "plain_text") vars[b.name] = b.text;
-          else if (b.type === "service") {
+          else if (b.type === "kv_namespace") {
+            if (!this.kvNamespaces.has(b.namespace_id))
+              return this.bad(400, "namespace not found", 10041);
+            kv[b.name] = b.namespace_id;
+          } else if (b.type === "service") {
             if (!this.scripts.has(b.service)) return this.bad(400, "service not found", 10143);
             services[b.name] = b.service;
           } else return this.bad(400, `binding type ${b.type}`, 10021);
@@ -258,11 +343,13 @@ export class FakeCfWorkers {
           compatibilityDate: meta.compatibility_date,
           compatibilityFlags: meta.compatibility_flags ?? [],
           services,
+          kv,
         });
         return this.ok({ id: name });
       }
       if (method === "DELETE") {
         this.scripts.delete(name);
+        this.schedules.delete(name);
         return this.ok(null);
       }
     }

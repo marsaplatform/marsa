@@ -57,6 +57,15 @@ export interface Config {
     healthIntervalSec: number;
     /** 0.16.0: end of the 7-day period in which list responses still carry var values (ms). */
     varValuesSunset: number;
+    /** 0.17.0: how long a deploy request waits before answering 202 with a job (seconds). */
+    deployWaitSec: number;
+    /** 0.17.0 cron triggers: minimum interval, per-team default, account-wide cap. */
+    cronMinMinutes: number;
+    cronsPerTeam: number;
+    cronAccountMax: number;
+    /** 0.17.0 private per-Worker KV: per-team default and account-wide namespace cap. */
+    kvPerTeam: number;
+    kvAccountMax: number;
   };
   /** Site ids spotlighted on the home page (FEATURED_SITES, comma-separated). */
   featuredSites: string[];
@@ -241,6 +250,12 @@ export function loadConfig(env: Env = process.env): Config {
         if (!Number.isFinite(t)) throw new Error(`Invalid VAR_VALUES_SUNSET: "${raw}"`);
         return t;
       })(),
+      deployWaitSec: Math.min(90, int(env, "WORKER_DEPLOY_WAIT_SEC", 60, 0)),
+      cronMinMinutes: Math.min(1440, int(env, "WORKER_CRON_MIN_MINUTES", 10, 1)),
+      cronsPerTeam: Math.min(250, int(env, "WORKER_CRONS_PER_TEAM", 2, 0)),
+      cronAccountMax: Math.min(250, int(env, "WORKER_CRON_ACCOUNT_MAX", 5, 0)),
+      kvPerTeam: Math.min(100, int(env, "WORKER_KV_PER_TEAM", 3, 0)),
+      kvAccountMax: Math.min(1000, int(env, "WORKER_KV_ACCOUNT_MAX", 100, 0)),
     },
     teamMaxBytes: int(env, "TEAM_MAX_MB", 200, 1) * MB,
     backup: {

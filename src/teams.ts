@@ -28,6 +28,9 @@ export interface Team {
   maxWorkers?: number;
   /** Quota: largest script, in KB. Unset = WORKER_MAX_KB. */
   maxWorkerKb?: number;
+  /** 0.17.0 quotas: cron expressions across the team's Workers; Workers with private KV. */
+  maxCrons?: number;
+  maxKvWorkers?: number;
   /** 0.16.0: an owner hid the getting-started checklist. */
   checklistHidden?: boolean;
   createdAt: string;
@@ -50,6 +53,8 @@ export interface TeamPatch {
   slug?: string | null;
   maxWorkers?: number | null;
   maxWorkerKb?: number | null;
+  maxCrons?: number | null;
+  maxKvWorkers?: number | null;
   checklistHidden?: boolean;
 }
 
@@ -219,6 +224,8 @@ export class TeamStore {
     if (!next.maxMb) delete next.maxMb;
     if (!next.maxWorkers) delete next.maxWorkers;
     if (!next.maxWorkerKb) delete next.maxWorkerKb;
+    if (!next.maxCrons) delete next.maxCrons;
+    if (!next.maxKvWorkers) delete next.maxKvWorkers;
     if (!next.slug) delete next.slug;
     if (!next.workers) delete next.workers;
     this.teams.set(id, next);

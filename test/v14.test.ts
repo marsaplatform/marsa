@@ -493,7 +493,7 @@ describe("0.14.0 pages", () => {
       const marks = html.match(/<mark class="policy-placeholder">[^<]*<\/mark>/g) ?? [];
       expect(marks).toHaveLength(1);
       expect(html.replace(marks[0] ?? "", "")).not.toMatch(/PLACEHOLDER|مكان محجوز|نص مؤقت/);
-      expect(html).toContain("0.16.0");
+      expect(html).toContain("0.17.0");
       for (const v of [
         "marsaplatform",
         "mailto:info@marsaplatform.com",

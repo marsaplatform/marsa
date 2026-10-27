@@ -1,8 +1,8 @@
 # Contributing to Marsa
 
 Thanks for helping! Marsa aims to stay **small**: a single Node process, no
-database, few dependencies. Features that need accounts, teams or a backend
-belong in a full platform, not here.
+database, few dependencies. Team accounts and the optional data/files backend are supported; keep additions
+consistent with the existing permission model and lightweight deployment.
 
 ## Setup
 
