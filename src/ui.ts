@@ -3799,7 +3799,7 @@ function privacyText(
     return {
       title: "Privacy policy",
       sub: "What this Marsa Spaces instance stores, why, for how long, who else handles it, and your rights under the EU General Data Protection Regulation (GDPR). It describes what the software does.",
-      updated: "Last updated: 21 October 2026 (version 0.16.0)",
+      updated: "Last updated: 21 October 2026 (version 0.17.0)",
       sections: [
         [
           "Who is responsible (data controller)",
@@ -3861,6 +3861,8 @@ function privacyText(
             "Health checks: if a team keeps them on, Spaces requests each Worker's address (or sends an MCP initialize call) every few minutes and stores the time, result, status code and response time. Single checks are kept 7 days and daily totals 31 days; they are deleted with the Worker.",
             "Logs and analytics: for the Worker pages, Spaces reads request counts, errors, CPU time and recent log lines from Cloudflare. They are kept only in memory for a few minutes, and anything that looks like a key or password is redacted before it is shown.",
             "Repository checks: if a team links a Worker or space to a GitHub repository, Spaces asks GitHub's public API whether the repository is public and whether the deployed commit is the newest one. GitHub receives the repository name and the server's IP address; the answers are cached in memory.",
+            "Private Worker storage (0.17.0, opt-in): if a team turns on storage for a Worker, Spaces creates a Cloudflare Workers KV namespace that only that Worker can read and write. Whatever the Worker's code saves there (which may include personal data of the Worker's users, decided by the team) is stored by Cloudflare, not on this server; Spaces keeps only the namespace id and never reads the contents. The namespace and all its data are deleted when the Worker is deleted or storage is turned off. For that data the team is the controller and Spaces acts on its instructions.",
+            "Deploy jobs (0.17.0): for each deploy Spaces keeps the job's status, the Worker name, who started it, times, the resulting version, the one-request health check result and any error message, for 7 days (the newest 500).",
           ],
         ],
         [
@@ -3926,7 +3928,7 @@ function privacyText(
   return {
     title: "سياسة الخصوصية",
     sub: "ما الذي تحفظه نسخة Marsa Spaces هذه، ولماذا، وإلى متى، ومن يتعامل معه أيضًا، وحقوقك بموجب اللائحة الأوروبية العامة لحماية البيانات (GDPR). تصف السياسة ما يفعله البرنامج فعليًا.",
-    updated: "آخر تحديث: 21 أكتوبر 2026 (الإصدار 0.16.0)",
+    updated: "آخر تحديث: 21 أكتوبر 2026 (الإصدار 0.17.0)",
     sections: [
       [
         "المسؤول عن البيانات (المتحكّم)",
@@ -3988,6 +3990,8 @@ function privacyText(
           "فحوص الصحة: إذا أبقاها الفريق مفعّلة، تطلب مساحات عنوان كل وركر (أو ترسل طلب MCP initialize) كل بضع دقائق وتحفظ الوقت والنتيجة ورمز الحالة وزمن الاستجابة. تُحفظ الفحوص المفردة 7 أيام والمجاميع اليومية 31 يومًا، وتُحذف مع الوركر.",
           "السجلات والإحصاءات: لصفحات الوركرات تقرأ مساحات من Cloudflare عدد الطلبات والأخطاء ووقت المعالج وآخر سطور السجل. تبقى في الذاكرة فقط لبضع دقائق، ويُحجب قبل العرض كل ما يشبه مفتاحًا أو كلمة مرور.",
           "فحص المستودعات: إذا ربط فريق وركر أو مساحة بمستودع GitHub، تسأل مساحات الـ API العامة لـ GitHub إن كان المستودع عامًا وإن كان الـ commit المنشور هو الأحدث. يصل إلى GitHub اسم المستودع وعنوان IP للخادم، وتُحفظ الإجابات مؤقتًا في الذاكرة.",
+          "التخزين الخاص للوركر (0.17.0، اختياري): إذا فعّل الفريق التخزين لوركر، تنشئ مساحات مساحة Workers KV في Cloudflare لا يقرأ منها ولا يكتب فيها إلا ذلك الوركر. ما يحفظه كود الوركر فيها (وقد يشمل بيانات شخصية لمستخدمي الوركر بقرار من الفريق) تخزّنه Cloudflare لا هذا الخادم؛ ولا تحتفظ مساحات إلا بمعرّف المساحة ولا تقرأ محتواها أبدًا. تُحذف المساحة وكل بياناتها عند حذف الوركر أو إيقاف التخزين. في هذه البيانات يكون الفريق هو المتحكم، وتعمل مساحات وفق تعليماته.",
+          "مهام النشر (0.17.0): لكل عملية نشر تحفظ مساحات حالة المهمة واسم الوركر ومن بدأها والأوقات والإصدار الناتج ونتيجة فحص الصحة بطلب واحد وأي رسالة خطأ، لمدة 7 أيام (أحدث 500).",
         ],
       ],
       [

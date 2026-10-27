@@ -86,8 +86,11 @@ describe("team Workers", () => {
       { code: HELLO },
       { "x-team-key": team.key },
     );
-    expect(fail.status).toBe(502);
-    expect(await fail.text()).not.toContain(CF_TOKEN);
+    // 0.17.0: Cloudflare's script validation error (10021) is the caller's code: 400.
+    expect(fail.status).toBe(400);
+    const failText = await fail.text();
+    expect(failText).toContain("VALIDATION_FAILED");
+    expect(failText).not.toContain(CF_TOKEN);
     expect(logs.join("\n")).not.toContain(CF_TOKEN);
     expect(await readFile(join(t.dir, "audit.json"), "utf8")).not.toContain(CF_TOKEN);
   });

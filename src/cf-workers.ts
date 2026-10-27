@@ -49,6 +49,20 @@ export interface ScriptUpload {
   services?: { name: string; script: string }[];
   /** 0.15.2: Workers Logs (observability) on for this script. */
   observability?: boolean;
+  /** 0.17.0: the Worker's private KV namespace, bound as env.STORE. */
+  kvNamespaceId?: string;
+}
+
+/** 0.17.0: the env name of a Worker's private KV namespace. */
+export const STORE_BINDING = "STORE";
+
+/** 0.17.0: one rule of a zone ruleset (only what Spaces reads). */
+export interface CfRule {
+  id: string;
+  description?: string;
+  expression?: string;
+  action?: string;
+  ref?: string;
 }
 
 /** A binding as Spaces shows it: name and type only (plain_text values are dropped). */
@@ -193,6 +207,9 @@ export class CloudflareWorkersApi {
       bindings: [
         ...small.map(([name, text]) => ({ type: "plain_text", name, text })),
         ...(s.services ?? []).map((b) => ({ type: "service", name: b.name, service: b.script })),
+        ...(s.kvNamespaceId
+          ? [{ type: "kv_namespace", name: STORE_BINDING, namespace_id: s.kvNamespaceId }]
+          : []),
       ],
       // Secrets are set separately and survive redeploys.
       keep_bindings: ["secret_text"],
@@ -304,6 +321,113 @@ export class CloudflareWorkersApi {
       if (e instanceof CfError) return { ok: false, status: e.status, message: e.message };
       return { ok: false, status: 0, message: "no answer" };
     }
+  }
+
+  // ---- 0.17.0: cron triggers ---------------------------------------------------------------
+  async getSchedules(a: CfAccess, script: string): Promise<string[]> {
+    const r = await this.call<{ schedules?: { cron?: string }[] }>(
+      a.token,
+      "GET",
+      `/accounts/${a.accountId}/workers/scripts/${script}/schedules`,
+      undefined,
+      true,
+    );
+    return (r?.schedules ?? []).map((x) => x.cron ?? "").filter(Boolean);
+  }
+  /** Replace the script's cron triggers ([] removes them). */
+  async putSchedules(a: CfAccess, script: string, crons: string[]): Promise<void> {
+    await this.call(
+      a.token,
+      "PUT",
+      `/accounts/${a.accountId}/workers/scripts/${script}/schedules`,
+      crons.map((cron) => ({ cron })),
+    );
+  }
+  /** Script names on the account (for the account-wide cron count). */
+  async listScripts(a: CfAccess): Promise<string[]> {
+    const r = await this.call<{ id: string }[]>(
+      a.token,
+      "GET",
+      `/accounts/${a.accountId}/workers/scripts`,
+    );
+    return (r ?? []).map((x) => x.id);
+  }
+
+  // ---- 0.17.0: private KV namespaces ---------------------------------------------------------
+  async createKvNamespace(a: CfAccess, title: string): Promise<string> {
+    const r = await this.call<{ id: string }>(
+      a.token,
+      "POST",
+      `/accounts/${a.accountId}/storage/kv/namespaces`,
+      { title },
+    );
+    if (!r?.id) throw new CfError(502, "Cloudflare returned no namespace id");
+    return r.id;
+  }
+  async deleteKvNamespace(a: CfAccess, id: string): Promise<void> {
+    await this.call(
+      a.token,
+      "DELETE",
+      `/accounts/${a.accountId}/storage/kv/namespaces/${id}`,
+      undefined,
+      true,
+    );
+  }
+  /** Number of KV namespaces on the account (first page count is enough for a quota). */
+  async countKvNamespaces(a: CfAccess): Promise<number> {
+    const r = await this.call<{ id: string }[]>(
+      a.token,
+      "GET",
+      `/accounts/${a.accountId}/storage/kv/namespaces?per_page=100`,
+    );
+    return (r ?? []).length;
+  }
+
+  // ---- 0.17.0: zone configuration rules (Browser Integrity Check exception) ----------------
+  /** The zone's http_config_settings entry point: its id and rules, or null when none exists. */
+  async configRules(a: CfAccess): Promise<{ id: string; rules: CfRule[] } | null> {
+    const r = await this.call<{ id: string; rules?: CfRule[] }>(
+      a.token,
+      "GET",
+      `/zones/${a.zoneId}/rulesets/phases/http_config_settings/entrypoint`,
+      undefined,
+      true,
+    );
+    return r ? { id: r.id, rules: r.rules ?? [] } : null;
+  }
+  /** Create the entry point with one rule (only when the zone has none yet). */
+  async createConfigEntrypoint(a: CfAccess, rule: Omit<CfRule, "id">): Promise<void> {
+    await this.call(
+      a.token,
+      "PUT",
+      `/zones/${a.zoneId}/rulesets/phases/http_config_settings/entrypoint`,
+      { rules: [rule] },
+    );
+  }
+  async addConfigRule(a: CfAccess, rulesetId: string, rule: Omit<CfRule, "id">): Promise<void> {
+    await this.call(a.token, "POST", `/zones/${a.zoneId}/rulesets/${rulesetId}/rules`, rule);
+  }
+  async updateConfigRule(
+    a: CfAccess,
+    rulesetId: string,
+    ruleId: string,
+    rule: Omit<CfRule, "id">,
+  ): Promise<void> {
+    await this.call(
+      a.token,
+      "PATCH",
+      `/zones/${a.zoneId}/rulesets/${rulesetId}/rules/${ruleId}`,
+      rule,
+    );
+  }
+  async deleteConfigRule(a: CfAccess, rulesetId: string, ruleId: string): Promise<void> {
+    await this.call(
+      a.token,
+      "DELETE",
+      `/zones/${a.zoneId}/rulesets/${rulesetId}/rules/${ruleId}`,
+      undefined,
+      true,
+    );
   }
 
   async putSecret(a: CfAccess, script: string, name: string, value: string): Promise<void> {

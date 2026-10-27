@@ -35,7 +35,8 @@ export interface AgentNote {
   /** A deploy or version id (e.g. "v4", a Worker version number or a commit). */
   version?: string;
   agent: string;
-  via: "team-key" | "agent-key" | "mcp" | "dashboard";
+  /** "admin" (0.17.0): a note the platform admin posted to the team. */
+  via: "team-key" | "agent-key" | "mcp" | "dashboard" | "admin";
   status: NoteStatus;
   reply?: { text: string; at: string; by: string };
   updatedAt: string;

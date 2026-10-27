@@ -193,12 +193,39 @@ Over MCP, use `leave_note`. Never include keys or tokens: they are removed autom
 values are returned only on request: `?includeValues=1` (needs `workers:deploy`), or
 `list_workers {"includeValues": true}`. Read `varNames` (or your own config) instead of relying on the values.
 
+## Deploy jobs, crons and storage (0.17.0)
+
+- **Slow deploys**: a deploy waits up to 60 s, then answers `202` with a job. In scripts, handle both:
+
+  ```sh
+  R=$(curl -s -w '\n%{http_code}' -X PUT "$MARSA_URL/api/teams/$MARSA_TEAM/workers/$WORKER_NAME" \
+    -H "X-Team-Key: $MARSA_AGENT_KEY" -H "content-type: application/javascript" --data-binary @dist/worker.js)
+  CODE=$(echo "$R" | tail -1); BODY=$(echo "$R" | sed '$d')
+  if [ "$CODE" = 202 ]; then
+    URL=$(echo "$BODY" | jq -r .job.statusUrl)
+    until [ "$(curl -s "$URL" -H "X-Team-Key: $MARSA_AGENT_KEY" | jq -r .job.done)" = true ]; do sleep 5; done
+    curl -s "$URL" -H "X-Team-Key: $MARSA_AGENT_KEY" | jq .job
+  else echo "$BODY" | jq '{version: .worker.version, health}'; fi
+  ```
+
+  Add `?async=1` to always get the job at once. Failures are in the activity log (`action=worker-deploy-fail`).
+- **Checks before upload**: `SYNTAX_ERROR` (with line and column), `MISSING_MODULE` (bundle first),
+  `NOT_A_MODULE`, and `VALIDATION_FAILED` when Cloudflare refuses the script. All are `400`, so fix the code
+  and deploy again.
+- **`health` in the answer**: Spaces requests your `meta.healthPath` (or `/`) once after deploying.
+- **Scheduled jobs**: `"crons": ["*/30 * * * *"]` plus `async scheduled(controller, env, ctx) {…}` in the
+  default export. At least 10 minutes apart; 2 per team by default.
+- **Remembering state**: `"storage": "kv"` gives the Worker a private KV store as `env.STORE`
+  (`get`/`put`/`list`). It is deleted with the Worker, so keep anything precious elsewhere too.
+- `GET …/workers/<name>/runtime` shows the current crons, storage, flags, bindings and the var limits.
+
 ## Common pitfalls
 
 - **`NOT_A_MODULE`**: the bundle lost `export default`, or it is a service-worker script. Run `npm run check`.
 - **`fetch()` to a team Worker fails with 5xx or 522**: use a binding or `global_fetch_strictly_public` (above).
 - **SSE and sessions by default**: in a Worker, use `enableJsonResponse: true` and create a new server per request (the starter does both).
 - **Node APIs in the bundle** (`fs`, `Buffer` without `nodejs_compat`): keep to Web APIs, or add `nodejs_compat` deliberately.
-- **No User-Agent**: upstream APIs return 403 or 429 only in production.
+- **No User-Agent**: upstream APIs return 403 or 429 only in production. Calling a Spaces Worker from Python's `urllib` with its default User-Agent returns Cloudflare **error 1010**: set `User-Agent` yourself.
+- **`MISSING_MODULE`**: the code still imports a package (`hono`, `zod`…). Deploy the bundled `dist/worker.js`, not `src/index.ts`.
 - **Secrets in `vars` or code**: anyone on the team can read vars, and versions keep the code. Rotate the secret if this happened.
 - **Throwing inside a tool**: return `fail()` / `isError: true` so the client shows a readable message.

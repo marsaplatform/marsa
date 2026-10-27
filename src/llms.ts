@@ -46,6 +46,15 @@ Each site has a Streamable HTTP MCP server at ${base}/mcp/s/<siteId>. Auth: Auth
 - Usage and errors: GET …/usage?range=24h|7d|30d and GET …/logs. MCP worker_status returns health, usage and recent errors in one call. Full log lines need Workers Logs on for that Worker and the operator's Cloudflare token to have "Account · Workers Observability: Edit (API: Write)" ("Read" alone answers 403); without it …/logs still returns analytics error counts.
 - Every change is in the team's activity log: GET ${base}/api/teams/<team>/activity (team key; ?format=csv|jsonl).
 
+## Deploying Workers (0.17.0)
+
+- Deploys wait up to 60 s and answer 200/201 as before (with "health" and "job"). A slower deploy answers 202 {"job": {"id", "status", "statusUrl"}}: poll GET ${base}/api/teams/<team>/jobs/<id> until "done" is true. ?wait=0-90, ?async=1 or "Prefer: respond-async" choose the wait. Failures are in the activity log as worker-deploy-fail.
+- The code is checked first: 400 SYNTAX_ERROR (line/column), MISSING_MODULE (bundle first: esbuild --bundle --format=esm), NOT_A_MODULE (no default export), VALIDATION_FAILED (Cloudflare refused the script). Any default-export form works.
+- Cron triggers: "crons": ["*/30 * * * *"] (5 fields, UTC, at least 10 minutes apart, 2 per team by default) plus async scheduled(controller, env, ctx) in the default export. [] or null removes them.
+- Private storage: "storage": "kv" binds a KV namespace only this Worker uses as env.STORE. It is deleted with the Worker (or with "storage": null).
+- GET …/workers/<name>/runtime returns compatibility date/flags, bindings, crons, storage, var/secret names and limits (32 vars, 32 KB per value, 64 KB total).
+- Python urllib's default User-Agent is refused by Cloudflare (error 1010): send your own User-Agent header.
+
 ## Limits on this instance
 
 - ttlHours: ${config.minTtlHours}-${config.maxTtlHours} (default ${config.defaultTtlHours}); a link never outlives created + ${config.maxTtlHours}h

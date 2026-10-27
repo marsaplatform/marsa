@@ -159,6 +159,107 @@ curl -s -X DELETE "https://marsa.example.com/api/teams/sanad/workers/hello" -H "
   وحدها يرفضها استعلام السجلات بـ 403)؛ تفحص صفحة إعدادات الإدارة كل صلاحية
   بفحوص للقراءة فقط وتعرض أضواء خضراء/حمراء/رمادية.
 
+## مهام النشر والفحص والجدولة والتخزين الخاص (0.17.0)
+
+### النشر يردّ في الوقت: المهام و202
+
+كل عملية نشر (`PUT|POST …/workers[/<name>]` و`POST …/redeploy` و`POST …/rollback` و`POST …/runtime`) صارت
+**مهمة** (job). لكل فريق طابوره الخاص، فلا يؤخّر نشرٌ بطيء لفريقٍ فريقًا آخر.
+
+- **الافتراضي (لا يتغير شيء للسكربتات الحالية):** ينتظر الطلب انتهاء النشر حتى ٦٠ ثانية ويردّ `200/201` كما
+  كان، مع إضافة `health` و`job`. رقم المهمة في الترويسة `X-Marsa-Job`.
+- إن بقي النشر جاريًا بعد الانتظار، يكون الرد **`202 Accepted`** مع `{"job": {"id", "status", "statusUrl", …}}`
+  والترويسة `Location` و`Retry-After: 5`. استعلم `GET /api/teams/<team>/jobs/<id>` حتى يصبح `done` = `true`.
+  قيم `status`: `queued` و`running` و`succeeded` و`failed` و`interrupted`. المهمة الناجحة فيها `version`
+  و`health`، والفاشلة فيها `error: {status, code, message}`.
+- `?wait=0…90` يحدد الانتظار بالثواني. `?async=1` أو الترويسة `Prefer: respond-async` تردّ `202` مباشرة
+  بعد الفحوص أدناه.
+- `GET /api/teams/<team>/jobs?worker=<name>` يعرض المهام الأخيرة (تُحفظ ٧ أيام). المهمة التي كانت جارية عند
+  إعادة تشغيل الخادم تصبح `interrupted`: انشر مرة أخرى.
+- كل فشل يُسجَّل في سجل نشاط الفريق باسم `worker-deploy-fail`
+  (`GET /api/teams/<team>/activity?action=worker-deploy-fail`) مع رمز الخطأ ورسالته.
+
+```bash
+curl -s -X PUT "https://spaces.marsaplatform.com/api/teams/<team>/workers/news?async=1" \
+  -H "X-Team-Key: $MARSA_AGENT_KEY" -H "content-type: application/javascript" --data-binary @dist/worker.js
+# => 202 {"job":{"id":"job_…","status":"queued","statusUrl":"…/api/teams/<team>/jobs/job_…"}}
+curl -s "https://spaces.marsaplatform.com/api/teams/<team>/jobs/job_…" -H "X-Team-Key: $MARSA_AGENT_KEY"
+```
+
+### فحص الكود قبل الرفع
+
+قبل إرسال أي شيء إلى Cloudflare يُحلَّل الكود بـ esbuild:
+
+| الرمز | HTTP | المعنى |
+| --- | --- | --- |
+| `SYNTAX_ERROR` | 400 | الكود لا يُحلَّل؛ الرسالة فيها السطر والعمود |
+| `MISSING_MODULE` | 400 | `import` لحزمة (مثل `hono`) غير موجودة في الملف. اجمع الكود أولًا: `esbuild src/index.ts --bundle --format=esm --outfile=dist/worker.js`. استيراد `cloudflare:*` و`node:*` مسموح |
+| `NOT_A_MODULE` | 400 | لا يوجد تصدير افتراضي (default export) |
+| `VALIDATION_FAILED` | 400 | رفضت Cloudflare السكربت (خطؤها 10021، مثل استثناء عند البدء)؛ الرسالة توضّح السبب |
+
+كل أشكال التصدير الافتراضي مقبولة: `export default {…}` و`export default app` و`export { app as default }`
+و`export default class …`.
+
+بعد النشر الناجح يطلب Spaces الوركر مرة واحدة (`meta.healthPath` أو `/`) ويُعيد
+`health: {path, status, ms, ok}` (`ok` = أقل من 500). `?health=0` يتخطى هذا الطلب. إن لم يصل رد، يوضّح
+`error` السبب (مثل خطأ TLS أو DNS). ولنطاق أُنشئ قبل دقائق، يذكر `note` أن وصول DNS إلى كل المحلِّلات قد يستغرق
+بضع دقائق: تحقّق مجددًا بـ `GET …/health`.
+
+### المشغّلات المجدولة (Cron)
+
+```json
+{ "code": "…", "crons": ["*/30 * * * *"] }
+```
+
+- تعابير cron من خمسة حقول بتوقيت UTC (`الدقيقة الساعة اليوم الشهر يوم-الأسبوع`؛ الأسماء مثل `mon-fri` مقبولة)،
+  حتى ٣ لكل وركر. يجب أن يفصل بين التشغيلين **١٠ دقائق** على الأقل (`WORKER_CRON_MIN_MINUTES`).
+- يحتاج الوركر دالة `scheduled`: `export default { fetch(…) {…}, async scheduled(controller, env, ctx) {…} }`.
+- الحصص: مشغّلان لكل فريق ما لم يضبط المسؤول `maxCrons`؛ وفوقها `409 CRON_QUOTA`. خطة Cloudflare المجانية
+  تسمح بـ ٥ مشغّلات للحساب كله، مشتركة مع وركرات أخرى: `409 CRON_ACCOUNT_LIMIT` حين يمتلئ الحساب.
+- احذف الحقل لإبقائها، و`[]` أو `null` لإزالتها. تعطيل الوركر يوقفها مؤقتًا، وحذفه يزيلها. متاحة أيضًا في
+  `POST …/runtime` وفي أداتي MCP `deploy_worker` و`set_worker_runtime`.
+
+### تخزين خاص لكل وركر (KV)
+
+```json
+{ "code": "…", "storage": "kv" }
+```
+
+- `"storage": "kv"` ينشئ مساحة Cloudflare KV لا يستخدمها إلا هذا الوركر، مربوطة باسم **`env.STORE`**:
+  `await env.STORE.put("key", "value")` و`await env.STORE.get("key")` و`env.STORE.list({prefix})`.
+- **حذف الوركر يحذف المساحة وكل بياناتها.** و`"storage": null` يحذفها بالطريقة نفسها. احذف الحقل لإبقائها.
+  صدّر بياناتك أولًا إن كنت تحتاجها.
+- الاسم `STORE` محجوز: لا يجوز استخدامه لمتغير أو سر ما دام التخزين مفعّلًا.
+- الحصص: ٣ وركرات بتخزين لكل فريق ما لم يضبط المسؤول `maxKvWorkers` (`409 KV_QUOTA`)، وحدّ للحساب
+  (`409 KV_ACCOUNT_LIMIT`). إن لم يكن لمفتاح المنصة صلاحية *Workers KV Storage: Edit* يُرفض النشر بـ
+  `503 KV_NOT_PERMITTED` ولا يتغير شيء.
+- تنطبق حدود Cloudflare KV (الخطة المجانية: ١٬٠٠٠ كتابة و١٠٠٬٠٠٠ قراءة يوميًا للحساب، و٢٥ ميغابايت للقيمة).
+  KV متّسق في النهاية: قد تستغرق الكتابة حتى دقيقة لتظهر في كل مكان.
+
+### قراءة إعدادات التشغيل
+
+`GET /api/teams/<team>/workers/<name>/runtime` (صلاحية `workers:read`) يُعيد
+`{runtime: {compatibilityDate, compatibilityFlags, bindings, crons, storage, logs, varNames, secretNames},
+allowedCompatibilityFlags, limits}`. في `limits` حدود المتغيرات: حتى ٣٢ متغيرًا للوركر، و٣٢ كيلوبايت للقيمة
+و٦٤ كيلوبايت إجمالًا (رُفعت من ٥ كيلوبايت في 0.14.0)، مع حصص الجدولة والتخزين لفريقك.
+
+### عملاء يحصلون على خطأ Cloudflare رقم 1010 (Python `urllib` وبعض أدوات سطر الأوامر)
+
+النطاق مفعّل عليه **فحص سلامة المتصفح** (Browser Integrity Check) من Cloudflare. يرفض الطلبات التي يبدو
+`User-Agent` فيها كسكربت (القيمة الافتراضية لـ `urllib` في Python: `Python-urllib/3.x`) بالخطأ **1010**، قبل أن
+يصل الطلب إلى وركرك. إلى أن يُفعَّل استثناء المنصة، أرسل أي User-Agent عادي:
+
+```python
+import urllib.request
+req = urllib.request.Request(url, headers={"User-Agent": "my-agent/1.0 (+https://example.com)"})
+urllib.request.urlopen(req)
+```
+
+`requests` و`httpx` و`curl` والمتصفحات لا تتأثر. يستطيع المسؤول تفعيل استثناء لنطاقات وركرات الفرق
+(`PUT /api/admin/workers/bic {"enabled": true}`): قاعدة إعدادات واحدة في Cloudflare تُطفئ الفحص لنطاقات وركرات
+الفرق فقط. تحتاج صلاحية المفتاح **Zone · Config Rules: Edit** (مؤشر في الإعدادات › صلاحيات Cloudflare)؛ ومن
+دونها لا يتغير شيء.
+
 ## التشغيل والمراقبة
 
 بعد أن يصبح الوركر حيًا، يستطيع وكيل (أو أنت) تشغيله بلا مفتاح Cloudflare:
@@ -207,7 +308,8 @@ curl -s -X DELETE "https://marsa.example.com/api/teams/sanad/workers/hello" -H "
 كلها مع `Authorization: Bearer $ADMIN_TOKEN`:
 
 - `GET /api/admin/workers/settings` و`PUT /api/admin/workers/settings` (`{"token","accountId"?,"zone"?}`) و`POST /api/admin/workers/settings/verify` و`DELETE /api/admin/workers/settings` (فقط عند عدم وجود وركرات للفرق).
-- `PUT /api/admin/teams/<id>/workers` (`{"enabled", "slug", "maxWorkers", "maxWorkerKb"}`)؛ `enabled: false` يحذف وركرات الفريق.
+- `PUT /api/admin/teams/<id>/workers` (`{"enabled", "slug", "maxWorkers", "maxWorkerKb", "maxCrons", "maxKvWorkers"}`)؛ `enabled: false` يحذف وركرات الفريق.
+- `GET|PUT /api/admin/workers/bic` (`{"enabled": true|false}`): استثناء فحص سلامة المتصفح لنطاقات وركرات الفرق (0.17.0).
 - `GET /api/admin/workers` و`POST /api/admin/workers/<id>/disable|enable` و`DELETE /api/admin/workers/<id>`.
 
 ## إعدادات الخادم
@@ -218,6 +320,12 @@ curl -s -X DELETE "https://marsa.example.com/api/teams/sanad/workers/hello" -H "
 | `WORKERS_DEFAULT_MAX` | `3` | الوركرات لكل فريق ما لم يضبط المسؤول حصة |
 | `WORKER_MAX_KB` | `1024` | حجم السكربت لكل فريق ما لم يضبط المسؤول حصة |
 | `WORKERS_COMPAT_DATE` | `2025-09-01` | تاريخ توافق Cloudflare للسكربتات المنشورة |
+| `WORKER_DEPLOY_WAIT_SEC` | `60` | مدة انتظار طلب النشر قبل الرد بـ `202` ومهمة (حتى ٩٠) |
+| `WORKER_CRON_MIN_MINUTES` | `10` | أقصر فاصل مسموح بين تشغيلين مجدولين |
+| `WORKER_CRONS_PER_TEAM` | `2` | المشغّلات المجدولة لكل فريق ما لم يضبط المسؤول `maxCrons` |
+| `WORKER_CRON_ACCOUNT_MAX` | `5` | المشغّلات التي يسمح بها حساب Cloudflare (المجانية ٥، المدفوعة ٢٥٠) |
+| `WORKER_KV_PER_TEAM` | `3` | الوركرات ذات التخزين الخاص لكل فريق ما لم يضبط المسؤول `maxKvWorkers` |
+| `WORKER_KV_ACCOUNT_MAX` | `100` | مساحات KV التي يحق لـ Spaces الاحتفاظ بها في الحساب |
 | `VAR_VALUES_SUNSET` | `2026-10-28T12:00:00Z` | نهاية الفترة التي ما زالت فيها القوائم تُعيد قيم المتغيرات العادية (انظر [قيم المتغيرات](#قيم-المتغيرات)) |
 
-غير متوفر بعد: متابعة السجلات مباشرة (استخدم لوحة Cloudflare)، والربط بغير المتغيرات العادية والأسرار (KV و D1 و R2 و Durable Objects)، والحزم متعددة الملفات (اجمعها أولًا، مثلًا بـ `esbuild --bundle --format=esm`).
+غير متوفر بعد: متابعة السجلات مباشرة (استخدم لوحة Cloudflare)، والربط بغير المتغيرات والأسرار وخدمات الفريق نفسه وتخزين KV الخاص (لا D1 ولا R2 ولا Durable Objects)، والحزم متعددة الملفات (اجمعها أولًا، مثلًا بـ `esbuild --bundle --format=esm`).

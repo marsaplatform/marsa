@@ -192,12 +192,38 @@ curl -s -X POST "$MARSA_URL/api/teams/$MARSA_TEAM/notes" -H "X-Team-Key: $MARSA_
 `deprecations` وترويستي `Deprecation` و`Sunset`. بعد ذلك لا تُرجَع القيم إلا عند طلبها: `?includeValues=1`
 (تحتاج `workers:deploy`) أو `list_workers {"includeValues": true}`. اقرأ `varNames` (أو إعداداتك) بدل الاعتماد على القيم.
 
+## مهام النشر والجدولة والتخزين (0.17.0)
+
+- **النشر البطيء**: ينتظر النشر حتى ٦٠ ثانية، ثم يردّ `202` ومعه مهمة (job). في السكربتات تعاملوا مع الحالتين:
+
+  ```sh
+  R=$(curl -s -w '\n%{http_code}' -X PUT "$MARSA_URL/api/teams/$MARSA_TEAM/workers/$WORKER_NAME" \
+    -H "X-Team-Key: $MARSA_AGENT_KEY" -H "content-type: application/javascript" --data-binary @dist/worker.js)
+  CODE=$(echo "$R" | tail -1); BODY=$(echo "$R" | sed '$d')
+  if [ "$CODE" = 202 ]; then
+    URL=$(echo "$BODY" | jq -r .job.statusUrl)
+    until [ "$(curl -s "$URL" -H "X-Team-Key: $MARSA_AGENT_KEY" | jq -r .job.done)" = true ]; do sleep 5; done
+    curl -s "$URL" -H "X-Team-Key: $MARSA_AGENT_KEY" | jq .job
+  else echo "$BODY" | jq '{version: .worker.version, health}'; fi
+  ```
+
+  أضيفوا `?async=1` لتحصلوا على المهمة فورًا دائمًا. الفشل يُسجَّل في سجل النشاط (`action=worker-deploy-fail`).
+- **فحوص قبل الرفع**: `SYNTAX_ERROR` (مع السطر والعمود)، و`MISSING_MODULE` (اجمعوا الكود أولًا)، و`NOT_A_MODULE`،
+  و`VALIDATION_FAILED` حين ترفض Cloudflare السكربت. كلها `400`: أصلحوا الكود وانشروا من جديد.
+- **`health` في الرد**: يطلب Spaces مسار `meta.healthPath` (أو `/`) مرة واحدة بعد النشر.
+- **المهام المجدولة**: `"crons": ["*/30 * * * *"]` مع `async scheduled(controller, env, ctx) {…}` في التصدير
+  الافتراضي. بفاصل ١٠ دقائق على الأقل؛ اثنان لكل فريق افتراضيًا.
+- **حفظ الحالة**: `"storage": "kv"` يعطي الوركر مخزن KV خاصًا باسم `env.STORE` (`get`/`put`/`list`). يُحذف مع
+  الوركر، فاحفظوا ما هو مهم في مكان آخر أيضًا.
+- `GET …/workers/<name>/runtime` يعرض الجدولة والتخزين والعلامات والربط الحالية وحدود المتغيرات.
+
 ## أخطاء شائعة
 
 - **`NOT_A_MODULE`**: فُقد `export default` من الحزمة، أو الكود سكربت service-worker. شغّلوا `npm run check`.
 - **‏`fetch()` إلى وركر الفريق يعيد 5xx أو 522**: استخدموا الربط أو `global_fetch_strictly_public` (انظروا أعلاه).
 - **SSE والجلسات افتراضيًا**: في الوركر استخدموا `enableJsonResponse: true` وأنشئوا خادمًا جديدًا لكل طلب (القالب يفعل الأمرين).
 - **واجهات Node في الحزمة** (`fs`، و`Buffer` دون `nodejs_compat`): التزموا بواجهات الويب، أو أضيفوا `nodejs_compat` عن قصد.
-- **غياب User-Agent**: المصادر الخارجية تعيد 403 أو 429 في الإنتاج فقط.
+- **غياب User-Agent**: المصادر الخارجية تعيد 403 أو 429 في الإنتاج فقط. واستدعاء وركر في Spaces من `urllib` في Python بقيمة User-Agent الافتراضية يعيد **الخطأ 1010** من Cloudflare: اضبطوا `User-Agent` بأنفسكم.
+- **`MISSING_MODULE`**: ما زال الكود يستورد حزمة (`hono`، `zod`…). انشروا `dist/worker.js` المجمّع، لا `src/index.ts`.
 - **أسرار في `vars` أو الكود**: أي عضو في الفريق يقرأ المتغيرات، والإصدارات تحفظ الكود. غيّروا السر إن حدث ذلك.
 - **رمي استثناء داخل أداة**: أعيدوا `fail()` / `isError: true` ليعرض العميل رسالة مفهومة.
